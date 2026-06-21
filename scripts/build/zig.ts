@@ -18,7 +18,7 @@
 
 import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { availableParallelism, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Config } from "./config.ts";
 import { downloadWithRetry, extractTarXz, extractZip, tryPrefetchExtracted } from "./download.ts";
@@ -47,29 +47,14 @@ export const ZIG_COMMIT = "0.17.0-dev.892+54537285c";
  * LLVM modules — parallelises emit, but cross-unit calls become
  * `linkonce_odr` externs so LLVM can't inline or IPO across them.
  *
- * Sharding is gated off for:
- *   - Non-ASAN CI: shipped releases want full IPO; cg=1 keeps that and
- *     keeps the upload/download contract a single file.
- *   - Windows targets: COFF shard emission is unimplemented in oven-sh/zig.
- *   - LTO: zig_llvm.cpp gates SplitModule on !lto, so cg>1 would emit one
- *     .o instead of N and the no_merge_shards path would expect missing files.
- *
- * ASAN CI uses a FIXED count (CI_ASAN_CODEGEN_THREADS) so zig-only and
- * link-only — which run on different machines — agree on the artifact
- * names. Local builds shard at availableParallelism(); benchmark against
- * a non-ASAN CI artifact if cross-unit inlining matters.
+ * DISABLED (returns 1 = single `bun-zig.o`): codegen sharding is an
+ * oven-sh/zig-only patch (`--llvm-codegen-threads`) that is NOT in the clean
+ * upstream cataggar/zig 0.17 compiler this build now targets. Re-enable once a
+ * patched compiler ships the feature (migration Phase B2). Until then sharding
+ * would pass `-Dllvm_codegen_threads=N` to a compiler that doesn't implement it.
  */
-function codegenThreads(cfg: Config): number {
-  if (cfg.windows) return 1;
-  if (cfg.lto) return 1;
-  if (cfg.ci) {
-    // ASAN is a test-only build (not shipped), so cross-shard IPO loss is
-    // fine and the speedup is worth it. The count is FIXED so zig-only and
-    // link-only — which run on different machines — agree on the artifact
-    // names. Non-asan CI stays at 1: shipped releases want full IPO.
-    return cfg.asan ? CI_ASAN_CODEGEN_THREADS : 1;
-  }
-  return availableParallelism();
+function codegenThreads(_cfg: Config): number {
+  return 1;
 }
 
 /** Fixed shard count for CI ASAN builds. Matches getZigAgent's instance size. */
@@ -311,14 +296,16 @@ export function registerZigRules(n: Ninja, cfg: Config): void {
   //
   // --zig-progress instead of --console (posix only, set interleave=true):
   // decodes ZIG_PROGRESS IPC into `[zig] Stage [N/M]` lines that interleave
-  // with ninja's [N/M] for cxx — both visible at once. Requires
-  // oven-sh/zig's fix for ziglang/zig#24722. Windows zig has no IPC in
-  // our fork (upstream added Feb 2026, not backported).
+  // with ninja's [N/M] for cxx. Requires the oven-sh/zig-only `--zig-progress`
+  // / ZIG_PROGRESS IPC patch (ziglang/zig#24722), which the clean upstream
+  // cataggar/zig 0.17 compiler does NOT have — keep interleave=false until a
+  // patched compiler ships it (migration Phase B2).
   const interleave = false;
   const consoleMode = !interleave || hostWin;
-  const parallelSema = " --env=ZIG_PARALLEL_SEMA=1";
+  // ZIG_PARALLEL_SEMA is another oven-sh/zig-only patch (parallel semantic
+  // analysis); the clean upstream compiler ignores it, so don't set it.
   n.rule("zig_build", {
-    command: `${stream} ${consoleMode ? "--console" : "--zig-progress"} --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache${parallelSema} $zig build $step $args`,
+    command: `${stream} ${consoleMode ? "--console" : "--zig-progress"} --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache $zig build $step $args`,
     // $out can be 16 shard paths; the build edge sets a compact $label.
     description: "zig $step → $label",
     ...(consoleMode && { pool: "console" }),
@@ -330,7 +317,7 @@ export function registerZigRules(n: Ninja, cfg: Config): void {
   // ninja can track completion. Same cache dirs as the main zig build —
   // zig keys by hash, the two coexist cleanly.
   n.rule("zig_check", {
-    command: `${stream} --console --stamp=$out --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache${parallelSema} $zig build $step $args`,
+    command: `${stream} --console --stamp=$out --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache $zig build $step $args`,
     description: "zig $step",
     pool: "console",
     restat: true,
