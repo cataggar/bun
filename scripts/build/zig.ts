@@ -498,8 +498,8 @@ function zigBuildArgs(cfg: Config): string[] {
     // Git sha (optional — empty on dirty builds).
     ...(cfg.revision !== "unknown" && cfg.revision !== "" ? [`-Dsha=${cfg.revision}`] : []),
 
-    // Output formatting
-    "--prominent-compile-errors",
+    // Output formatting. (`--prominent-compile-errors` was removed from
+    // `zig build` in 0.17 — compile errors are always shown prominently now.)
     "--summary",
     "all",
   ];
