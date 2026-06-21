@@ -172,27 +172,41 @@ pub inline fn ConcatArgs4(
 
 // Copied from std.meta
 fn CreateUniqueTuple(comptime N: comptime_int, comptime types: [N]type) type {
-    var tuple_fields: [types.len]std.builtin.Type.StructField = undefined;
-    inline for (types, 0..) |T, i| {
-        @setEvalBranchQuota(10_000);
-        var num_buf: [128]u8 = undefined;
-        tuple_fields[i] = .{
-            .name = std.fmt.bufPrintZ(&num_buf, "{d}", .{i}) catch unreachable,
-            .type = T,
-            .default_value_ptr = null,
-            .is_comptime = false,
-            .alignment = if (@sizeOf(T) > 0) @alignOf(T) else 0,
-        };
-    }
+    return @Tuple(&types);
+}
 
-    return @Type(.{
-        .@"struct" = .{
-            .is_tuple = true,
-            .layout = .auto,
-            .decls = &.{},
-            .fields = &tuple_fields,
+/// Reconstruct a type from a (possibly modified) `std.builtin.Type`, replacing
+/// the `@Type` builtin removed in Zig 0.16. Switches on the kind and calls the
+/// corresponding per-kind builtin. The `Type` reflection structs use the 0.17
+/// parallel-array representation (`field_names`/`field_types`/`field_attrs`).
+pub fn Reify(comptime info: std.builtin.Type) type {
+    return switch (info) {
+        .int => |i| @Int(i.signedness, i.bits),
+        .float => |f| switch (f.bits) {
+            16 => f16,
+            32 => f32,
+            64 => f64,
+            80 => f80,
+            128 => f128,
+            else => @compileError("Reify: unsupported float bit width"),
         },
-    });
+        .pointer => |p| @Pointer(p.size, p.attrs, p.child, p.sentinel()),
+        .optional => |o| ?o.child,
+        .array => |a| if (a.sentinel()) |s| [a.len:s]a.child else [a.len]a.child,
+        .vector => |v| @Vector(v.len, v.child),
+        .@"struct" => |s| if (s.is_tuple)
+            @Tuple(s.field_types)
+        else
+            @Struct(s.layout, s.backing_integer, s.field_names, s.field_types[0..s.field_names.len], s.field_attrs[0..s.field_names.len]),
+        .@"union" => |u| @Union(u.layout, if (u.layout == .@"packed") u.backing_integer else u.tag_type, u.field_names, u.field_types[0..u.field_names.len], u.field_attrs[0..u.field_names.len]),
+        .@"enum" => |e| blk: {
+            var vals: [e.field_names.len]e.tag_type = undefined;
+            for (e.field_values, 0..) |v, idx| vals[idx] = v;
+            const cv = vals;
+            break :blk @Enum(e.tag_type, e.mode, e.field_names, &cv);
+        },
+        else => @compileError("Reify: unsupported type kind " ++ @tagName(info)),
+    };
 }
 
 pub const TaggedUnion = @import("./tagged_union.zig").TaggedUnion;
@@ -321,9 +335,8 @@ pub fn looksLikeListContainerType(comptime T: type) ?struct { list: ListContaine
 pub fn Tagged(comptime U: type, comptime T: type) type {
     var info: std.builtin.Type.Union = @typeInfo(U).@"union";
     info.tag_type = T;
-    info.decls = &.{};
     info.layout = .auto;
-    return @Type(.{ .@"union" = info });
+    return Reify(.{ .@"union" = info });
 }
 
 pub fn SliceChild(comptime T: type) type {
@@ -338,18 +351,12 @@ pub fn SliceChild(comptime T: type) type {
 pub fn useAllFields(comptime T: type, _: VoidFields(T)) void {}
 
 fn VoidFields(comptime T: type) type {
-    const fields = @typeInfo(T).@"struct".fields;
-    var new_fields = fields[0..fields.len].*;
-    for (&new_fields) |*field| {
-        field.type = void;
-        field.default_value_ptr = null;
-    }
-    return @Type(.{ .@"struct" = .{
-        .layout = .auto,
-        .fields = &new_fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    const s = @typeInfo(T).@"struct";
+    var types: [s.field_names.len]type = undefined;
+    for (&types) |*ty| ty.* = void;
+    const field_types = types;
+    const field_attrs: [s.field_names.len]std.builtin.Type.Struct.FieldAttributes = @splat(.{});
+    return @Struct(.auto, null, s.field_names, &field_types, &field_attrs);
 }
 
 pub fn voidFieldTypeDiscardHelper(data: anytype) void {

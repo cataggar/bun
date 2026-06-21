@@ -96,5 +96,7 @@ pub fn AddConst(Pointer: type) type {
         // verifies that's not the case.
         else => @compileError("`Pointer` must be a (possibly optional) pointer or slice"),
     }
-    return @Type(type_info);
+    return bun.meta.Reify(type_info);
 }
+
+const bun = @import("bun");

@@ -442,12 +442,12 @@ fn Span(comptime T: type) type {
                 },
                 .c => {
                     new_ptr_info.sentinel_ptr = &@as(ptr_info.child, 0);
-                    new_ptr_info.is_allowzero = false;
+                    new_ptr_info.attrs.@"allowzero" = false;
                 },
                 .many, .slice => {},
             }
             new_ptr_info.size = .slice;
-            return @Type(.{ .pointer = new_ptr_info });
+            return meta.Reify(.{ .pointer = new_ptr_info });
         },
         else => @compileError("invalid type given to std.mem.Span: " ++ @typeName(T)),
     }
@@ -1401,11 +1401,11 @@ fn SliceTo(comptime T: type, comptime end: std.meta.Elem(T)) type {
                 .c => {
                     new_ptr_info.sentinel_ptr = &end;
                     // C pointers are always allowzero, but we don't want the return type to be.
-                    assert(new_ptr_info.is_allowzero);
-                    new_ptr_info.is_allowzero = false;
+                    assert(new_ptr_info.attrs.@"allowzero");
+                    new_ptr_info.attrs.@"allowzero" = false;
                 },
             }
-            return @Type(.{ .pointer = new_ptr_info });
+            return meta.Reify(.{ .pointer = new_ptr_info });
         },
         else => {},
     }

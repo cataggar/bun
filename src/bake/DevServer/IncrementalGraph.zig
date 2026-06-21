@@ -65,7 +65,7 @@ const Content = union(enum) {
     const Untagged = blk: {
         var info = @typeInfo(Content);
         info.@"union".tag_type = null;
-        break :blk @Type(info);
+        break :blk bun.meta.Reify(info);
     };
 };
 

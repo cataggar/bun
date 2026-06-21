@@ -183,7 +183,7 @@ pub fn dropSentinel(ptr: anytype, allocator: std.mem.Allocator) blk: {
     var info = @typeInfo(@TypeOf(ptr));
     info.pointer.size = .slice;
     info.pointer.sentinel_ptr = null;
-    break :blk bun.OOM!@Type(info);
+    break :blk bun.OOM!bun.meta.Reify(info);
 } {
     const info = @typeInfo(@TypeOf(ptr)).pointer;
     const Child = info.child;
