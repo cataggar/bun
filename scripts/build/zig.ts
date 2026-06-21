@@ -40,7 +40,7 @@ import { streamPath } from "./stream.ts";
  *
  * From https://github.com/cataggar/zig releases (a mirror of ziglang.org).
  */
-export const ZIG_COMMIT = "0.17.0-dev.892+54537285c";
+export const ZIG_COMMIT = "0.17.0-dev.902+7255f3e72";
 
 /**
  * Number of LLVM codegen units. >1 splits the build into N independent
