@@ -75,14 +75,14 @@ const BunBuildOptions = struct {
         }
 
         var opts = b.addOptions();
-        opts.addOption([]const u8, "base_path", b.pathFromRoot("."));
-        opts.addOption([]const u8, "codegen_path", std.fs.path.resolve(b.graph.arena, &.{ b.build_root.path.?, this.codegen_path }) catch @panic("OOM"));
+        opts.addOption([]const u8, "base_path", b.pathResolve(&.{"."}));
+        opts.addOption([]const u8, "codegen_path", b.pathResolve(&.{this.codegen_path}));
 
         opts.addOption(bool, "codegen_embed", this.shouldEmbedCode());
         opts.addOption(u32, "canary_revision", this.canary_revision orelse 0);
         opts.addOption(bool, "is_canary", this.canary_revision != null);
         opts.addOption(Version, "version", this.version);
-        opts.addOption([:0]const u8, "sha", b.allocator.dupeZ(u8, this.sha) catch @panic("OOM"));
+        opts.addOption([:0]const u8, "sha", b.allocator.dupeSentinel(u8, this.sha, 0) catch @panic("OOM"));
         opts.addOption(bool, "baseline", this.isBaseline());
         opts.addOption(bool, "enable_logs", this.enable_logs);
         opts.addOption(bool, "enable_asan", this.enable_asan);
@@ -158,6 +158,7 @@ pub fn getCpuModel(os: OperatingSystem, arch: Arch) ?Target.Query.CpuModel {
 pub fn build(b: *Build) !void {
     std.log.info("zig compiler v{s}", .{builtin.zig_version_string});
     checked_file_exists = std.AutoHashMap(u64, void).init(b.allocator);
+    build_io = b.graph.io;
 
     var target_query = b.standardTargetOptionsQueryOnly(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -194,19 +195,16 @@ pub fn build(b: *Build) !void {
 
     const target = b.resolveTargetQuery(target_query);
 
-    const codegen_path = b.pathFromRoot(
+    const codegen_path = b.pathResolve(&.{
         b.option([]const u8, "codegen_path", "Set the generated code directory") orelse
             "build/debug/codegen",
-    );
-    const codegen_embed = b.option(bool, "codegen_embed", "If codegen files should be embedded in the binary") orelse switch (b.release_mode) {
+    });
+    const codegen_embed = b.option(bool, "codegen_embed", "If codegen files should be embedded in the binary") orelse switch (b.graph.release_mode) {
         .off => false,
         else => true,
     };
 
     const bun_version = b.option([]const u8, "version", "Value of `Bun.version`") orelse "0.0.0";
-
-    // Lower the default reference trace for incremental
-    b.reference_trace = b.reference_trace orelse if (b.graph.incremental == true) 8 else 16;
 
     const obj_format = b.option(ObjectFormat, "obj_format", "Output file for object files") orelse .obj;
 
@@ -252,25 +250,21 @@ pub fn build(b: *Build) !void {
         ),
         .sha = sha: {
             const sha_buildoption = b.option([]const u8, "sha", "Force the git sha");
-            const sha_github = b.graph.env_map.get("GITHUB_SHA");
-            const sha_env = b.graph.env_map.get("GIT_SHA");
+            const sha_github = b.graph.environ_map.get("GITHUB_SHA");
+            const sha_env = b.graph.environ_map.get("GIT_SHA");
             const sha = sha_buildoption orelse sha_github orelse sha_env orelse fetch_sha: {
-                const result = std.process.Child.run(.{
-                    .allocator = b.allocator,
-                    .argv = &.{
-                        "git",
-                        "rev-parse",
-                        "HEAD",
-                    },
-                    .cwd = b.pathFromRoot("."),
-                    .expand_arg0 = .expand,
-                }) catch |err| {
+                var exit_code: u8 = undefined;
+                const stdout = b.runAllowFail(
+                    &.{ "git", "rev-parse", "HEAD" },
+                    &exit_code,
+                    .inherit,
+                ) catch |err| {
                     std.log.warn("Failed to execute 'git rev-parse HEAD': {s}", .{@errorName(err)});
                     std.log.warn("Falling back to zero sha", .{});
                     break :sha zero_sha;
                 };
 
-                break :fetch_sha b.dupe(std.mem.trim(u8, result.stdout, "\n \t"));
+                break :fetch_sha b.dupe(std.mem.trim(u8, stdout, "\n \t"));
             };
 
             if (sha.len == 0) {
@@ -353,7 +347,7 @@ pub fn build(b: *Build) !void {
     {
         var step = b.step("check", "Check for semantic analysis errors");
         var bun_check_obj = addBunObject(b, &build_options);
-        bun_check_obj.generated_bin = null;
+        bun_check_obj.generated_bin = .none;
         // bun_check_obj.use_llvm = false;
         step.dependOn(&bun_check_obj.step);
 
@@ -665,7 +659,7 @@ pub fn build(b: *Build) !void {
         });
 
         const run_gen = b.addRunArtifact(gen_exe);
-        const gen_output = run_gen.captureStdOut();
+        const gen_output = run_gen.captureStdOut(.{});
 
         const install = b.addInstallFile(gen_output, "../src/string/immutable/grapheme_tables.zig");
         step.dependOn(&install.step);
@@ -725,7 +719,7 @@ fn addMultiCheck(
             };
 
             var obj = addBunObject(b, &options);
-            obj.generated_bin = null;
+            obj.generated_bin = .none;
             parent_step.dependOn(&obj.step);
         }
     }
@@ -832,7 +826,7 @@ pub fn addBunObject(b: *Build, opts: *BunBuildOptions) *Compile {
 }
 
 fn enableFastBuild(b: *Build) bool {
-    const val = b.graph.env_map.get("BUN_BUILD_FAST") orelse return false;
+    const val = b.graph.environ_map.get("BUN_BUILD_FAST") orelse return false;
     return std.mem.eql(u8, val, "1");
 }
 
@@ -863,7 +857,8 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
     if (@hasField(std.meta.Child(@TypeOf(obj)), "llvm_no_merge_shards"))
         obj.llvm_no_merge_shards = obj.kind == .obj and (opts.llvm_codegen_threads orelse 0) > 1;
 
-    obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
+    if (@hasField(std.meta.Child(@TypeOf(obj)), "no_link_obj"))
+        obj.no_link_obj = opts.os != .windows and !opts.no_llvm;
 
     if (opts.enable_asan and !enableFastBuild(b)) {
         if (@hasField(Build.Module, "sanitize_address")) {
@@ -884,8 +879,8 @@ fn configureObj(b: *Build, opts: *BunBuildOptions, obj: *Compile) void {
 
     // Link libc
     if (opts.os != .wasm) {
-        obj.linkLibC();
-        obj.linkLibCpp();
+        obj.root_module.link_libc = true;
+        obj.root_module.link_libcpp = true;
     }
 
     // Disable stack probing on x86 so we don't need to include compiler_rt
@@ -963,6 +958,7 @@ pub fn addInstallObjectFile(
 }
 
 var checked_file_exists: std.AutoHashMap(u64, void) = undefined;
+var build_io: std.Io = undefined;
 fn exists(path: []const u8) bool {
     const entry = checked_file_exists.getOrPut(std.hash.Wyhash.hash(0, path)) catch unreachable;
     if (entry.found_existing) {
@@ -970,7 +966,7 @@ fn exists(path: []const u8) bool {
         return true;
     }
 
-    std.fs.accessAbsolute(path, .{ .mode = .read_only }) catch return false;
+    std.Io.Dir.cwd().access(build_io, path, .{}) catch return false;
     return true;
 }
 
