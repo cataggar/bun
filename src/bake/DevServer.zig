@@ -3992,10 +3992,7 @@ pub const HmrTopic = enum(u8) {
 
     pub const max_count = @typeInfo(HmrTopic).@"enum".fields.len;
     pub const Bits = @Type(.{ .@"struct" = .{
-        .backing_integer = @Type(.{ .int = .{
-            .bits = max_count,
-            .signedness = .unsigned,
-        } }),
+        .backing_integer = @Int(.unsigned, max_count),
         .fields = &brk: {
             const enum_fields = @typeInfo(HmrTopic).@"enum".fields;
             var fields: [enum_fields.len]std.builtin.Type.StructField = undefined;

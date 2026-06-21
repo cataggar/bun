@@ -1943,7 +1943,7 @@ fn testPureBitSet(comptime Set: type) !void {
     try testing.expect(full.differenceWith(even).eql(odd));
 }
 
-fn testStaticBitSet(comptime Set: type, comptime Container: @Type(.enum_literal)) !void {
+fn testStaticBitSet(comptime Set: type, comptime Container: @TypeOf(.enum_literal)) !void {
     var a = Set.initEmpty();
     var b = Set.initFull();
     try testing.expectEqual(@as(usize, 0), a.count());
