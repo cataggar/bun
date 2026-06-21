@@ -216,8 +216,8 @@ pub fn NewHotReloader(comptime Ctx: type, comptime EventLoopType: type, comptime
                 return .{
                     .reloader = reloader,
 
-                    .hashes = [_]u32{0} ** 8,
-                    .paths = if (Ctx == bun.bake.DevServer) [_][]const u8{&.{}} ** 8,
+                    .hashes = @splat(0),
+                    .paths = if (Ctx == bun.bake.DevServer) @as([8][]const u8, @splat(&.{})),
                     .count = 0,
                     .concurrent_task = undefined,
                 };

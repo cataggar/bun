@@ -3,6 +3,40 @@ const strings = @This();
 /// memmem is provided by libc on posix, but implemented in zig for windows.
 pub const memmem = bun.sys.workaround_symbols.memmem;
 
+/// Comptime sequence repetition, replacing Zig's removed `seq ** n` operator
+/// (ziglang/zig#24738) for repeating a multi-element sequence. To repeat a
+/// single scalar into an array, use `@splat` instead.
+pub fn repeatComptime(comptime T: type, comptime seq: []const T, comptime n: usize) [seq.len * n]T {
+    var out: [seq.len * n]T = undefined;
+    for (0..n) |i| @memcpy(out[i * seq.len ..][0..seq.len], seq);
+    return out;
+}
+
+test repeatComptime {
+    try std.testing.expectEqualSlices(u8, "abcabcabc", &repeatComptime(u8, "abc", 3));
+    try std.testing.expectEqualSlices(u8, "======", &repeatComptime(u8, "=", 6));
+    try std.testing.expectEqualSlices(u32, &.{ 1, 2, 1, 2 }, &repeatComptime(u32, &.{ 1, 2 }, 2));
+}
+
+test "@splat replaces scalar array-multiplication" {
+    // The migration from the removed `[_]T{x} ** N` operator to `@splat(x)`
+    // (ziglang/zig#24738) must preserve the exact array contents.
+    const zeros: [64]u8 = @splat(0);
+    try std.testing.expect(zeros.len == 64);
+    for (zeros) |b| try std.testing.expect(b == 0);
+
+    const flags: [3]bool = @splat(true);
+    try std.testing.expect(flags[0] and flags[1] and flags[2]);
+
+    // nested-value element (e.g. `.{.{ 0, 0, 0, 255 }} ** 256`)
+    const palette: [2][4]u8 = @splat(.{ 0, 0, 0, 255 });
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 255 }, &palette[1]);
+
+    // single-char string repeat via `&@splat` (e.g. clap's space buffer)
+    const spaces: *const [5]u8 = &@splat(' ');
+    try std.testing.expectEqualSlices(u8, "     ", spaces);
+}
+
 pub const Encoding = enum {
     ascii,
     utf8,
@@ -1366,7 +1400,7 @@ pub fn indexOfNotChar(slice: []const u8, char: u8) ?u32 {
 
 const invalid_char: u8 = 0xff;
 const hex_table: [256]u8 = brk: {
-    var values: [256]u8 = [_]u8{invalid_char} ** 256;
+    var values: [256]u8 = @splat(invalid_char);
     values['0'] = 0;
     values['1'] = 1;
     values['2'] = 2;

@@ -571,7 +571,7 @@ pub const RapidHash = struct {
     }
 
     test "RapidHash.hash" {
-        const bytes: []const u8 = "abcdefgh" ** 128;
+        const bytes: []const u8 = &bun.strings.repeatComptime(u8, "abcdefgh", 128);
 
         const sizes: [13]u64 = .{ 0, 1, 2, 3, 4, 8, 16, 32, 64, 128, 256, 512, 1024 };
 

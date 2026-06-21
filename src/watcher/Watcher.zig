@@ -94,7 +94,7 @@ pub fn init(comptime T: type, ctx: *T, fs: *bun.fs.FileSystem, allocator: std.me
         .onError = &wrapped.onErrorWrapped,
         .platform = .{},
         .watch_events = try allocator.alloc(WatchEvent, max_count),
-        .changed_filepaths = [_]?[:0]u8{null} ** max_count,
+        .changed_filepaths = @as([max_count]?[:0]u8, @splat(null)),
     };
 
     try Platform.init(&watcher.platform, fs.top_level_dir);
