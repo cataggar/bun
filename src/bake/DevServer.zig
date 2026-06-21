@@ -3990,27 +3990,15 @@ pub const HmrTopic = enum(u8) {
     /// Invalid data
     _,
 
-    pub const max_count = @typeInfo(HmrTopic).@"enum".fields.len;
-    pub const Bits = @Type(.{ .@"struct" = .{
-        .backing_integer = @Int(.unsigned, max_count),
-        .fields = &brk: {
-            const enum_fields = @typeInfo(HmrTopic).@"enum".fields;
-            var fields: [enum_fields.len]std.builtin.Type.StructField = undefined;
-            for (enum_fields, &fields) |e, *s| {
-                s.* = .{
-                    .name = e.name,
-                    .type = bool,
-                    .default_value_ptr = &false,
-                    .is_comptime = false,
-                    .alignment = 0,
-                };
-            }
-            break :brk fields;
-        },
-        .decls = &.{},
-        .is_tuple = false,
-        .layout = .@"packed",
-    } });
+    pub const max_count = @typeInfo(HmrTopic).@"enum".field_names.len;
+    pub const Bits = brk: {
+        const field_names = @typeInfo(HmrTopic).@"enum".field_names;
+        var types: [field_names.len]type = undefined;
+        for (&types) |*ty| ty.* = bool;
+        const field_types = types;
+        const field_attrs: [field_names.len]std.builtin.Type.Struct.FieldAttributes = @splat(.{ .default_value_ptr = &false });
+        break :brk @Struct(.@"packed", @Int(.unsigned, max_count), field_names, &field_types, &field_attrs);
+    };
 };
 
 pub const HmrSocket = @import("./DevServer/HmrSocket.zig");

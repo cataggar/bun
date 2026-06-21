@@ -56,29 +56,22 @@ pub fn TagTypeEnumWithTypeMap(comptime Types: anytype) struct {
     ty_map: TypeMap(Types),
 } {
     var typeMap: TypeMap(Types) = undefined;
-    var enumFields: [Types.len]std.builtin.Type.EnumField = undefined;
 
-    @memset(&enumFields, std.mem.zeroes(std.builtin.Type.EnumField));
     @memset(&typeMap, TypeMapT{ .value = 0, .ty = void, .name = "" });
 
-    inline for (Types, 0..) |field, i| {
-        const name = comptime @typeName(field);
-        enumFields[i] = .{
-            .name = name,
-            .value = 1024 - i,
-        };
-        typeMap[i] = .{ .value = 1024 - i, .ty = field, .name = name };
-    }
-
     return .{
-        .tag_type = @Type(.{
-            .@"enum" = .{
-                .tag_type = TaggedPointer.Tag,
-                .fields = &enumFields,
-                .decls = &.{},
-                .is_exhaustive = false,
-            },
-        }),
+        .tag_type = blk: {
+            var names: [Types.len][:0]const u8 = undefined;
+            var values: [Types.len]TaggedPointer.Tag = undefined;
+            inline for (Types, 0..) |field, i| {
+                names[i] = @typeName(field);
+                values[i] = 1024 - i;
+                typeMap[i] = .{ .value = 1024 - i, .ty = field, .name = @typeName(field) };
+            }
+            const cn = names;
+            const cv = values;
+            break :blk @Enum(TaggedPointer.Tag, .nonexhaustive, &cn, &cv);
+        },
         .ty_map = typeMap,
     };
 }

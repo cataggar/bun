@@ -187,38 +187,23 @@ pub const packed_features_list = brk: {
     break :brk names[0..i].*;
 };
 
-pub const PackedFeatures = @Type(.{
-    .@"struct" = .{
-        .layout = .@"packed",
-        .backing_integer = u64,
-        .fields = brk: {
-            var fields: [64]std.builtin.Type.StructField = undefined;
-            var i: usize = 0;
-            for (packed_features_list) |name| {
-                fields[i] = .{
-                    .name = name,
-                    .type = bool,
-                    .default_value_ptr = &false,
-                    .is_comptime = false,
-                    .alignment = 0,
-                };
-                i += 1;
-            }
-            while (i < fields.len) : (i += 1) {
-                fields[i] = .{
-                    .name = std.fmt.comptimePrint("_{d}", .{i}),
-                    .type = bool,
-                    .default_value_ptr = &false,
-                    .is_comptime = false,
-                    .alignment = 0,
-                };
-            }
-            break :brk &fields;
-        },
-        .decls = &.{},
-        .is_tuple = false,
-    },
-});
+pub const PackedFeatures = brk: {
+    var names: [64][:0]const u8 = undefined;
+    var i: usize = 0;
+    for (packed_features_list) |name| {
+        names[i] = name;
+        i += 1;
+    }
+    while (i < names.len) : (i += 1) {
+        names[i] = std.fmt.comptimePrint("_{d}", .{i});
+    }
+    const field_names = names;
+    var types: [64]type = undefined;
+    for (&types) |*ty| ty.* = bool;
+    const field_types = types;
+    const field_attrs: [64]std.builtin.Type.Struct.FieldAttributes = @splat(.{ .default_value_ptr = &false });
+    break :brk @Struct(.@"packed", u64, &field_names, &field_types, &field_attrs);
+};
 
 pub fn packedFeatures() PackedFeatures {
     var bits = PackedFeatures{};

@@ -605,34 +605,18 @@ pub fn toAST(
         .@"union" => |Union| {
             const info = Union;
             if (info.tag_type) |UnionTagType| {
-                inline for (info.fields) |u_field| {
-                    if (value == @field(UnionTagType, u_field.name)) {
-                        const StructType = @Type(
-                            .{
-                                .Struct = .{
-                                    .layout = .Auto,
-                                    .decls = &.{},
-                                    .is_tuple = false,
-                                    .fields = &.{
-                                        .{
-                                            .name = u_field.name,
-                                            .type = @TypeOf(
-                                                @field(value, u_field.name),
-                                            ),
-                                            .is_comptime = false,
-                                            .default_value_ptr = undefined,
-                                            .alignment = @alignOf(
-                                                @TypeOf(
-                                                    @field(value, u_field.name),
-                                                ),
-                                            ),
-                                        },
-                                    },
-                                },
-                            },
+                inline for (info.field_names) |fname| {
+                    if (value == @field(UnionTagType, fname)) {
+                        const FieldType = @TypeOf(@field(value, fname));
+                        const StructType = @Struct(
+                            .auto,
+                            null,
+                            &[_][]const u8{fname},
+                            &[_]type{FieldType},
+                            &[_]std.builtin.Type.Struct.FieldAttributes{.{}},
                         );
                         var struct_value: StructType = undefined;
-                        @field(struct_value, u_field.name) = value;
+                        @field(struct_value, fname) = value;
                         return try toAST(allocator, StructType, struct_value);
                     }
                 }
