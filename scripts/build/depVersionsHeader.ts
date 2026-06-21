@@ -71,8 +71,9 @@ function computeVersions(cfg: Config): [string, string][] {
   versions.push(["UWS", cfg.revision]);
   versions.push(["USOCKETS", cfg.revision]);
   // Zig: could run `zig version` but that's a subprocess per configure.
-  // Using zigCommit from config — less human-readable than "0.15.2" but
-  // more precise (the commit IS what we ship) and stays in sync.
+  // Using zigCommit from config — cataggar/zig's full version string
+  // (e.g. "0.17.0-dev.892+54537285c"), which is both readable and precise
+  // (it embeds the upstream commit) and stays in sync with what we ship.
   versions.push(["ZIG", cfg.zigCommit]);
 
   // NOTE: cmake's GenerateDependencyVersions.cmake also extracted semantic

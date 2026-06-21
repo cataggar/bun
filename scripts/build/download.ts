@@ -241,6 +241,38 @@ export async function extractTarGz(tarball: string, dest: string, stripComponent
 }
 
 /**
+ * Extract a .tar.xz archive with mtime normalization.
+ *
+ * Same contract as extractTarGz (see there for the `-m` mtime rationale and
+ * `stripComponents` semantics) but for xz-compressed tarballs — the format
+ * cataggar/zig (and ziglang.org) ship the compiler in. `-J` selects xz;
+ * bsdtar (macOS / Windows tar.exe) also accepts `-J` and otherwise
+ * auto-detects, so the flag is safe across platforms.
+ */
+export async function extractTarXz(tarball: string, dest: string, stripComponents = 1): Promise<void> {
+  const args = ["-xJmf", tarball, "-C", dest];
+  if (stripComponents > 0) args.push(`--strip-components=${stripComponents}`);
+
+  const result = spawnSync(tarExe, args, {
+    stdio: ["ignore", "ignore", "pipe"],
+    encoding: "utf8",
+  });
+
+  if (result.error) {
+    throw new BuildError(`Failed to spawn tar`, {
+      hint: "Is `tar` (with xz support) in your PATH? Linux GNU tar needs the `xz` binary installed (apt install xz-utils).",
+      cause: result.error,
+    });
+  }
+  if (result.status !== 0) {
+    throw new BuildError(`tar extraction failed (exit ${result.status}): ${result.stderr}`, { file: tarball });
+  }
+
+  const entries = await readdir(dest);
+  assert(entries.length > 0, `tar extracted nothing from ${tarball}`, { hint: "Tarball may be corrupt" });
+}
+
+/**
  * Extract a .zip archive with mtime normalization.
  *
  * Tries `unzip` first (most systems), falls back to `tar` (bsdtar — what
