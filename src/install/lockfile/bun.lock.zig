@@ -28,7 +28,10 @@ pub const Stringifier = struct {
     // }
 
     pub fn saveFromBinary(allocator: std.mem.Allocator, lockfile: *BinaryLockfile, load_result: *const LoadResult, options: *const PackageManager.Options, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-        return bun.handleOom(saveFromBinary_inner(allocator, lockfile, load_result, options, writer));
+        return saveFromBinary_inner(allocator, lockfile, load_result, options, writer) catch |err| switch (err) {
+            error.OutOfMemory => bun.outOfMemory(),
+            error.WriteFailed => return error.WriteFailed,
+        };
     }
     pub fn saveFromBinary_inner(allocator: std.mem.Allocator, lockfile: *BinaryLockfile, load_result: *const LoadResult, options: *const PackageManager.Options, writer: *std.Io.Writer) !void {
         const buf = lockfile.buffers.string_bytes.items;

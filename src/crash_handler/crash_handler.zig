@@ -401,7 +401,8 @@ pub fn crashHandler(
 
                     dumpStackTrace(trace.*, .{});
 
-                    trace_str_buf.writer().print("{f}", .{TraceString{
+                    var trace_str_writer = trace_str_buf.writer();
+                    trace_str_writer.print("{f}", .{TraceString{
                         .trace = trace,
                         .reason = reason,
                         .action = .view_trace,
@@ -466,7 +467,8 @@ pub fn crashHandler(
 
                     writer.writeAll(" ") catch std.process.abort();
 
-                    trace_str_buf.writer().print("{f}", .{TraceString{
+                    var trace_str_writer = trace_str_buf.writer();
+                    trace_str_writer.print("{f}", .{TraceString{
                         .trace = trace,
                         .reason = reason,
                         .action = .open_issue,
@@ -507,7 +509,7 @@ pub fn crashHandler(
                 bun.auto_reload_on_crash = false;
 
                 Output.prettyErrorln("<d>--- Bun is auto-restarting due to crash <d>[time: <b>{d}<r><d>] ---<r>", .{
-                    @max(std.time.milliTimestamp(), 0),
+                    @max(bun.SystemTimer.milliTimestamp(), 0),
                 });
                 Output.flush();
 

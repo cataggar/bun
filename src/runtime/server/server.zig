@@ -2811,7 +2811,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                             if (this.h3_app) |h3_app| h3_app.any(user_route.route.path, *UserRoute, user_route, onH3UserRouteRequest);
                         }
                         if (is_star_path) {
-                            star_methods_covered_by_user = .initFull();
+                            star_methods_covered_by_user = .full;
                         }
 
                         if (this.config.websocket) |*websocket| {
@@ -2873,7 +2873,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                         has_static_route_for_star_path = true;
                         switch (entry.method) {
                             .any => {
-                                star_methods_covered_by_user = .initFull();
+                                star_methods_covered_by_user = .full;
                             },
                             .method => |method| {
                                 star_methods_covered_by_user.setUnion(method);
@@ -2939,7 +2939,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                 has_dev_server_for_star_path = bun.handleOom(dev.setRoutes(this));
                 if (has_dev_server_for_star_path) {
                     // Assume dev server "/*" covers all methods if it exists
-                    star_methods_covered_by_user = .initFull();
+                    star_methods_covered_by_user = .full;
                 }
             }
 
@@ -2956,7 +2956,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             }
 
             // --- 9. Consolidated "/*" HTTP Fallback Registration ---
-            if (star_methods_covered_by_user.eql(bun.http.Method.Set.initFull())) {
+            if (star_methods_covered_by_user.eql(.full)) {
                 // User/Static/Dev has already provided a "/*" handler for ALL methods.
                 // No further global "/*" HTTP fallback needed.
             } else if (has_any_user_route_for_star_path or has_static_route_for_star_path or has_dev_server_for_star_path) {
@@ -2991,7 +2991,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             // for method-specific "/*" routes fill the complement per method.
             if (comptime has_h3) {
                 if (this.h3_app) |h3_app| {
-                    if (h3_star_covered.eql(bun.http.Method.Set.initFull())) {
+                    if (h3_star_covered.eql(.full)) {
                         // user/static "/*" already covers every method
                     } else if (has_any_user_route_for_star_path or has_static_route_for_star_path) {
                         var uncovered = h3_star_covered;

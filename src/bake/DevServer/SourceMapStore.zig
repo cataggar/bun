@@ -210,8 +210,13 @@ pub const Entry = struct {
             return bun.strings.percentEncodeWrite(utf8_input, array_list);
         }
 
-        const writer = array_list.writer();
-        try bun.js_printer.writePreQuotedString(utf8_input, @TypeOf(writer), writer, '"', false, true, .utf8);
+        const list_allocator = array_list.allocator;
+        var unmanaged = array_list.moveToUnmanaged();
+        var allocating_writer = std.Io.Writer.Allocating.fromArrayList(list_allocator, &unmanaged);
+        errdefer allocating_writer.deinit();
+        const writer = &allocating_writer.writer;
+        bun.js_printer.writePreQuotedString(utf8_input, @TypeOf(writer), writer, '"', false, true, .utf8) catch return error.OutOfMemory;
+        array_list.* = allocating_writer.toArrayList().toManaged(list_allocator);
     }
 
     fn joinVLQ(map: *const Entry, kind: ChunkKind, j: *StringJoiner, arena: Allocator, side: bake.Side) !void {

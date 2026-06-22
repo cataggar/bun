@@ -100,7 +100,14 @@ pub fn writeEscapedJSON(index: u32, graph: *const Graph, linker_graph: *const Li
     const allocator = stack.get();
     var bytes = std.array_list.Managed(u8).init(allocator);
     defer bytes.deinit();
-    try write(index, graph, linker_graph, chunks, bytes.writer());
+    var unmanaged = bytes.moveToUnmanaged();
+    var allocating_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &unmanaged);
+    errdefer allocating_writer.deinit();
+    write(index, graph, linker_graph, chunks, &allocating_writer.writer) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        else => |e| return e,
+    };
+    bytes = allocating_writer.toArrayList().toManaged(allocator);
     try bun.js_printer.writePreQuotedString(bytes.items, @TypeOf(writer), writer, '"', false, true, .utf8);
 }
 

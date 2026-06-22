@@ -80,7 +80,7 @@ pub const Route = struct {
     pub fn init(html_bundle: *HTMLBundle) RefPtr(Route) {
         return .new(.{
             .bundle = .initRef(html_bundle),
-            .pending_responses = .{},
+            .pending_responses = .empty,
             .ref_count = .init(),
             .server = null,
             .state = .pending,

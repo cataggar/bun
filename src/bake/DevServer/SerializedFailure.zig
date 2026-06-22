@@ -117,16 +117,15 @@ pub fn initFromLog(
     var sfb = bun.stackFallback(65536, dev.allocator());
     var payload = std.array_list.Managed(u8).initCapacity(sfb.get(), 65536) catch
         unreachable; // enough space
-    const w = payload.writer();
 
-    try w.writeInt(u32, @bitCast(owner.encode()), .little);
+    try writeInt(&payload, u32, @bitCast(owner.encode()));
 
-    try writeString32(owner_display_name, w);
+    try writeString32(owner_display_name, &payload);
 
-    try w.writeInt(u32, @intCast(messages.len), .little);
+    try writeInt(&payload, u32, @intCast(messages.len));
 
     for (messages) |*msg| {
-        try writeLogMsg(msg, w);
+        try writeLogMsg(msg, &payload);
     }
 
     // Avoid-recloning if it is was moved to the hap
@@ -140,32 +139,30 @@ pub fn initFromLog(
 
 // All "write" functions get a corresponding "read" function in ./client/error.ts
 
-const Writer = std.array_list.Managed(u8).Writer;
-
-fn writeLogMsg(msg: *const bun.logger.Msg, w: Writer) !void {
-    try w.writeByte(switch (msg.kind) {
+fn writeLogMsg(msg: *const bun.logger.Msg, w: *std.array_list.Managed(u8)) !void {
+    try w.append(switch (msg.kind) {
         inline else => |k| @intFromEnum(@field(ErrorKind, "bundler_log_" ++ @tagName(k))),
     });
     try writeLogData(msg.data, w);
     const notes = msg.notes;
-    try w.writeInt(u32, @intCast(notes.len), .little);
+    try writeInt(w, u32, @intCast(notes.len));
     for (notes) |note| {
         try writeLogData(note, w);
     }
 }
 
-fn writeLogData(data: bun.logger.Data, w: Writer) !void {
+fn writeLogData(data: bun.logger.Data, w: *std.array_list.Managed(u8)) !void {
     try writeString32(data.text, w);
     if (data.location) |loc| {
         if (loc.line < 0) {
-            try w.writeInt(u32, 0, .little);
+            try writeInt(w, u32, 0);
             return;
         }
         assert(loc.column >= 0); // zero based and not negative
 
-        try w.writeInt(i32, @intCast(loc.line), .little);
-        try w.writeInt(u32, @intCast(loc.column), .little);
-        try w.writeInt(u32, @intCast(loc.length), .little);
+        try writeInt(w, i32, @intCast(loc.line));
+        try writeInt(w, u32, @intCast(loc.column));
+        try writeInt(w, u32, @intCast(loc.length));
 
         // TODO: syntax highlighted line text + give more context lines
         try writeString32(loc.line_text orelse "", w);
@@ -174,13 +171,19 @@ fn writeLogData(data: bun.logger.Data, w: Writer) !void {
         // in isolation, it would be impossible to reference any other file
         // in this Log. Thus, it is not serialized.
     } else {
-        try w.writeInt(u32, 0, .little);
+        try writeInt(w, u32, 0);
     }
 }
 
-fn writeString32(data: []const u8, w: Writer) !void {
-    try w.writeInt(u32, @intCast(data.len), .little);
-    try w.writeAll(data);
+fn writeString32(data: []const u8, w: *std.array_list.Managed(u8)) !void {
+    try writeInt(w, u32, @intCast(data.len));
+    try w.appendSlice(data);
+}
+
+fn writeInt(w: *std.array_list.Managed(u8), comptime T: type, value: T) !void {
+    var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+    std.mem.writeInt(std.math.ByteAlignedInt(T), &bytes, value, .little);
+    try w.appendSlice(&bytes);
 }
 
 // fn writeJsValue(value: JSValue, global: *jsc.JSGlobalObject, w: *Writer) !void {

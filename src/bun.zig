@@ -1817,7 +1817,7 @@ pub fn reloadProcess(
         if (src == null) {
             dest.* = null;
         } else {
-            dest.* = (allocator.dupeZ(u8, sliceTo(src.?, 0)) catch unreachable).ptr;
+            dest.* = (dupeZ(allocator, u8, sliceTo(src.?, 0)) catch unreachable).ptr;
         }
     }
 
@@ -1867,16 +1867,15 @@ pub fn reloadProcess(
         }
     } else if (comptime Environment.isPosix) {
         if (comptime Environment.isLinux or Environment.isFreeBSD) on_before_reload_process_linux();
-        const err = std.posix.execveZ(
-            exec_path,
-            newargv,
-            envp,
-        );
+        // Zig 0.17 removed `std.posix.execveZ`; call libc directly. execve only
+        // returns on failure.
+        _ = std.c.execve(exec_path, newargv, envp);
+        const errno: std.c.E = @enumFromInt(std.c._errno().*);
         if (may_return) {
-            Output.errGeneric("Failed to reload process: {s}", .{@errorName(err)});
+            Output.errGeneric("Failed to reload process: {s}", .{@tagName(errno)});
             return;
         }
-        Output.panic("Unexpected error while reloading: {s}", .{@errorName(err)});
+        Output.panic("Unexpected error while reloading: {s}", .{@tagName(errno)});
     } else {
         @compileError("unsupported platform for reloadProcess");
     }
@@ -2103,9 +2102,10 @@ pub fn openFileForPath(file_path: [:0]const u8) !std.Io.File {
     const O_PATH = if (comptime Environment.isLinux) O.PATH else O.RDONLY;
     const flags: u32 = O.CLOEXEC | O.NOCTTY | O_PATH;
 
-    const fd = try std.posix.openZ(file_path, O.toPacked(flags), 0);
+    const fd = try sys.open(file_path, @bitCast(flags), 0).unwrap();
     return std.Io.File{
-        .handle = fd,
+        .handle = fd.cast(),
+        .flags = .{ .nonblocking = false },
     };
 }
 
@@ -2691,7 +2691,7 @@ pub const MakePath = struct {
             );
         }
 
-        return self.makeOpenPath(sub_path, opts);
+        return self.createDirPathOpen(blockingIo(), sub_path, .{ .open_options = opts });
     }
 
     /// copy/paste of `std.Io.Dir.makePath` and related functions and modified to support u16 slices.
@@ -2707,7 +2707,7 @@ pub const MakePath = struct {
         var it = try componentIterator(T, sub_path);
         var component = it.last() orelse return;
         while (true) {
-            std.Io.Dir.makeDir(self, component.path) catch |err| switch (err) {
+            self.createDir(blockingIo(), component.path, .default_dir) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     // TODO stat the file and return an error if it's not a directory
                     // this is important because otherwise a dangling symlink
@@ -4015,8 +4015,8 @@ pub inline fn wrappingNegation(val: anytype) @TypeOf(val) {
 fn assertNoPointers(T: type) void {
     switch (@typeInfo(T)) {
         .pointer => @compileError("no pointers!"),
-        inline .@"struct", .@"union" => |s| for (s.fields) |field| {
-            assertNoPointers(field.type);
+        inline .@"struct", .@"union" => |s| for (s.field_types) |FieldType| {
+            assertNoPointers(FieldType);
         },
         .array => |a| assertNoPointers(a.child),
         else => {},

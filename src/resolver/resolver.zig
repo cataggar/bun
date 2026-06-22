@@ -1096,7 +1096,7 @@ pub const Resolver = struct {
                         if (!query.entry.cache.fd.isValid() and store_fd) {
                             buf[out.len] = 0;
                             const span = buf[0..out.len :0];
-                            var file: bun.FD = .fromStdFile(try std.fs.openFileAbsoluteZ(span, .{ .mode = .read_only }));
+                            const file = (try bun.sys.File.open(span, bun.O.RDONLY, 0).unwrap()).handle;
                             query.entry.cache.fd = file;
                             Fs.FileSystem.setMaxFd(file.native());
                         }
@@ -1104,8 +1104,7 @@ pub const Resolver = struct {
                         defer {
                             if (r.fs.fs.needToCloseFiles()) {
                                 if (query.entry.cache.fd.isValid()) {
-                                    var file = query.entry.cache.fd.stdFile();
-                                    file.close();
+                                    query.entry.cache.fd.close();
                                     query.entry.cache.fd = .invalid;
                                 }
                             }
@@ -4047,9 +4046,8 @@ pub const Resolver = struct {
                             bin_folders = BinFolderArray.init(0) catch unreachable;
                         }
 
-                        const this_dir = fd.stdDir();
-                        var file = bun.FD.fromStdDir(this_dir.openDirZ(bun.pathLiteral("node_modules/.bin"), .{}) catch
-                            break :append_bin_dir);
+                        var file = bun.openDirForIteration(fd, bun.pathLiteral("node_modules/.bin")).unwrap() catch
+                            break :append_bin_dir;
                         defer file.close();
                         const bin_path = file.getFdPath(bufs(.node_bin_path)) catch break :append_bin_dir;
                         bin_folders_lock.lock();
@@ -4073,10 +4071,9 @@ pub const Resolver = struct {
                                 bin_folders = BinFolderArray.init(0) catch unreachable;
                             }
 
-                            const this_dir = fd.stdDir();
-                            var file = this_dir.openDirZ(".bin", .{}) catch break :append_bin_dir;
+                            var file = bun.openDirForIteration(fd, bun.pathLiteral(".bin")).unwrap() catch break :append_bin_dir;
                             defer file.close();
-                            const bin_path = bun.getFdPath(.fromStdDir(file), bufs(.node_bin_path)) catch break :append_bin_dir;
+                            const bin_path = file.getFdPath(bufs(.node_bin_path)) catch break :append_bin_dir;
                             bin_folders_lock.lock();
                             defer bin_folders_lock.unlock();
 

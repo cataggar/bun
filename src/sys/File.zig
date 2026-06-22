@@ -228,8 +228,8 @@ pub const Reader = struct {
         return switch (@typeInfo(@TypeOf(buffer))) {
             .pointer => |ptr| switch (ptr.size) {
                 .one => switch (@typeInfo(ptr.child)) {
-                    .array => |array| @constCast(buffer[0..array.len]),
-                    else => @compileError("expected a buffer slice or pointer to an array"),
+                    .array => |array| @constCast(buffer)[0..array.len],
+                    else => @as([*]u8, @ptrCast(@constCast(buffer)))[0..1],
                 },
                 .slice => @constCast(buffer),
                 else => @compileError("expected a buffer slice or pointer to an array"),
@@ -344,8 +344,8 @@ fn FileWriter(comptime quiet: bool) type {
             return switch (@typeInfo(@TypeOf(buffer))) {
                 .pointer => |ptr| switch (ptr.size) {
                     .one => switch (@typeInfo(ptr.child)) {
-                        .array => |array| @constCast(buffer[0..array.len]),
-                        else => @compileError("expected a buffer slice or pointer to an array"),
+                        .array => |array| @constCast(buffer)[0..array.len],
+                        else => @as([*]u8, @ptrCast(@constCast(buffer)))[0..1],
                     },
                     .slice => @constCast(buffer),
                     else => @compileError("expected a buffer slice or pointer to an array"),

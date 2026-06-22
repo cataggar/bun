@@ -15,7 +15,8 @@ pub inline fn slice(self: *const VLQ) []const u8 {
 }
 
 pub fn writeTo(self: VLQ, writer: anytype) !void {
-    try writer.writeAll(self.bytes[0..self.len]);
+    var mutable_writer = writer;
+    try mutable_writer.writeAll(self.bytes[0..self.len]);
 }
 
 pub const zero = vlq_lookup_table[0];

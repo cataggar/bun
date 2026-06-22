@@ -318,22 +318,22 @@ pub const Editor = enum(u8) {
             },
         }
 
-        spawned.child_process = std.process.Child.init(args_buf[0..i], default_allocator);
+        spawned.argv = args_buf[0..i];
         var thread = try std.Thread.spawn(.{}, autoClose, .{spawned});
         thread.detach();
     }
     const SpawnedEditorContext = struct {
         file_path_buf: [1024 + bun.MAX_PATH_BYTES]u8 = undefined,
         buf: [10]string = undefined,
-        child_process: std.process.Child = undefined,
+        argv: []const string = &.{},
     };
 
     fn autoClose(spawned: *SpawnedEditorContext) void {
         defer bun.default_allocator.destroy(spawned);
 
         Global.setThreadName("Open Editor");
-        spawned.child_process.spawn() catch return;
-        _ = spawned.child_process.wait() catch {};
+        var child = std.process.spawn(bun.blockingIo(), .{ .argv = spawned.argv }) catch return;
+        _ = child.wait(bun.blockingIo()) catch {};
     }
 };
 

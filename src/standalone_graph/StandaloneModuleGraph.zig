@@ -336,7 +336,7 @@ pub const StandaloneModuleGraph = struct {
             );
         }
 
-        modules.lockPointers(); // make the pointers stable forever
+        modules.unmanaged.lockPointers(); // make the pointers stable forever
 
         return StandaloneModuleGraph{
             .bytes = raw_bytes[0..offsets.byte_count],
@@ -577,7 +577,7 @@ pub const StandaloneModuleGraph = struct {
             // An expensive sanity check:
             var graph = try fromBytes(allocator, @alignCast(output_bytes), offsets);
             defer {
-                graph.files.unlockPointers();
+                graph.files.unmanaged.unlockPointers();
                 graph.files.deinit();
             }
 
@@ -641,7 +641,7 @@ pub const StandaloneModuleGraph = struct {
 
     pub fn inject(bytes: []const u8, self_exe: [:0]const u8, inject_options: InjectOptions, target: *const CompileTarget) bun.FD {
         var buf: bun.PathBuffer = undefined;
-        var zname: [:0]const u8 = bun.fs.FileSystem.tmpname("bun-build", &buf, @as(u64, @bitCast(std.time.milliTimestamp()))) catch |err| {
+        var zname: [:0]const u8 = bun.fs.FileSystem.tmpname("bun-build", &buf, @as(u64, @bitCast(bun.SystemTimer.milliTimestamp()))) catch |err| {
             Output.prettyErrorln("<r><red>error<r><d>:<r> failed to get temporary file name: {s}", .{@errorName(err)});
             return bun.invalid_fd;
         };
@@ -1084,7 +1084,7 @@ pub const StandaloneModuleGraph = struct {
             };
         }
 
-        return try allocator.dupeZ(u8, dest_z);
+        return try bun.dupeZ(allocator, u8, dest_z);
     }
 
     pub fn toExecutable(
@@ -1110,7 +1110,7 @@ pub const StandaloneModuleGraph = struct {
         var free_self_exe = false;
         const self_exe = if (self_exe_path) |path| brk: {
             free_self_exe = true;
-            break :brk bun.handleOom(allocator.dupeZ(u8, path));
+            break :brk bun.handleOom(bun.dupeZ(allocator, u8, path));
         } else if (target.isDefault())
             bun.selfExePath() catch |err| {
                 return CompileResult.failFmt("failed to get self executable path: {s}", .{@errorName(err)});
@@ -1137,7 +1137,7 @@ pub const StandaloneModuleGraph = struct {
             }
 
             free_self_exe = true;
-            break :blk bun.handleOom(allocator.dupeZ(u8, dest_z));
+            break :blk bun.handleOom(bun.dupeZ(allocator, u8, dest_z));
         };
 
         defer if (free_self_exe) {
@@ -1439,7 +1439,13 @@ pub const StandaloneModuleGraph = struct {
         arena: std.mem.Allocator,
         json_source: []const u8,
     ) !void {
-        const out = header_list.writer();
+        const Writer = struct {
+            fn appendU32(list: *std.array_list.Managed(u8), value: u32) !void {
+                var bytes: [@sizeOf(u32)]u8 = undefined;
+                std.mem.writeInt(u32, &bytes, value, .little);
+                try list.appendSlice(&bytes);
+            }
+        };
         const json_src = bun.logger.Source.initPathString("sourcemap.json", json_source);
         var log = bun.logger.Log.init(arena);
         defer log.deinit();
@@ -1475,8 +1481,8 @@ pub const StandaloneModuleGraph = struct {
         const map_blob = SourceMap.InternalSourceMap.fromVLQ(arena, map_vlq, 0) catch
             return error.InvalidSourceMap;
 
-        try out.writeInt(u32, sources_paths.items.len, .little);
-        try out.writeInt(u32, @intCast(map_blob.len), .little);
+        try Writer.appendU32(header_list, @intCast(sources_paths.items.len));
+        try Writer.appendU32(header_list, @intCast(map_blob.len));
 
         const string_payload_start_location = @sizeOf(u32) +
             @sizeOf(u32) +
@@ -1496,8 +1502,8 @@ pub const StandaloneModuleGraph = struct {
                 .offset = @intCast(offset + string_payload_start_location),
                 .length = @intCast(string_payload.items.len - offset),
             };
-            try out.writeInt(u32, slice.offset, .little);
-            try out.writeInt(u32, slice.length, .little);
+            try Writer.appendU32(header_list, slice.offset);
+            try Writer.appendU32(header_list, slice.length);
         }
 
         for (sources_content.items.slice()) |item| {
@@ -1523,11 +1529,11 @@ pub const StandaloneModuleGraph = struct {
                 .offset = @intCast(offset + string_payload_start_location),
                 .length = @intCast(string_payload.items.len - offset),
             };
-            try out.writeInt(u32, slice.offset, .little);
-            try out.writeInt(u32, slice.length, .little);
+            try Writer.appendU32(header_list, slice.offset);
+            try Writer.appendU32(header_list, slice.length);
         }
 
-        try out.writeAll(map_blob);
+        try header_list.appendSlice(map_blob);
 
         bun.assert(header_list.items.len == string_payload_start_location);
     }

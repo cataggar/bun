@@ -2357,9 +2357,9 @@ const CompilerRT = struct {
         defer bunCC.close(io);
 
         inline for (comptime std.meta.declarations(compiler_rt_sources)) |decl| {
-            const source = @field(compiler_rt_sources, decl.name);
+            const source = @field(compiler_rt_sources, decl);
             bunCC.writeFile(io, .{
-                .sub_path = decl.name,
+                .sub_path = decl,
                 .data = source,
             }) catch {};
         }

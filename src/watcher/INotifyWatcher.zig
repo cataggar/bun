@@ -97,7 +97,8 @@ pub fn init(this: *INotifyWatcher, _: []const u8) !void {
     this.coalesce_interval = std.math.cast(isize, bun.env_var.BUN_INOTIFY_COALESCE_INTERVAL.get()) orelse 100_000;
 
     // TODO: convert to bun.sys.Error
-    this.fd = .fromNative(try std.posix.inotify_init1(IN.CLOEXEC));
+    const rc = system.inotify_init1(IN.CLOEXEC);
+    this.fd = try (bun.sys.Maybe(bun.FD).errnoSys(rc, .watch) orelse .{ .result = bun.FD.fromNative(@intCast(rc)) }).unwrap();
     this.eventlist_bytes = &(try bun.default_allocator.alignedAlloc(EventListBytes, .of(Event), 1))[0];
     log("{f} init", .{this.fd});
 }

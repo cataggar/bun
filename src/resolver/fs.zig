@@ -481,7 +481,7 @@ pub const FileSystem = struct {
             parts,
             .loose,
         );
-        return try allocator.dupeZ(u8, joined);
+        return try bun.dupeZ(allocator, u8, joined);
     }
 
     pub fn abs(f: *@This(), parts: anytype) string {
@@ -629,7 +629,7 @@ pub const FileSystem = struct {
                         handle.stdDir(),
 
                         void,
-                        void{},
+                        {},
                     ) catch |err| {
                         existing.entries.data.clearAndFree(bun.default_allocator);
                         return this.readDirectoryError(existing.entries.dir, err) catch unreachable;
@@ -973,8 +973,9 @@ pub const FileSystem = struct {
             errdefer dir.deinit(allocator);
 
             if (store_fd) {
-                FileSystem.setMaxFd(handle.fd);
-                dir.fd = .fromStdDir(handle);
+                const dir_fd = bun.FD.fromStdDir(handle);
+                FileSystem.setMaxFd(dir_fd.native());
+                dir.fd = dir_fd;
             }
 
             while (try iter.next().unwrap()) |*_entry| {
@@ -983,7 +984,7 @@ pub const FileSystem = struct {
                 try dir.addEntry(prev_map, _entry, allocator, Iterator, iterator);
             }
 
-            debug("readdir({f}, {s}) = {d}", .{ printHandle(handle.fd), _dir, dir.data.count() });
+            debug("readdir({f}, {s}) = {d}", .{ printHandle(handle.handle), _dir, dir.data.count() });
 
             return dir;
         }
@@ -1259,7 +1260,7 @@ pub const FileSystem = struct {
                         return err;
                     };
                     if (read_count + 1 < buf.len) {
-                        const allocation = try allocator.dupeZ(u8, buf[0..read_count]);
+                        const allocation = try bun.dupeZ(allocator, u8, buf[0..read_count]);
                         file_contents = allocation[0..read_count];
 
                         if (strings.BOM.detect(file_contents)) |bom| {
@@ -1324,22 +1325,22 @@ pub const FileSystem = struct {
             var symlink: []const u8 = "";
 
             if (is_symlink) {
-                var file = try if (existing_fd != 0)
-                    std.Io.File{ .handle = existing_fd }
+                var file: bun.sys.File = if (existing_fd.unwrapValid()) |valid|
+                    bun.sys.File.from(valid)
                 else if (store_fd)
-                    std.fs.openFileAbsoluteZ(absolute_path, .{ .mode = .read_only })
+                    try bun.sys.File.open(absolute_path, bun.O.RDONLY, 0).unwrap()
                 else
-                    bun.openFileForPath(absolute_path);
-                setMaxFd(file.handle);
+                    bun.sys.File.from(try bun.openFileForPath(absolute_path));
+                setMaxFd(file.handle.native());
 
                 defer {
-                    if ((!store_fd or fs.needToCloseFiles()) and existing_fd == 0) {
+                    if ((!store_fd or fs.needToCloseFiles()) and !existing_fd.isValid()) {
                         file.close();
                     } else if (comptime FeatureFlags.store_file_descriptors) {
                         cache.fd = file.handle;
                     }
                 }
-                const _stat = try file.stat(bun.blockingIo());
+                const _stat = try file.handle.stdFile().stat(bun.blockingIo());
 
                 symlink = try bun.getFdPath(file.handle, &outpath);
 
@@ -1469,7 +1470,7 @@ pub const FileSystem = struct {
                         cache.fd = file;
                     }
                 }
-                const file_stat = try file.stdFile().stat();
+                const file_stat = try file.stdFile().stat(bun.blockingIo());
                 symlink = try file.getFdPath(&outpath);
                 file_kind = file_stat.kind;
             }

@@ -608,7 +608,7 @@ pub const Loader = struct {
         comptime suffix: DotEnvFileSuffix,
         skip_default_env: bool,
     ) !void {
-        const start = std.time.nanoTimestamp();
+        const start = bun.SystemTimer.nanoTimestamp();
 
         // Create a reusable buffer with stack fallback for parsing multiple files
         var stack_fallback = bun.stackFallback(4096, this.allocator);
@@ -733,7 +733,7 @@ pub const Loader = struct {
             this.custom_files_loaded.count();
 
         if (count == 0) return;
-        const elapsed = @as(f64, @floatFromInt((std.time.nanoTimestamp() - start))) / std.time.ns_per_ms;
+        const elapsed = @as(f64, @floatFromInt((bun.SystemTimer.nanoTimestamp() - start))) / std.time.ns_per_ms;
 
         const all = [_]string{
             ".env.development.local",
@@ -817,33 +817,24 @@ pub const Loader = struct {
                 },
             }
         };
-        defer file.close();
+        const io = bun.blockingIo();
+        defer file.close(io);
 
-        const end = brk: {
-            if (comptime Environment.isWindows) {
-                const pos = try file.getEndPos();
-                if (pos == 0) {
-                    @field(this, base) = logger.Source.initPathString(base, "");
-                    return;
-                }
-
-                break :brk pos;
-            }
-
-            const stat = try file.stat();
+        const end: usize = brk: {
+            const stat = try file.stat(io);
 
             if (stat.size == 0 or stat.kind != .file) {
                 @field(this, base) = logger.Source.initPathString(base, "");
                 return;
             }
 
-            break :brk stat.size;
+            break :brk @intCast(stat.size);
         };
 
         var buf = try this.allocator.alloc(u8, end + 1);
         errdefer this.allocator.free(buf);
-        const amount_read = file.readAll(buf[0..end]) catch |err| switch (err) {
-            error.Unexpected, error.SystemResources, error.OperationAborted, error.BrokenPipe, error.AccessDenied, error.IsDir => {
+        const amount_read = file.readPositionalAll(io, buf[0..end], 0) catch |err| switch (err) {
+            error.Unexpected, error.SystemResources, error.Canceled, error.InputOutput, error.AccessDenied, error.IsDir => {
                 if (!this.quiet) {
                     Output.prettyErrorln("<r><red>{s}<r> error loading {s} file", .{ @errorName(err), base });
                 }
@@ -890,33 +881,24 @@ pub const Loader = struct {
             try this.custom_files_loaded.put(file_path, logger.Source.initPathString(file_path, ""));
             return;
         };
-        defer file.close();
+        const io = bun.blockingIo();
+        defer file.close(io);
 
-        const end = brk: {
-            if (comptime Environment.isWindows) {
-                const pos = try file.getEndPos();
-                if (pos == 0) {
-                    try this.custom_files_loaded.put(file_path, logger.Source.initPathString(file_path, ""));
-                    return;
-                }
-
-                break :brk pos;
-            }
-
-            const stat = try file.stat();
+        const end: usize = brk: {
+            const stat = try file.stat(io);
 
             if (stat.size == 0 or stat.kind != .file) {
                 try this.custom_files_loaded.put(file_path, logger.Source.initPathString(file_path, ""));
                 return;
             }
 
-            break :brk stat.size;
+            break :brk @intCast(stat.size);
         };
 
         var buf = try this.allocator.alloc(u8, end + 1);
         errdefer this.allocator.free(buf);
-        const amount_read = file.readAll(buf[0..end]) catch |err| switch (err) {
-            error.Unexpected, error.SystemResources, error.OperationAborted, error.BrokenPipe, error.AccessDenied, error.IsDir => {
+        const amount_read = file.readPositionalAll(io, buf[0..end], 0) catch |err| switch (err) {
+            error.Unexpected, error.SystemResources, error.Canceled, error.InputOutput, error.AccessDenied, error.IsDir => {
                 if (!this.quiet) {
                     Output.prettyErrorln("<r><red>{s}<r> error loading {s} file", .{ @errorName(err), file_path });
                 }

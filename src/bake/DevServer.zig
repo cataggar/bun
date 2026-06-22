@@ -1627,12 +1627,14 @@ fn generateJavaScriptCodeForHTMLFile(
     var sfa_state = bun.stackFallback(65536, dev.allocator());
     const sfa = sfa_state.get();
     var array = bun.handleOom(std.ArrayListUnmanaged(u8).initCapacity(sfa, 65536));
-    defer array.deinit(sfa);
-    const w = array.writer(sfa);
+    errdefer array.deinit(sfa);
+    var allocating_writer = std.Io.Writer.Allocating.fromArrayList(sfa, &array);
+    errdefer allocating_writer.deinit();
+    const w = &allocating_writer.writer;
 
-    try w.writeAll("  ");
-    try bun.js_printer.writeJSONString(input_file_sources[index.get()].path.pretty, @TypeOf(w), w, .utf8);
-    try w.writeAll(": [ [");
+    w.writeAll("  ") catch return error.OutOfMemory;
+    bun.js_printer.writeJSONString(input_file_sources[index.get()].path.pretty, @TypeOf(w), w, .utf8) catch return error.OutOfMemory;
+    w.writeAll(": [ [") catch return error.OutOfMemory;
     var any = false;
     for (import_records[index.get()].slice()) |import| {
         if (import.source_index.isValid()) {
@@ -1646,22 +1648,25 @@ fn generateJavaScriptCodeForHTMLFile(
         }
         if (!any) {
             any = true;
-            try w.writeAll("\n");
+            w.writeAll("\n") catch return error.OutOfMemory;
         }
-        try w.writeAll("    ");
-        try bun.js_printer.writeJSONString(import.path.pretty, @TypeOf(w), w, .utf8);
-        try w.writeAll(", 0,\n");
+        w.writeAll("    ") catch return error.OutOfMemory;
+        bun.js_printer.writeJSONString(import.path.pretty, @TypeOf(w), w, .utf8) catch return error.OutOfMemory;
+        w.writeAll(", 0,\n") catch return error.OutOfMemory;
     }
     if (any) {
-        try w.writeAll("  ");
+        w.writeAll("  ") catch return error.OutOfMemory;
     }
-    try w.writeAll("], [], [], () => {}, false],\n");
+    w.writeAll("], [], [], () => {}, false],\n") catch return error.OutOfMemory;
 
+    array = allocating_writer.toArrayList();
     // Avoid-recloning if it is was moved to the heap
-    return if (array.items.ptr == &sfa_state.buffer)
-        try dev.allocator().dupe(u8, array.items)
-    else
-        array.items;
+    if (array.items.ptr == &sfa_state.buffer) {
+        defer array.deinit(sfa);
+        return try dev.allocator().dupe(u8, array.items);
+    }
+
+    return array.items;
 }
 
 pub fn onJsRequestWithBundle(dev: *DevServer, bundle_index: RouteBundle.Index, resp: AnyResponse, method: bun.http.Method) void {
@@ -1986,17 +1991,16 @@ fn indexFailures(dev: *DevServer) !void {
         var payload = try std.array_list.Managed(u8).initCapacity(sfa, total_len);
         defer payload.deinit();
         payload.appendAssumeCapacity(MessageId.errors.char());
-        const w = payload.writer();
 
-        try w.writeInt(u32, @intCast(dev.incremental_result.failures_removed.items.len), .little);
+        try appendInt(&payload, u32, @intCast(dev.incremental_result.failures_removed.items.len));
 
         for (dev.incremental_result.failures_removed.items) |removed| {
-            try w.writeInt(u32, @bitCast(removed.getOwner().encode()), .little);
+            try appendInt(&payload, u32, @bitCast(removed.getOwner().encode()));
             removed.deinit(dev);
         }
 
         for (dev.incremental_result.failures_added.items) |added| {
-            try w.writeAll(added.data);
+            try payload.appendSlice(added.data);
 
             switch (added.getOwner()) {
                 .none, .route => unreachable,
@@ -2026,12 +2030,11 @@ fn indexFailures(dev: *DevServer) !void {
         var payload = try std.array_list.Managed(u8).initCapacity(sfa, @sizeOf(MessageId) + @sizeOf(u32) + dev.incremental_result.failures_removed.items.len * @sizeOf(u32));
         defer payload.deinit();
         payload.appendAssumeCapacity(MessageId.errors.char());
-        const w = payload.writer();
 
-        try w.writeInt(u32, @intCast(dev.incremental_result.failures_removed.items.len), .little);
+        try appendInt(&payload, u32, @intCast(dev.incremental_result.failures_removed.items.len));
 
         for (dev.incremental_result.failures_removed.items) |removed| {
-            try w.writeInt(u32, @bitCast(removed.getOwner().encode()), .little);
+            try appendInt(&payload, u32, @bitCast(removed.getOwner().encode()));
             removed.deinit(dev);
         }
 
@@ -2622,11 +2625,8 @@ pub fn finalizeBundle(
     defer hot_update_payload.deinit();
     hot_update_payload.appendAssumeCapacity(MessageId.hot_update.char());
 
-    // The writer used for the hot_update payload
-    const w = hot_update_payload.writer();
-
     // It was discovered that if a tree falls with nobody around it, it does not
-    // make any sound. Let's avoid writing into `w` if no sockets are open.
+    // make any sound. Let's avoid appending payloads if no sockets are open.
     const hot_update_subscribers = dev.numSubscribers(.hot_update);
     const will_hear_hot_update = hot_update_subscribers > 0;
 
@@ -2664,10 +2664,10 @@ pub fn finalizeBundle(
         while (it.next()) |bundled_route_index| {
             const bundle = &dev.route_bundles.items[bundled_route_index];
             if (bundle.active_viewers == 0) continue;
-            try w.writeInt(i32, @intCast(bundled_route_index), .little);
+            try appendInt(&hot_update_payload, i32, @intCast(bundled_route_index));
         }
     }
-    try w.writeInt(i32, -1, .little);
+    try appendInt(&hot_update_payload, i32, -1);
 
     // When client component roots get updated, the `client_components_affected`
     // list contains the server side versions of these roots. These roots are
@@ -2748,7 +2748,7 @@ pub fn finalizeBundle(
                 }
             }
             if (route_bundle.active_viewers == 0 or !will_hear_hot_update) continue;
-            try w.writeInt(i32, @intCast(i), .little);
+            try appendInt(&hot_update_payload, i32, @intCast(i));
 
             // If no edges were changed, then it is impossible to
             // change the list of CSS files.
@@ -2758,30 +2758,30 @@ pub fn finalizeBundle(
                 try dev.traceAllRouteImports(route_bundle, &gts, .find_css);
                 const css_ids = dev.client_graph.current_css_files.items;
 
-                try w.writeInt(i32, @intCast(css_ids.len), .little);
+                try appendInt(&hot_update_payload, i32, @intCast(css_ids.len));
                 for (css_ids) |css_id| {
-                    try w.writeAll(&std.fmt.bytesToHex(std.mem.asBytes(&css_id), .lower));
+                    try hot_update_payload.appendSlice(&std.fmt.bytesToHex(std.mem.asBytes(&css_id), .lower));
                 }
             } else {
-                try w.writeInt(i32, -1, .little);
+                try appendInt(&hot_update_payload, i32, -1);
             }
         }
     }
-    try w.writeInt(i32, -1, .little);
+    try appendInt(&hot_update_payload, i32, -1);
 
     const css_chunks = result.cssChunks();
     if (will_hear_hot_update) {
         if (dev.client_graph.current_chunk_len > 0 or css_chunks.len > 0) {
             // Send CSS mutations
             const asset_values = dev.assets.files.values();
-            try w.writeInt(u32, @intCast(css_chunks.len), .little);
+            try appendInt(&hot_update_payload, u32, @intCast(css_chunks.len));
             const sources = bv2.graph.input_files.items(.source);
             for (css_chunks) |chunk| {
                 const key = sources[chunk.entry_point.source_index].path.keyForIncrementalGraph();
-                try w.writeAll(&std.fmt.bytesToHex(std.mem.asBytes(&bun.hash(key)), .lower));
+                try hot_update_payload.appendSlice(&std.fmt.bytesToHex(std.mem.asBytes(&bun.hash(key)), .lower));
                 const css_data = asset_values[chunk.entry_point.entry_point_id].blob.InternalBlob.bytes.items;
-                try w.writeInt(u32, @intCast(css_data.len), .little);
-                try w.writeAll(css_data);
+                try appendInt(&hot_update_payload, u32, @intCast(css_data.len));
+                try hot_update_payload.appendSlice(css_data);
             }
 
             // Send the JS chunk
@@ -2824,7 +2824,7 @@ pub fn finalizeBundle(
                     },
                     .shared => |entry| entry,
                 };
-                try w.writeInt(u32, entry.overlapping_memory_cost, .little);
+                try appendInt(&hot_update_payload, u32, entry.overlapping_memory_cost);
 
                 // Build and send the source chunk
                 try dev.client_graph.takeJSBundleToList(&hot_update_payload, &.{
@@ -2834,7 +2834,7 @@ pub fn finalizeBundle(
                 });
             }
         } else {
-            try w.writeInt(i32, 0, .little);
+            try appendInt(&hot_update_payload, i32, 0);
         }
 
         dev.publish(.hot_update, hot_update_payload.items, .binary);
@@ -3268,6 +3268,9 @@ fn getOrPutRouteBundle(dev: *DevServer, route: RouteBundle.UnresolvedIndex) !Rou
     const bundle_index = RouteBundle.Index.init(@intCast(dev.route_bundles.items.len));
 
     try dev.route_bundles.ensureUnusedCapacity(dev.allocator(), 1);
+    var random_source: std.Random.IoSource = .{ .io = bun.blockingIo() };
+    const client_script_generation = random_source.interface().int(u32);
+
     dev.route_bundles.appendAssumeCapacity(.{
         .data = switch (route) {
             .framework => |route_index| .{ .framework = .{
@@ -3292,7 +3295,7 @@ fn getOrPutRouteBundle(dev: *DevServer, route: RouteBundle.UnresolvedIndex) !Rou
                 } };
             },
         },
-        .client_script_generation = std.crypto.random.int(u32),
+        .client_script_generation = client_script_generation,
         .server_state = .unqueued,
         .client_bundle = null,
         .active_viewers = 0,
@@ -3428,6 +3431,12 @@ fn sendBuiltInNotFound(resp: anytype) void {
     resp.end(message, true);
 }
 
+fn appendInt(buf: *std.array_list.Managed(u8), comptime T: type, value: T) !void {
+    var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+    std.mem.writeInt(std.math.ByteAlignedInt(T), &bytes, value, .little);
+    try buf.appendSlice(&bytes);
+}
+
 fn printMemoryLine(dev: *DevServer) void {
     if (comptime !AllocationScope.enabled) {
         return;
@@ -3514,15 +3523,15 @@ pub const IncrementalResult = struct {
     failures_added: ArrayListUnmanaged(SerializedFailure),
 
     pub const empty: IncrementalResult = .{
-        .framework_routes_affected = .{},
-        .html_routes_soft_affected = .{},
-        .html_routes_hard_affected = .{},
+        .framework_routes_affected = .empty,
+        .html_routes_soft_affected = .empty,
+        .html_routes_hard_affected = .empty,
         .had_adjusted_edges = false,
-        .failures_removed = .{},
-        .failures_added = .{},
-        .client_components_added = .{},
-        .client_components_removed = .{},
-        .client_components_affected = .{},
+        .failures_removed = .empty,
+        .failures_added = .empty,
+        .client_components_added = .empty,
+        .client_components_removed = .empty,
+        .client_components_affected = .empty,
     };
 
     fn reset(result: *IncrementalResult) void {
@@ -3706,68 +3715,52 @@ pub fn emitMemoryVisualizerMessage(dev: *DevServer) void {
 }
 
 pub fn writeMemoryVisualizerMessage(dev: *DevServer, payload: *std.array_list.Managed(u8)) !void {
-    const w = payload.writer();
-    const Fields = extern struct {
-        incremental_graph_client: u32,
-        incremental_graph_server: u32,
-        js_code: u32,
-        source_maps: u32,
-        assets: u32,
-        other: u32,
-        devserver_tracked: u32,
-        process_used: u32,
-        system_used: u32,
-        system_total: u32,
-    };
     const cost = dev.memoryCostDetailed();
     const system_total = bun.api.node.os.totalmem();
-    try w.writeStruct(Fields{
-        .incremental_graph_client = @truncate(cost.incremental_graph_client),
-        .incremental_graph_server = @truncate(cost.incremental_graph_server),
-        .js_code = @truncate(cost.js_code),
-        .source_maps = @truncate(cost.source_maps),
-        .assets = @truncate(cost.assets),
-        .other = @truncate(cost.other),
-        .devserver_tracked = if (comptime AllocationScope.enabled)
-            @truncate(dev.allocation_scope.stats().total_memory_allocated)
-        else
-            0,
-        .process_used = @truncate(bun.sys.selfProcessMemoryUsage() orelse 0),
-        .system_used = @truncate(system_total -| bun.api.node.os.freemem()),
-        .system_total = @truncate(system_total),
-    });
+    try appendInt(payload, u32, @truncate(cost.incremental_graph_client));
+    try appendInt(payload, u32, @truncate(cost.incremental_graph_server));
+    try appendInt(payload, u32, @truncate(cost.js_code));
+    try appendInt(payload, u32, @truncate(cost.source_maps));
+    try appendInt(payload, u32, @truncate(cost.assets));
+    try appendInt(payload, u32, @truncate(cost.other));
+    try appendInt(payload, u32, if (comptime AllocationScope.enabled)
+        @truncate(dev.allocation_scope.stats().total_memory_allocated)
+    else
+        0);
+    try appendInt(payload, u32, @truncate(bun.sys.selfProcessMemoryUsage() orelse 0));
+    try appendInt(payload, u32, @truncate(system_total -| bun.api.node.os.freemem()));
+    try appendInt(payload, u32, @truncate(system_total));
 
     // SourceMapStore is easy to leak refs in.
     {
         const keys = dev.source_maps.entries.keys();
         const values = dev.source_maps.entries.values();
-        try w.writeInt(u32, @intCast(keys.len), .little);
+        try appendInt(payload, u32, @intCast(keys.len));
         for (keys, values) |key, value| {
             bun.assert(value.ref_count > 0);
-            try w.writeAll(std.mem.asBytes(&key.get()));
-            try w.writeInt(u32, value.ref_count, .little);
+            try payload.appendSlice(std.mem.asBytes(&key.get()));
+            try appendInt(payload, u32, value.ref_count);
             if (dev.source_maps.locateWeakRef(key)) |entry| {
-                try w.writeInt(u32, entry.ref.count, .little);
+                try appendInt(payload, u32, entry.ref.count);
                 // floats are easier to decode in JS
-                try w.writeAll(std.mem.asBytes(&@as(f64, @floatFromInt(entry.ref.expire))));
+                try payload.appendSlice(std.mem.asBytes(&@as(f64, @floatFromInt(entry.ref.expire))));
             } else {
-                try w.writeInt(u32, 0, .little);
+                try appendInt(payload, u32, 0);
             }
-            try w.writeInt(u32, @truncate(value.files.len), .little);
-            try w.writeInt(u32, value.overlapping_memory_cost, .little);
+            try appendInt(payload, u32, @truncate(value.files.len));
+            try appendInt(payload, u32, value.overlapping_memory_cost);
         }
     }
 }
 
 pub fn writeVisualizerMessage(dev: *DevServer, payload: *std.array_list.Managed(u8)) !void {
     payload.appendAssumeCapacity(MessageId.visualizer.char());
-    const w = payload.writer();
 
     inline for (
         [2]bake.Side{ .client, .server },
         .{ &dev.client_graph, &dev.server_graph },
     ) |side, g| {
-        try w.writeInt(u32, @intCast(g.bundled_files.count()), .little);
+        try appendInt(payload, u32, @intCast(g.bundled_files.count()));
         for (
             g.bundled_files.keys(),
             g.bundled_files.values(),
@@ -3777,18 +3770,18 @@ pub fn writeVisualizerMessage(dev: *DevServer, payload: *std.array_list.Managed(
             const relative_path_buf = bun.path_buffer_pool.get();
             defer bun.path_buffer_pool.put(relative_path_buf);
             const normalized_key = dev.relativePath(relative_path_buf, k);
-            try w.writeInt(u32, @intCast(normalized_key.len), .little);
+            try appendInt(payload, u32, @intCast(normalized_key.len));
             if (k.len == 0) continue;
-            try w.writeAll(normalized_key);
-            try w.writeByte(@intFromBool(g.stale_files.isSetAllowOutOfBound(i, true) or file.failed));
-            try w.writeByte(@intFromBool(side == .server and file.is_rsc));
-            try w.writeByte(@intFromBool(side == .server and file.is_ssr));
-            try w.writeByte(@intFromBool(switch (side) {
+            try payload.appendSlice(normalized_key);
+            try payload.append(@intFromBool(g.stale_files.isSetAllowOutOfBound(i, true) or file.failed));
+            try payload.append(@intFromBool(side == .server and file.is_rsc));
+            try payload.append(@intFromBool(side == .server and file.is_ssr));
+            try payload.append(@intFromBool(switch (side) {
                 .server => file.is_route,
                 .client => file.html_route_bundle_index != null,
             }));
-            try w.writeByte(@intFromBool(side == .client and file.is_special_framework_file));
-            try w.writeByte(@intFromBool(switch (side) {
+            try payload.append(@intFromBool(side == .client and file.is_special_framework_file));
+            try payload.append(@intFromBool(switch (side) {
                 .server => file.is_client_component_boundary,
                 .client => file.is_hmr_root,
             }));
@@ -3797,13 +3790,13 @@ pub fn writeVisualizerMessage(dev: *DevServer, payload: *std.array_list.Managed(
     inline for (.{ &dev.client_graph, &dev.server_graph }) |g| {
         const G = @TypeOf(g.*);
 
-        try w.writeInt(u32, @intCast(g.edges.items.len - g.edges_free_list.items.len), .little);
+        try appendInt(payload, u32, @intCast(g.edges.items.len - g.edges_free_list.items.len));
         for (g.edges.items, 0..) |edge, i| {
             if (std.mem.indexOfScalar(G.EdgeIndex, g.edges_free_list.items, G.EdgeIndex.init(@intCast(i))) != null)
                 continue;
 
-            try w.writeInt(u32, @intCast(edge.dependency.get()), .little);
-            try w.writeInt(u32, @intCast(edge.imported.get()), .little);
+            try appendInt(payload, u32, @intCast(edge.dependency.get()));
+            try appendInt(payload, u32, @intCast(edge.imported.get()));
         }
     }
 }
@@ -4447,10 +4440,10 @@ const UnrefSourceMapRequest = struct {
 };
 
 pub fn readString32(reader: anytype, alloc: Allocator) ![]const u8 {
-    const len = try reader.readInt(u32, .little);
+    const len = try reader.takeInt(u32, .little);
     const memory = try alloc.alloc(u8, len);
     errdefer alloc.free(memory);
-    try reader.readNoEof(memory);
+    try reader.readSliceAll(memory);
     return memory;
 }
 

@@ -251,14 +251,4 @@ const debug = DevServer.debug;
 const std = @import("std");
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
-const Timer = struct {
-    started_at: std.Io.Clock.Timestamp,
-
-    pub fn start() !Timer {
-        return .{ .started_at = std.Io.Clock.Timestamp.now(bun.blockingIo(), .awake) };
-    }
-
-    pub fn read(this: *Timer) u64 {
-        return @intCast(@max(@as(i96, 0), this.started_at.untilNow(bun.blockingIo()).raw.nanoseconds));
-    }
-};
+const Timer = bun.SystemTimer.Timer;

@@ -122,14 +122,14 @@ pub const Lazy = union(enum) {
                 return .{ .err = .fromCode(.ISDIR, .fstat) };
             }
 
-            if (bun.S.ISREG(stat.mode)) {
+            if (bun.S.ISREG(@intCast(stat.mode))) {
                 is_nonblocking = false;
             }
 
-            this.pollable = bun.sys.isPollable(stat.mode) or is_nonblocking or (file.is_atty orelse false);
-            this.file_type = if (bun.S.ISFIFO(stat.mode))
+            this.pollable = bun.sys.isPollable(@intCast(stat.mode)) or is_nonblocking or (file.is_atty orelse false);
+            this.file_type = if (bun.S.ISFIFO(@intCast(stat.mode)))
                 .pipe
-            else if (bun.S.ISSOCK(stat.mode))
+            else if (bun.S.ISSOCK(@intCast(stat.mode)))
                 .socket
             else
                 .file;

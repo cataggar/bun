@@ -2221,7 +2221,7 @@ pub const BundleV2 = struct {
         {
             // We do this first to make it harder for any dangling pointers to data to be used in there.
             var on_parse_finalizers = this.finalizers;
-            this.finalizers = .{};
+            this.finalizers = .empty;
             for (on_parse_finalizers.items) |finalizer| {
                 finalizer.call();
             }
@@ -4368,7 +4368,8 @@ pub const DevServerOutput = struct {
 };
 
 pub fn generateUniqueKey() u64 {
-    const key = std.crypto.random.int(u64) & @as(u64, 0x0FFFFFFF_FFFFFFFF);
+    var random_source: std.Random.IoSource = .{ .io = bun.blockingIo() };
+    const key = random_source.interface().int(u64) & @as(u64, 0x0FFFFFFF_FFFFFFFF);
     // without this check, putting unique_key in an object key would
     // sometimes get converted to an identifier. ensuring it starts
     // with a number forces that optimization off.

@@ -2602,7 +2602,7 @@ pub fn renameatConcurrentlyWithoutFallback(
             var to_dir = to_dir_fd.stdDir();
             to_dir.deleteTree(bun.blockingIo(), to) catch {};
         } else {
-            std.fs.deleteTreeAbsolute(to) catch {};
+            bun.FD.cwd().stdDir().deleteTree(bun.blockingIo(), to) catch {};
         }
         switch (renameat(from_dir_fd, from, to_dir_fd, to)) {
             .err => |err| {
@@ -4447,7 +4447,7 @@ pub fn copyFileZSlowWithHandle(in_handle: bun.FD, to_dir: bun.FD, destination: [
 
         if (comptime Environment.isPosix) {
             _ = bun.c.fchmod(out_handle.cast(), @intCast(stat_.mode));
-            _ = bun.c.fchown(out_handle.cast(), stat_.uid, stat_.gid);
+            _ = bun.sys.fchown(out_handle, @intCast(stat_.uid), @intCast(stat_.gid));
         }
 
         return .success;

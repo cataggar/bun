@@ -1005,12 +1005,11 @@ fn fetchImpl(
     if (url_type != .remote) {
         defer unix_socket_path.deinit();
         var path_buf: bun.PathBuffer = undefined;
-        const PercentEncoding = @import("../../url/url.zig").PercentEncoding;
         var path_buf2: bun.PathBuffer = undefined;
-        var stream = std.io.fixedBufferStream(&path_buf2);
-        var url_path_decoded = path_buf2[0 .. PercentEncoding.decode(
-            @TypeOf(&stream.writer()),
-            &stream.writer(),
+        var writer: std.Io.Writer = .fixed(&path_buf2);
+        const decoded_len: usize = @intCast(PercentEncoding.decode(
+            @TypeOf(&writer),
+            &writer,
             switch (url_type) {
                 .file => url.path,
                 .blob => url.href["blob:".len..],
@@ -1018,7 +1017,8 @@ fn fetchImpl(
             },
         ) catch |err| {
             return globalThis.throwError(err, "Failed to decode file url");
-        }];
+        });
+        var url_path_decoded = path_buf2[0..decoded_len];
         var url_string: bun.String = bun.String.empty;
         defer url_string.deref();
         // This can be a blob: url or a file: url.
@@ -1162,11 +1162,9 @@ fn fetchImpl(
 
             if (proxy == null and bun.http.SendFile.isEligible(url)) {
                 use_sendfile: {
-                    const stat: bun.Stat = switch (bun.sys.fstat(opened_fd)) {
-                        .result => |result| result,
-                        // bail out for any reason
-                        .err => break :use_sendfile,
-                    };
+                    const stat_maybe = bun.sys.fstat(opened_fd);
+                    if (stat_maybe == .err) break :use_sendfile;
+                    const stat: bun.Stat = stat_maybe.result;
 
                     if (Environment.isMac) {
                         // macOS only supports regular files for sendfile()
@@ -1495,6 +1493,7 @@ const string = []const u8;
 const std = @import("std");
 const DataURL = @import("../../resolver/data_url.zig").DataURL;
 const Method = @import("../../http_types/Method.zig").Method;
+const PercentEncoding = @import("../../url/url.zig").PercentEncoding;
 const ZigURL = @import("../../url/url.zig").URL;
 
 const bun = @import("bun");

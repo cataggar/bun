@@ -745,7 +745,7 @@ pub fn migrateNPMLockfile(
                         break :peer_dep_meta expr.data.e_object;
                     } else null
                 else
-                    void{};
+                    {};
 
                 if (deps.data != .e_object) return error.InvalidNPMLockfile;
                 const properties = deps.data.e_object.properties;

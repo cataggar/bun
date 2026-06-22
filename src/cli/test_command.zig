@@ -892,7 +892,7 @@ pub const CommandLineReporter = struct {
 
                                 var unmanaged = concatenated_describe_scopes.moveToUnmanaged();
                                 var writer = std.Io.Writer.Allocating.fromArrayList(allocator, &unmanaged);
-                                bun.handleOom(escapeXml(name, &writer.writer));
+                                escapeXml(name, &writer.writer) catch bun.outOfMemory();
                                 var owned = writer.toArrayList();
                                 concatenated_describe_scopes = owned.toManaged(allocator);
                             };

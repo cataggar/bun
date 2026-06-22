@@ -71,7 +71,7 @@ pub fn BoundedArrayAligned(
         /// Does not initialize added items if any.
         pub fn resize(self: *Self, len: usize) error{Overflow}!void {
             if (len > buffer_capacity) return error.Overflow;
-            self.len = len;
+            self.len = @intCast(len);
         }
 
         /// Remove all elements from the slice.

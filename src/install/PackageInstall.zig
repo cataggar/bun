@@ -891,14 +891,21 @@ pub const PackageInstall = struct {
                                 bun.MakePath.makePath(std.meta.Elem(@TypeOf(entry.path)), destination_dir, entry.path) catch {};
                             },
                             .file => {
-                                std.posix.linkatZ(entry.dir.cast(), entry.basename, destination_dir.handle, entry.path, 0) catch |err| {
-                                    if (err != error.PathAlreadyExists) {
-                                        return err;
-                                    }
+                                const destination_fd = bun.FD.fromStdDir(destination_dir);
+                                switch (bun.sys.linkatZ(entry.dir, entry.basename, destination_fd, entry.path)) {
+                                    .result => {},
+                                    .err => |err| {
+                                        if (err.getErrno() != .EXIST) {
+                                            return err.toZigErr();
+                                        }
 
-                                    std.posix.unlinkatZ(destination_dir.handle, entry.path, 0) catch {};
-                                    try std.posix.linkatZ(entry.dir.cast(), entry.basename, destination_dir.handle, entry.path, 0);
-                                };
+                                        _ = bun.sys.unlinkat(destination_fd, entry.path);
+                                        switch (bun.sys.linkatZ(entry.dir, entry.basename, destination_fd, entry.path)) {
+                                            .result => {},
+                                            .err => |link_err| return link_err.toZigErr(),
+                                        }
+                                    },
+                                }
 
                                 real_file_count += 1;
                             },

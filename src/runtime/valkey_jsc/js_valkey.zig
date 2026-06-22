@@ -1151,7 +1151,7 @@ pub const JSValkeyClient = struct {
         this.client.socket = try this.client.address.connect(&this.client, group, ssl_ctx, is_tls);
     }
 
-    pub fn send(this: *JSValkeyClient, globalThis: *jsc.JSGlobalObject, _: JSValue, command: *const Command) !*jsc.JSPromise {
+    pub fn send(this: *JSValkeyClient, globalThis: *jsc.JSGlobalObject, _: JSValue, command: *const Command) protocol.RedisError!*jsc.JSPromise {
         if (this.client.flags.needs_to_open_socket) {
             @branchHint(.unlikely);
 
@@ -1169,7 +1169,10 @@ pub const JSValkeyClient = struct {
         }
 
         defer this.updatePollRef();
-        return try this.client.send(globalThis, command);
+        return this.client.send(globalThis, command) catch |err| switch (err) {
+            error.WriteFailed => return error.OutOfMemory,
+            else => |e| return e,
+        };
     }
 
     // Getter for memory cost - useful for diagnostics

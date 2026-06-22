@@ -1312,7 +1312,7 @@ pub const PosixSpawnResult = struct {
                         // That would cause Zombie processes to accumulate.
                         else => {
                             while (true) {
-                                var status: u32 = 0;
+                                var status: i32 = 0;
                                 const rc = std.os.linux.wait4(this.pid, &status, 0, null);
 
                                 switch (bun.sys.getErrno(rc)) {
@@ -2464,7 +2464,7 @@ pub const sync = struct {
                 for (&out) |*array_list| {
                     array_list.clearAndFree();
                 }
-                _ = std.c.kill(process.pid, 1);
+                _ = std.c.kill(process.pid, std.posix.SIG.HUP);
             }
 
             for (out_fds) |fd| {
@@ -2785,7 +2785,7 @@ pub const sync = struct {
             var kmask = linux.sigemptyset();
             linux.sigaddset(&kmask, std.posix.SIG.CHLD);
             const rc = linux.signalfd(-1, &kmask, linux.SFD.CLOEXEC | linux.SFD.NONBLOCK);
-            switch (linux.E.init(rc)) {
+            switch (bun.sys.getErrno(rc)) {
                 .SUCCESS => break :blk bun.FD.fromNative(@intCast(rc)),
                 else => break :blk bun.invalid_fd,
             }
@@ -2814,7 +2814,7 @@ pub const sync = struct {
             _ = std.posix.prctl(.SET_PDEATHSIG, .{0}) catch {};
         }
         defer if (ppid > 1) {
-            _ = std.posix.prctl(.SET_PDEATHSIG, .{std.posix.SIG.KILL}) catch {};
+            _ = std.posix.prctl(.SET_PDEATHSIG, .{@intFromEnum(std.posix.SIG.KILL)}) catch {};
         };
         if (ppid > 1 and std.c.getppid() != ppid)
             bun.Global.exit(bun.ParentDeathWatchdog.exit_code);

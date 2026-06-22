@@ -11,12 +11,26 @@ fn isOomOnlyError(comptime ErrorUnionOrSet: type) bool {
     return true;
 }
 
+fn OomHandledReturn(comptime ArgType: type) type {
+    const arg_info = @typeInfo(ArgType);
+    if (isOomOnlyError(ArgType)) return switch (arg_info) {
+        .error_union => |union_info| union_info.payload,
+        .error_set => noreturn,
+        else => unreachable,
+    };
+
+    return switch (arg_info) {
+        .error_union => |union_info| anyerror!union_info.payload,
+        .error_set => anyerror,
+        else => @compileError("argument must be an error union or error set"),
+    };
+}
+
 /// If `error_union_or_set` is `error.OutOfMemory`, calls `bun.outOfMemory`. Otherwise:
 ///
 /// * If that was the only possible error, returns the non-error payload for error unions, or
 ///   `noreturn` for error sets.
-/// * If other errors are possible, returns the same error union or set, but without
-///   `error.OutOfMemory` in the error set.
+/// * If other errors are possible, returns them in a widened error set.
 ///
 /// Prefer this method over `catch bun.outOfMemory()`, since that could mistakenly catch
 /// non-OOM-related errors.
@@ -29,36 +43,20 @@ fn isOomOnlyError(comptime ErrorUnionOrSet: type) bool {
 /// // option 2:
 /// const thing = allocateThing() catch |err| bun.handleOom(err);
 /// ```
-pub fn handleOom(error_union_or_set: anytype) return_type: {
-    const ArgType = @TypeOf(error_union_or_set);
-    const arg_info = @typeInfo(ArgType);
-    break :return_type if (isOomOnlyError(ArgType)) switch (arg_info) {
-        .error_union => |union_info| union_info.payload,
-        .error_set => noreturn,
-        else => unreachable,
-    } else @TypeOf(blk: {
-        const err = switch (comptime arg_info) {
-            .error_union => if (error_union_or_set) |success| break :blk success else |err| err,
-            .error_set => error_union_or_set,
-            else => unreachable,
-        };
-        break :blk switch (err) {
-            error.OutOfMemory => unreachable,
-            else => |other_error| other_error,
-        };
-    });
-} {
+pub fn handleOom(error_union_or_set: anytype) OomHandledReturn(@TypeOf(error_union_or_set)) {
     const ArgType = @TypeOf(error_union_or_set);
     const err = switch (comptime @typeInfo(ArgType)) {
         .error_union => if (error_union_or_set) |success| return success else |err| err,
         .error_set => error_union_or_set,
         else => unreachable,
     };
-    return if (comptime isOomOnlyError(ArgType))
-        bun.outOfMemory()
-    else switch (err) {
+    if (comptime isOomOnlyError(ArgType)) {
+        bun.outOfMemory();
+    }
+
+    return switch (err) {
         error.OutOfMemory => bun.outOfMemory(),
-        else => |other_error| other_error,
+        else => |other_error| @as(OomHandledReturn(ArgType), other_error),
     };
 }
 

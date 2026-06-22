@@ -66,7 +66,7 @@ var getTemporaryDirectoryOnce = bun.once(struct {
             };
             file.close(bun.blockingIo());
 
-            std.posix.renameatZ(tempdir.handle, tmpname, cache_directory.handle, tmpname) catch |err| {
+            bun.sys.renameat(.fromStdDir(tempdir), tmpname, .fromStdDir(cache_directory), tmpname).unwrap() catch |err| {
                 if (!tried_dot_tmp) {
                     tried_dot_tmp = true;
                     tempdir = cache_directory.createDirPathOpen(bun.blockingIo(), ".tmp", .{}) catch |err2| {
@@ -86,7 +86,7 @@ var getTemporaryDirectoryOnce = bun.once(struct {
                 });
                 Global.crash();
             };
-            cache_directory.deleteFileZ(tmpname) catch {};
+            cache_directory.deleteFile(bun.blockingIo(), tmpname) catch {};
             break;
         }
         if (tried_dot_tmp) {

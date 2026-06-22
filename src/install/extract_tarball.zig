@@ -192,7 +192,7 @@ fn extract(this: *const ExtractTarball, log: *logger.Log, tgz_bytes: []const u8)
             return error.InstallFailed;
         };
 
-        defer extract_destination.close();
+        defer extract_destination.close(bun.blockingIo());
 
         const Archiver = bun.libarchive.Archiver;
         const Zlib = @import("../zlib/zlib.zig");
@@ -480,7 +480,7 @@ pub fn moveToCacheDirectory(
         ) catch unreachable;
         return error.InstallFailed;
     };
-    defer final_dir.close();
+    defer final_dir.close(bun.blockingIo());
     // and get the fd path
     const final_path = bun.getFdPathZ(
         .fromStdDir(final_dir),

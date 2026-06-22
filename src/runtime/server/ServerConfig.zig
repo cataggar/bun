@@ -736,8 +736,8 @@ pub fn fromJS(
                     init_ctx.arena.deinit();
                 }
             } else {
-                bun.debugAssert(init_ctx.arena.state.end_index == 0 and
-                    init_ctx.arena.state.buffer_list.first == null);
+                bun.debugAssert(init_ctx.arena.state.used_list == null and
+                    init_ctx.arena.state.free_list == null);
                 init_ctx.arena.deinit();
             }
         }
