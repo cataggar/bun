@@ -388,7 +388,7 @@ const PackageCollector = struct {
 
             if ((try this.dedupe.getOrPut(dep_pkg_id)).found_existing) continue;
 
-            var pkg_path_buf: std.ArrayList(PackageID) = .{};
+            var pkg_path_buf: std.ArrayList(PackageID) = .empty;
             try pkg_path_buf.append(this.manager.allocator, root_pkg_id);
             try pkg_path_buf.append(this.manager.allocator, dep_pkg_id);
 
@@ -420,7 +420,7 @@ const PackageCollector = struct {
 
                 if ((try this.dedupe.getOrPut(dep_pkg_id)).found_existing) continue;
 
-                var pkg_path_buf: std.ArrayList(PackageID) = .{};
+                var pkg_path_buf: std.ArrayList(PackageID) = .empty;
                 try pkg_path_buf.append(this.manager.allocator, pkg_id);
                 try pkg_path_buf.append(this.manager.allocator, dep_pkg_id);
 
