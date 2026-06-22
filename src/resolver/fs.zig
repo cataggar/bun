@@ -905,7 +905,7 @@ pub const FileSystem = struct {
                 return ModKey{
                     .inode = stat.inode,
                     .size = stat.size,
-                    .mtime = stat.mtime,
+                    .mtime = stat.mtime.toNanoseconds(),
                     .mode = stat.permissions.toMode(),
                     // .uid = stat.
                 };

@@ -418,7 +418,7 @@ pub const BuildCommand = struct {
 
             break :brk build_result.output_files.items;
         };
-        const bundled_end = std.time.nanoTimestamp();
+        const bundled_end = bun.SystemTimer.nanoTimestamp();
 
         var had_err = false;
         dump: {
@@ -598,7 +598,7 @@ pub const BuildCommand = struct {
                     }
                 }
 
-                const compiled_elapsed = @divTrunc(@as(i64, @truncate(std.time.nanoTimestamp() - bundled_end)), @as(i64, std.time.ns_per_ms));
+                const compiled_elapsed = @divTrunc(@as(i64, @truncate(bun.SystemTimer.nanoTimestamp() - bundled_end)), @as(i64, std.time.ns_per_ms));
                 const compiled_elapsed_digit_count: isize = switch (compiled_elapsed) {
                     0...9 => 3,
                     10...99 => 2,
@@ -629,13 +629,13 @@ pub const BuildCommand = struct {
             if (log.errors == 0) {
                 if (this_transpiler.options.transform_only) {
                     Output.prettyln("<green>Transpiled file in {d}ms<r>", .{
-                        @divFloor(std.time.nanoTimestamp() - bun.cli.start_time, std.time.ns_per_ms),
+                        @divFloor(bun.SystemTimer.nanoTimestamp() - bun.cli.start_time, std.time.ns_per_ms),
                     });
                 } else {
                     Output.prettyln("<green>Bundled {d} module{s} in {d}ms<r>", .{
                         reachable_file_count,
                         if (reachable_file_count == 1) "" else "s",
-                        @divFloor(std.time.nanoTimestamp() - bun.cli.start_time, std.time.ns_per_ms),
+                        @divFloor(bun.SystemTimer.nanoTimestamp() - bun.cli.start_time, std.time.ns_per_ms),
                     });
                 }
                 Output.prettyln("\n", .{});
