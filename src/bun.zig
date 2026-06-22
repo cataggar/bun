@@ -2122,9 +2122,9 @@ pub fn openDirForPath(file_path: [:0]const u8) !std.Io.Dir {
     const O_PATH = if (comptime Environment.isLinux) O.PATH else O.RDONLY;
     const flags: u32 = O.CLOEXEC | O.NOCTTY | O.DIRECTORY | O_PATH;
 
-    const fd = try std.posix.openZ(file_path, O.toPacked(flags), 0);
+    const fd = try sys.open(file_path, @bitCast(flags), 0).unwrap();
     return std.Io.Dir{
-        .fd = fd,
+        .handle = fd.cast(),
     };
 }
 

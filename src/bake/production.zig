@@ -331,8 +331,8 @@ pub fn buildWithVm(ctx: bun.cli.Command.Context, cwd: []const u8, vm: *VirtualMa
     Output.prettyErrorln("Rendering routes", .{});
     Output.flush();
 
-    var root_dir = try std.fs.cwd().makeOpenPath("dist", .{});
-    defer root_dir.close();
+    var root_dir = try std.Io.Dir.cwd().createDirPathOpen(bun.blockingIo(), "dist", .{});
+    defer root_dir.close(bun.blockingIo());
 
     var maybe_runtime_file_index: ?u32 = null;
 

@@ -1429,7 +1429,7 @@ pub fn parse(allocator: std.mem.Allocator, ctx: Command.Context, comptime cmd: C
         if (args.option("--metafile")) |metafile| {
             // If --metafile is passed without a value, default to "meta.json"
             ctx.bundler_options.metafile = if (metafile.len > 0)
-                bun.handleOom(allocator.dupeZ(u8, metafile))
+                bun.handleOom(bun.dupeZ(allocator, u8, metafile))
             else
                 "meta.json";
         }
