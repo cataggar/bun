@@ -497,7 +497,7 @@ pub const PublishCommand = struct {
         defer auth_buf.deinit();
 
         if (registry.token.len > 0) {
-            auth_buf.writer().print("Bearer {s}", .{registry.token}) catch return false;
+            auth_buf.print("Bearer {s}", .{registry.token}) catch return false;
             headers.count("authorization", auth_buf.items);
         } else if (registry.auth.len > 0) {
             auth_buf.writer().print("Basic {s}", .{registry.auth}) catch return false;
@@ -762,7 +762,11 @@ pub const PublishCommand = struct {
             }
         };
 
-        while ('\n' != Output.buffered_stdin.reader().readByte() catch return) {}
+        while (true) {
+            var byte: [1]u8 = undefined;
+            const n = bun.sys.read(bun.FD.stdin(), &byte).unwrap() catch return;
+            if (n == 0 or byte[0] == '\n') break;
+        }
 
         _ = bun.spawnSync(&.{
             .argv = &.{ Open.opener, auth_url },
@@ -888,7 +892,11 @@ pub const PublishCommand = struct {
                             break :nanoseconds 500 * std.time.ns_per_ms;
                         };
 
-                        std.Thread.sleep(nanoseconds);
+                        var sleep_req: std.c.timespec = .{
+                            .sec = @intCast(nanoseconds / std.time.ns_per_s),
+                            .nsec = @intCast(nanoseconds % std.time.ns_per_s),
+                        };
+                        _ = nanosleep(&sleep_req, null);
                         continue;
                     },
                     200 => {
@@ -1554,3 +1562,5 @@ const Dependency = install.Dependency;
 const Lockfile = install.Lockfile;
 const Npm = install.Npm;
 const PackageManager = install.PackageManager;
+
+extern "c" fn nanosleep(rqtp: *const std.c.timespec, rmtp: ?*std.c.timespec) c_int;

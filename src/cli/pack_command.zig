@@ -359,7 +359,7 @@ pub const PackCommand = struct {
                             }
                         }
 
-                        try pack_queue.add(.{ .path = entry_subpath });
+                        try pack_queue.push(allocator, .{ .path = entry_subpath });
                     },
                     else => unreachable,
                 }
@@ -474,7 +474,7 @@ pub const PackCommand = struct {
                                 continue :next_entry;
                             }
                         }
-                        try pack_queue.add(.{ .path = entry_subpath });
+                        try pack_queue.push(allocator, .{ .path = entry_subpath });
                     },
                     .directory => {
                         for (bins) |bin| {
@@ -536,7 +536,7 @@ pub const PackCommand = struct {
         root_dir: std.Io.Dir,
         log_level: LogLevel,
     ) OOM!PackQueue {
-        var bundled_pack_queue = PackQueue.init(ctx.allocator, {});
+        var bundled_pack_queue = PackQueue.initContext({});
         if (ctx.bundled_deps.items.len == 0) return bundled_pack_queue;
 
         var dir = root_dir.openDir(bun.blockingIo(), "node_modules", .{ .iterate = true }) catch |err| {
@@ -783,7 +783,7 @@ pub const PackCommand = struct {
 
                 switch (entry.kind) {
                     .file => {
-                        try bundled_pack_queue.add(.{ .path = entry_subpath });
+                        try bundled_pack_queue.push(ctx.allocator, .{ .path = entry_subpath });
                     },
                     .directory => {
                         const subdir = openSubdir(dir, entry_name, entry_subpath);
@@ -887,7 +887,7 @@ pub const PackCommand = struct {
                                 continue :next_entry;
                             }
                         }
-                        try pack_queue.add(.{ .path = entry_subpath });
+                        try pack_queue.push(allocator, .{ .path = entry_subpath });
                     },
                     .directory => {
                         for (bins) |bin| {
@@ -932,7 +932,7 @@ pub const PackCommand = struct {
                     }
                 },
                 .e_boolean => {
-                    const b = bundled_deps.asBool() orelse return .{};
+                    const b = bundled_deps.asBool() orelse return .empty;
                     if (!b == true) return .{};
 
                     if (json.get("dependencies")) |dependencies_expr| {
@@ -1444,7 +1444,7 @@ pub const PackCommand = struct {
             try getBundledDeps(ctx.allocator, json.root, "bundleDependencies") orelse
             .empty;
 
-        var pack_queue: PackQueue = .init(ctx.allocator, {});
+        var pack_queue: PackQueue = .initContext({});
         defer pack_queue.deinit();
 
         const bins = try getPackageBins(ctx.allocator, json.root);
@@ -1453,7 +1453,7 @@ pub const PackCommand = struct {
         for (bins) |bin| {
             switch (bin.type) {
                 .file => {
-                    try pack_queue.add(.{ .path = bin.path, .optional = true });
+                    try pack_queue.push(ctx.allocator, .{ .path = bin.path, .optional = true });
                 },
                 .dir => {
                     const bin_dir = root_dir.openDir(bun.blockingIo(), bin.path, .{ .iterate = true }) catch {
@@ -1712,7 +1712,7 @@ pub const PackCommand = struct {
             entry = try archivePackageJSON(ctx, archive, entry, root_dir, edited_package_json);
             if (log_level.showProgress()) node.completeOne();
 
-            while (pack_queue.removeOrNull()) |item| {
+            while (pack_queue.pop()) |item| {
                 defer if (log_level.showProgress()) node.completeOne();
 
                 const file = bun.sys.openat(.fromStdDir(root_dir), item.path, bun.O.RDONLY, 0).unwrap() catch |err| {
@@ -1752,7 +1752,7 @@ pub const PackCommand = struct {
                 );
             }
 
-            while (bundled_pack_queue.removeOrNull()) |item| {
+            while (bundled_pack_queue.pop()) |item| {
                 defer if (log_level.showProgress()) node.completeOne();
 
                 const file = File.openat(.fromStdDir(root_dir), item.path, bun.O.RDONLY, 0).unwrap() catch |err| {
