@@ -187,8 +187,8 @@ pub const PackageInstaller = struct {
         pub fn close(this: *LazyPackageDestinationDir) void {
             switch (this.*) {
                 .dir => {
-                    if (this.dir.fd != std.Io.Dir.cwd().handle) {
-                        this.dir.close();
+                    if (this.dir.handle != std.Io.Dir.cwd().handle) {
+                        this.dir.close(bun.blockingIo());
                     }
                 },
                 .node_modules_path, .closed => {},

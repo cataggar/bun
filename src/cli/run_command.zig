@@ -643,7 +643,7 @@ pub const RunCommand = struct {
     pub fn createFakeTemporaryNodeExecutable(
         PATH: *std.array_list.Managed(u8),
         optional_bun_path: *string,
-    ) (OOM || std.fs.SelfExePathError)!void {
+    ) anyerror!void {
         // If we are already running as "node", the path should exist
         if (CLI.pretend_to_be_node) return;
 

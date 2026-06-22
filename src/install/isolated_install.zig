@@ -858,17 +858,16 @@ pub fn installIsolatedPackages(
     // also eligible. The second condition matters because dep symlinks live
     // inside the global entry; baking a project-local path (workspace, folder)
     // into a shared directory would break for every other consumer.
-    const WyhashWriter = struct {
-        hasher: *std.hash.Wyhash,
-        const E = error{};
-        pub fn writer(self: *@This()) std.io.GenericWriter(*@This(), E, write) {
-            return .{ .context = self };
+    // Zig 0.17 removed `std.io.GenericWriter`. Hash formatted output via a
+    // fixed buffer instead (store paths are bounded by PathBuffer).
+    const hashPrint = struct {
+        fn call(hasher: *std.hash.Wyhash, comptime fmt: []const u8, args: anytype) void {
+            var buf: bun.PathBuffer = undefined;
+            var w = std.Io.Writer.fixed(&buf);
+            w.print(fmt, args) catch unreachable;
+            hasher.update(w.buffered());
         }
-        fn write(self: *@This(), bytes: []const u8) E!usize {
-            self.hasher.update(bytes);
-            return bytes.len;
-        }
-    };
+    }.call;
 
     const global_store_path: ?[:0]const u8 = if (manager.options.enable.global_virtual_store) global_store_path: {
         const entries = store.entries.slice();
@@ -996,9 +995,7 @@ pub fn installIsolatedPackages(
                     // uninitialized stack bytes into the hash.
                     top.hasher = .init(0x9E3779B97F4A7C15);
                     {
-                        var hw: WyhashWriter = .{ .hasher = &top.hasher };
-                        var w = hw.writer();
-                        w.print("{f}", .{Store.Entry.fmtStorePath(id, &store, lockfile)}) catch unreachable;
+                        hashPrint(&top.hasher, "{f}", .{Store.Entry.fmtStorePath(id, &store, lockfile)});
                     }
                     // The store path for `.npm` is just `name@version`, which
                     // is *not* unique across registries (an enterprise proxy
@@ -1149,9 +1146,7 @@ pub fn installIsolatedPackages(
                             const m = members[0];
                             if (entry_hashes[m] != 0) {
                                 var sub: std.hash.Wyhash = .init(0x9E3779B97F4A7C15);
-                                var hw: WyhashWriter = .{ .hasher = &sub };
-                                var w_ = hw.writer();
-                                w_.print("{f}", .{Store.Entry.fmtStorePath(.from(m), &store, lockfile)}) catch unreachable;
+                                hashPrint(&sub, "{f}", .{Store.Entry.fmtStorePath(.from(m), &store, lockfile)});
                                 sub.update(std.mem.asBytes(&pkg_metas[node_pkg_ids[entry_node_ids[m].get()]].integrity));
                                 var poisoned = false;
                                 for (entry_dependencies[m].slice()) |dep| {
@@ -1186,9 +1181,7 @@ pub fn installIsolatedPackages(
                             for (members) |m| {
                                 if (entry_hashes[m] == 0) any_ineligible = true;
                                 var sub: std.hash.Wyhash = .init(0);
-                                var hw: WyhashWriter = .{ .hasher = &sub };
-                                var w_ = hw.writer();
-                                w_.print("{f}", .{Store.Entry.fmtStorePath(.from(m), &store, lockfile)}) catch unreachable;
+                                hashPrint(&sub, "{f}", .{Store.Entry.fmtStorePath(.from(m), &store, lockfile)});
                                 sub.update(std.mem.asBytes(&pkg_metas[node_pkg_ids[entry_node_ids[m].get()]].integrity));
                                 try member_sub.append(manager.allocator, sub.final());
                                 for (entry_dependencies[m].slice()) |dep| {
