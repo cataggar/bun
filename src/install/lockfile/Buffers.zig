@@ -296,7 +296,7 @@ pub fn load(stream: *Stream, allocator: Allocator, log: *logger.Log, pm_: ?*Pack
 
         var pos: usize = 0;
         if (comptime Environment.isDebug) {
-            pos = try stream.getPos();
+            pos = stream.pos;
         }
 
         if (comptime Type == @TypeOf(this.dependencies)) {

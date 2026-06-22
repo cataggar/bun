@@ -94,7 +94,7 @@ pub const FallbackHandler = struct {
         if (@as(PropertyIdTag, property.*) == .unparsed) {
             const val: *const UnparsedProperty = &property.unparsed;
             var unparsed, const index = unparsed_and_index: {
-                inline for (bun.meta.fields(FallbackHandler)) |field| {
+                inline for (comptime bun.meta.fields(FallbackHandler)) |field| {
                     if (@intFromEnum(@field(PropertyIdTag, field.name)) == @intFromEnum(val.property_id)) {
                         const has_vendor_prefix = comptime PropertyIdTag.hasVendorPrefix(@field(PropertyIdTag, field.name));
                         const newval = newval: {

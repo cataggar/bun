@@ -1284,6 +1284,12 @@ pub fn StringArrayHashMap(comptime Type: type) type {
     return ArrayHashMapManaged([]const u8, Type, StringArrayHashMapContext, true);
 }
 
+/// Managed `AutoArrayHashMap` shim (removed in Zig 0.17 along with the other
+/// managed array hash maps). Restores the old managed API over the unmanaged map.
+pub fn AutoArrayHashMap(comptime K: type, comptime V: type) type {
+    return ArrayHashMapManaged(K, V, std.array_hash_map.AutoContext(K), !std.array_hash_map.autoEqlIsCheap(K));
+}
+
 pub fn CaseInsensitiveASCIIStringArrayHashMap(comptime Type: type) type {
     return ArrayHashMapManaged([]const u8, Type, CaseInsensitiveASCIIStringContext, true);
 }

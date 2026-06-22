@@ -5836,14 +5836,14 @@ pub const NodeFS = struct {
 
         const dest = args.path.sliceZ(&this.sync_error_buf);
 
-        std.posix.unlinkZ(dest) catch |err1| {
+        bun.sys.unlink(dest).unwrap() catch |err1| {
             bun.handleErrorReturnTrace(err1, @errorReturnTrace());
             // empircally, it seems to return AccessDenied when the
             // file is actually a directory on macOS.
             if (args.recursive and
                 (err1 == error.IsDir or err1 == error.NotDir or err1 == error.AccessDenied))
             {
-                std.posix.rmdirZ(dest) catch |err2| {
+                bun.sys.rmdir(dest).unwrap() catch |err2| {
                     bun.handleErrorReturnTrace(err2, @errorReturnTrace());
                     const code: E = switch (err2) {
                         error.AccessDenied => .ACCES,
@@ -6947,7 +6947,7 @@ pub fn zigDeleteTree(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.F
         iter: std.Io.Dir.Iterator,
 
         fn closeAll(io_: std.Io, items: []@This()) void {
-            for (items) |*item| item.iter.dir.close(io_);
+            for (items) |*item| item.iter.reader.dir.close(io_);
         }
     };
 
@@ -6968,7 +6968,7 @@ pub fn zigDeleteTree(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.F
             handle_entry: while (true) {
                 if (treat_as_dir) {
                     if (stack.unusedCapacitySlice().len >= 1) {
-                        var iterable_dir = top.iter.dir.openDir(io, entry.name, .{
+                        var iterable_dir = top.iter.reader.dir.openDir(io, entry.name, .{
                             .follow_symlinks = false,
                             .iterate = true,
                         }) catch |err| switch (err) {
@@ -6980,16 +6980,16 @@ pub fn zigDeleteTree(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.F
                         };
                         stack.appendAssumeCapacity(.{
                             .name = entry.name,
-                            .parent_dir = top.iter.dir,
+                            .parent_dir = top.iter.reader.dir,
                             .iter = iterable_dir.iterateAssumeFirstIteration(),
                         });
                         continue :process_stack;
                     } else {
-                        try zigDeleteTreeMinStackSizeWithKindHint(top.iter.dir, entry.name, entry.kind);
+                        try zigDeleteTreeMinStackSizeWithKindHint(top.iter.reader.dir, entry.name, entry.kind);
                         break :handle_entry;
                     }
                 } else {
-                    if (top.iter.dir.deleteFile(io, entry.name)) {
+                    if (top.iter.reader.dir.deleteFile(io, entry.name)) {
                         break :handle_entry;
                     } else |err| switch (err) {
                         error.IsDir => {
@@ -7005,7 +7005,7 @@ pub fn zigDeleteTree(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.F
 
         // On Windows, we can't delete until the dir's handle has been closed, so
         // close it before we try to delete.
-        top.iter.dir.close(io);
+        top.iter.reader.dir.close(io);
 
         // In order to avoid double-closing the directory when cleaning up
         // the stack in the case of an error, we save the relevant portions and
@@ -7123,7 +7123,7 @@ fn zigDeleteTreeMinStackSizeWithKindHint(self: std.Io.Dir, sub_path: []const u8,
 
         scan_dir: while (true) {
             var dir_it = dir.iterateAssumeFirstIteration();
-            dir_it: while (try dir_it.next()) |entry| {
+            dir_it: while (try dir_it.next(io)) |entry| {
                 var treat_as_dir = entry.kind == .directory;
                 handle_entry: while (true) {
                     if (treat_as_dir) {

@@ -1495,7 +1495,7 @@ fn updatePackageJsonAfterMigration(allocator: Allocator, manager: *PackageManage
                     continue;
                 };
                 join_buf.clearRetainingCapacity();
-                try join_buf.writer().print("{s}@{s}", .{
+                try join_buf.print("{s}@{s}", .{
                     key_str,
                     res_str,
                 });
@@ -1557,10 +1557,11 @@ fn printIntoArrayList(
     allocator: Allocator,
     comptime fmt: []const u8,
     args: anytype,
-) !void {
+) error{OutOfMemory}!void {
     var aw = std.Io.Writer.Allocating.fromArrayList(allocator, list);
     defer list.* = aw.toArrayList();
-    try aw.writer.print(fmt, args);
+    // The Allocating writer only fails on allocation failure.
+    aw.writer.print(fmt, args) catch return error.OutOfMemory;
 }
 
 const Lockfile = @import("./lockfile.zig");

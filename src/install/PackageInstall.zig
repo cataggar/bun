@@ -670,11 +670,11 @@ pub const PackageInstall = struct {
                         defer in_file.close();
 
                         debug("createFile {} {s}\n", .{ destination_dir_.handle, entry.path });
-                        var outfile = createFile(destination_dir_, entry.path, .{}) catch brk: {
+                        var outfile = createFile(destination_dir_, bun.blockingIo(), entry.path, .{}) catch brk: {
                             if (bun.Dirname.dirname(bun.OSPathChar, entry.path)) |entry_dirname| {
                                 bun.MakePath.makePath(bun.OSPathChar, destination_dir_, entry_dirname) catch {};
                             }
-                            break :brk createFile(destination_dir_, entry.path, .{}) catch |err| {
+                            break :brk createFile(destination_dir_, bun.blockingIo(), entry.path, .{}) catch |err| {
                                 if (progress_) |progress| {
                                     progress.root.end();
                                     progress.refresh();
@@ -684,7 +684,7 @@ pub const PackageInstall = struct {
                                 Global.crash();
                             };
                         };
-                        defer outfile.close();
+                        defer outfile.close(bun.blockingIo());
 
                         if (comptime Environment.isPosix) {
                             const stat = in_file.stat().unwrap() catch continue;

@@ -53,15 +53,15 @@ pub fn assertNoUninitializedPadding(comptime T: type) void {
     // if (info.layout != .Extern) {
     //     @compileError("assertNoUninitializedPadding(" ++ @typeName(T) ++ ") expects an extern struct type, got a struct of layout '" ++ @tagName(info.layout) ++ "'");
     // }
-    for (info.fields) |field| {
-        const fieldInfo = @typeInfo(field.type);
+    for (info.field_names, info.field_types) |field_name, FieldType| {
+        const fieldInfo = @typeInfo(FieldType);
         switch (fieldInfo) {
-            .@"struct" => assertNoUninitializedPadding(field.type),
-            .@"union" => assertNoUninitializedPadding(field.type),
+            .@"struct" => assertNoUninitializedPadding(FieldType),
+            .@"union" => assertNoUninitializedPadding(FieldType),
             .array => |a| assertNoUninitializedPadding(a.child),
             .optional => |a| assertNoUninitializedPadding(a.child),
             .pointer => {
-                @compileError("Expected no pointer types in " ++ @typeName(T) ++ ", found field '" ++ field.name ++ "' of type '" ++ @typeName(field.type) ++ "'");
+                @compileError("Expected no pointer types in " ++ @typeName(T) ++ ", found field '" ++ field_name ++ "' of type '" ++ @typeName(FieldType) ++ "'");
             },
             else => {},
         }
@@ -72,8 +72,8 @@ pub fn assertNoUninitializedPadding(comptime T: type) void {
     }
 
     var i = 0;
-    for (info.fields, 0..) |field, j| {
-        const offset = @offsetOf(T, field.name);
+    for (info.field_names, info.field_types, 0..) |field_name, FieldType, j| {
+        const offset = @offsetOf(T, field_name);
         if (offset != i) {
             @compileError(std.fmt.comptimePrint(
                 \\Expected no possibly uninitialized bytes of memory in '{s}', but found a {d} byte gap between fields '{s}' and '{s}' This can be fixed by adding a padding field to the struct like `padding: [{d}]u8 = @splat({0}),` between these fields. For more information, look at `padding_checker.zig`
@@ -81,14 +81,14 @@ pub fn assertNoUninitializedPadding(comptime T: type) void {
                 .{
                     @typeName(T),
                     offset - i,
-                    info.fields[j - 1].name,
-                    field.name,
+                    info.field_names[j - 1],
+                    field_name,
                     offset - i,
                     offset - i,
                 },
             ));
         }
-        i = offset + @sizeOf(field.type);
+        i = offset + @sizeOf(FieldType);
     }
 
     if (i != @sizeOf(T)) {

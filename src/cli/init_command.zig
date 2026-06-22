@@ -404,11 +404,11 @@ pub const InitCommand = struct {
 
         var fs = try Fs.FileSystem.init(null);
         const pathname = Fs.PathName.init(fs.topLevelDirWithoutTrailingSlash());
-        const destination_dir = std.fs.cwd();
+        const destination_dir = std.Io.Dir.cwd();
 
         var fields = PackageJSONFields{};
 
-        var package_json_file = destination_dir.openFile("package.json", .{ .mode = .read_write }) catch null;
+        var package_json_file = destination_dir.openFile(bun.blockingIo(), "package.json", .{ .mode = .read_write }) catch null;
         var package_json_contents: MutableString = MutableString.initEmpty(alloc);
         initializeStore();
         read_package_json: {
@@ -422,7 +422,7 @@ pub const InitCommand = struct {
 
                         break :brk end;
                     }
-                    const stat = pkg.stat() catch break :read_package_json;
+                    const stat = pkg.stat(bun.blockingIo()) catch break :read_package_json;
 
                     if (stat.kind != .file or stat.size == 0) {
                         break :read_package_json;
@@ -435,7 +435,8 @@ pub const InitCommand = struct {
                 package_json_contents.list.expandToCapacity();
 
                 const prev_file_pos = if (comptime Environment.isWindows) try pkg.getPos() else 0;
-                _ = pkg.preadAll(package_json_contents.list.items, 0) catch {
+                var read_file = bun.sys.File{ .handle = bun.FD.fromStdFile(pkg) };
+                _ = read_file.readAll(package_json_contents.list.items).unwrap() catch {
                     package_json_file = null;
                     break :read_package_json;
                 };

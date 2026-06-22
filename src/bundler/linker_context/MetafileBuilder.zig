@@ -39,10 +39,10 @@ pub fn generateChunkJson(
     chunk: *const Chunk,
     chunks: []const Chunk,
 ) ![]const u8 {
-    var json = std.array_list.Managed(u8).init(allocator);
-    errdefer json.deinit();
+    var aw: std.Io.Writer.Allocating = .init(allocator);
+    errdefer aw.deinit();
 
-    const writer = json.writer();
+    const writer = &aw.writer;
     const sources = c.parse_graph.input_files.items(.source);
 
     // Start chunk entry: "path/to/output.js": {
@@ -154,7 +154,7 @@ pub fn generateChunkJson(
 
     try writer.writeAll("\n    }");
 
-    return json.toOwnedSlice();
+    return aw.toOwnedSlice();
 }
 
 /// Assembles the final metafile JSON from pre-built chunk fragments.

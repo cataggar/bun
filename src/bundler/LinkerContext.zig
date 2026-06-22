@@ -632,9 +632,9 @@ pub const LinkerContext = struct {
     pub const ChunkMeta = struct {
         imports: Map,
         exports: Map,
-        dynamic_imports: std.AutoArrayHashMap(Index.Int, void),
+        dynamic_imports: bun.AutoArrayHashMap(Index.Int, void),
 
-        pub const Map = std.AutoArrayHashMap(Ref, void);
+        pub const Map = bun.AutoArrayHashMap(Ref, void);
     };
 
     pub const computeCrossChunkDependencies = @import("./linker_context/computeCrossChunkDependencies.zig").computeCrossChunkDependencies;
