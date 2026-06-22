@@ -481,7 +481,7 @@ pub const FileSystem = struct {
             parts,
             .loose,
         );
-        return try bun.dupeZ(bun, allocator, u8, joined);
+        return try bun.dupeZ(allocator, u8, joined);
     }
 
     pub fn abs(f: *@This(), parts: anytype) string {
@@ -1260,7 +1260,7 @@ pub const FileSystem = struct {
                         return err;
                     };
                     if (read_count + 1 < buf.len) {
-                        const allocation = try bun.dupeZ(bun, allocator, u8, buf[0..read_count]);
+                        const allocation = try bun.dupeZ(allocator, u8, buf[0..read_count]);
                         file_contents = allocation[0..read_count];
 
                         if (strings.BOM.detect(file_contents)) |bom| {

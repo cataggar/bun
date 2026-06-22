@@ -1084,7 +1084,7 @@ pub const StandaloneModuleGraph = struct {
             };
         }
 
-        return try bun.dupeZ(bun, allocator, u8, dest_z);
+        return try bun.dupeZ(allocator, u8, dest_z);
     }
 
     pub fn toExecutable(
@@ -1110,7 +1110,7 @@ pub const StandaloneModuleGraph = struct {
         var free_self_exe = false;
         const self_exe = if (self_exe_path) |path| brk: {
             free_self_exe = true;
-            break :brk bun.handleOom(bun.dupeZ(bun, allocator, u8, path));
+            break :brk bun.handleOom(bun.dupeZ(allocator, u8, path));
         } else if (target.isDefault())
             bun.selfExePath() catch |err| {
                 return CompileResult.failFmt("failed to get self executable path: {s}", .{@errorName(err)});
@@ -1137,7 +1137,7 @@ pub const StandaloneModuleGraph = struct {
             }
 
             free_self_exe = true;
-            break :blk bun.handleOom(bun.dupeZ(bun, allocator, u8, dest_z));
+            break :blk bun.handleOom(bun.dupeZ(allocator, u8, dest_z));
         };
 
         defer if (free_self_exe) {

@@ -140,7 +140,7 @@ pub const BunxCommand = struct {
     pub fn addCreatePrefix(allocator: std.mem.Allocator, input: []const u8) ![:0]const u8 {
         const prefixLength = "create-".len;
 
-        if (input.len == 0) return try bun.dupeZ(bun, allocator, u8, input);
+        if (input.len == 0) return try bun.dupeZ(allocator, u8, input);
 
         var new_str = try allocator.allocSentinel(u8, input.len + prefixLength, 0);
         if (input[0] == '@') {

@@ -113,7 +113,7 @@ var getTemporaryDirectoryOnce = bun.once(struct {
         return .{
             .handle = tempdir,
             .name = temp_dir_name,
-            .path = bun.handleOom(bun.dupeZ(bun, bun.default_allocator, u8, temp_dir_path)),
+            .path = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, temp_dir_path)),
         };
     }
 }.run);
@@ -122,7 +122,7 @@ noinline fn ensureCacheDirectory(this: *PackageManager) std.Io.Dir {
     loop: while (true) {
         if (this.options.enable.cache) {
             const cache_dir = fetchCacheDirectoryPath(this.env, &this.options);
-            this.cache_directory_path = bun.handleOom(bun.dupeZ(bun, this.allocator, u8, cache_dir.path));
+            this.cache_directory_path = bun.handleOom(bun.dupeZ(this.allocator, u8, cache_dir.path));
 
             return bun.FD.cwd().stdDir().createDirPathOpen(bun.blockingIo(), cache_dir.path, .{}) catch {
                 this.options.enable.cache = false;
@@ -131,7 +131,7 @@ noinline fn ensureCacheDirectory(this: *PackageManager) std.Io.Dir {
             };
         }
 
-        this.cache_directory_path = bun.dupeZ(bun, this.allocator, u8, Path.joinAbsString(
+        this.cache_directory_path = bun.dupeZ(this.allocator, u8, Path.joinAbsString(
             Fs.FileSystem.instance.top_level_dir,
             &.{
                 "node_modules",

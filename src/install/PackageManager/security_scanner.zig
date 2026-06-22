@@ -750,10 +750,10 @@ pub const SecurityScanSubprocess = struct {
         const exec_path = try bun.selfExePath();
 
         var argv = [_]?[*:0]const u8{
-            try bun.dupeZ(bun, this.manager.allocator, u8, exec_path),
+            try bun.dupeZ(this.manager.allocator, u8, exec_path),
             "--no-install",
             "-e",
-            try bun.dupeZ(bun, this.manager.allocator, u8, this.code),
+            try bun.dupeZ(this.manager.allocator, u8, this.code),
             null,
         };
         defer {

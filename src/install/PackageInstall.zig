@@ -1200,7 +1200,7 @@ pub const PackageInstall = struct {
                     }
                 };
                 var task = UninstallTask.new(.{
-                    .absolute_path = bun.handleOom(bun.dupeZ(bun, bun.default_allocator, u8, bun.path.joinAbsString(FileSystem.instance.top_level_dir, &.{ this.node_modules.path.items, temp_path }, .auto))),
+                    .absolute_path = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, bun.path.joinAbsString(FileSystem.instance.top_level_dir, &.{ this.node_modules.path.items, temp_path }, .auto))),
                 });
                 PackageManager.get().incrementPendingTasks(1);
                 PackageManager.get().thread_pool.schedule(bun.ThreadPool.Batch.from(&task.task));
