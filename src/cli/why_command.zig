@@ -293,7 +293,7 @@ pub const WhyCommand = struct {
 
                 var dep_version_buf = std.array_list.Managed(u8).init(arena_allocator);
                 defer dep_version_buf.deinit();
-                try dep_version_buf.writer().print("{f}", .{packages.items(.resolution)[pkg_idx].fmt(string_bytes, .auto)});
+                try dep_version_buf.print("{f}", .{packages.items(.resolution)[pkg_idx].fmt(string_bytes, .auto)});
                 const dep_pkg_version = try arena_allocator.dupe(u8, dep_version_buf.items);
 
                 const spec = try arena_allocator.dupe(u8, dependency.version.literal.slice(string_bytes));

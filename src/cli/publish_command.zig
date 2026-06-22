@@ -483,7 +483,7 @@ pub const PublishCommand = struct {
         const encoded_name = bun.fmt.dependencyUrl(package_name);
 
         // Try to get package metadata to check if version exists
-        url_buf.writer().print("{s}/{f}", .{ registry_url, encoded_name }) catch return false;
+        url_buf.print("{s}/{f}", .{ registry_url, encoded_name }) catch return false;
 
         const package_url = URL.parse(url_buf.items);
 
@@ -593,7 +593,6 @@ pub const PublishCommand = struct {
 
         var print_buf: std.ArrayListUnmanaged(u8) = .empty;
         defer print_buf.deinit(ctx.allocator);
-        var print_writer = print_buf.writer(ctx.allocator);
 
         const publish_headers = try constructPublishHeaders(
             ctx.allocator,
@@ -607,7 +606,7 @@ pub const PublishCommand = struct {
 
         var response_buf = try MutableString.init(ctx.allocator, 1024);
 
-        try print_writer.print("{s}/{f}", .{
+        try print_buf.print(ctx.allocator, "{s}/{f}", .{
             strings.withoutTrailingSlash(registry.url.href),
             bun.fmt.dependencyUrl(ctx.package_name),
         });
@@ -1357,7 +1356,6 @@ pub const PublishCommand = struct {
         uses_workspaces: bool,
         auth_type: ?PackageManager.Options.AuthType,
     ) OOM!http.HeaderBuilder {
-        var print_writer = print_buf.writer(allocator);
         var headers: http.HeaderBuilder = .{};
         const npm_auth_type = if (maybe_otp == null)
             if (auth_type) |auth| @tagName(auth) else "web"
@@ -1370,11 +1368,11 @@ pub const PublishCommand = struct {
             headers.count("accept-encoding", "gzip,deflate");
 
             if (registry.token.len > 0) {
-                try print_writer.print("Bearer {s}", .{registry.token});
+                try print_buf.print(allocator, "Bearer {s}", .{registry.token});
                 headers.count("authorization", print_buf.items);
                 print_buf.clearRetainingCapacity();
             } else if (registry.auth.len > 0) {
-                try print_writer.print("Basic {s}", .{registry.auth});
+                try print_buf.print(allocator, "Basic {s}", .{registry.auth});
                 headers.count("authorization", print_buf.items);
                 print_buf.clearRetainingCapacity();
             }
@@ -1390,7 +1388,7 @@ pub const PublishCommand = struct {
             }
             headers.count("npm-command", "publish");
 
-            try print_writer.print("{s} {s} {s} workspaces/{}{s}{s}", .{ Global.user_agent, Global.os_name, Global.arch_name, uses_workspaces, if (ci_name != null) " ci/" else "", ci_name orelse "" });
+            try print_buf.print(allocator, "{s} {s} {s} workspaces/{}{s}{s}", .{ Global.user_agent, Global.os_name, Global.arch_name, uses_workspaces, if (ci_name != null) " ci/" else "", ci_name orelse "" });
             // headers.count("user-agent", "npm/10.8.3 node/v24.3.0 darwin arm64 workspaces/false");
             headers.count("user-agent", print_buf.items);
             print_buf.clearRetainingCapacity();
@@ -1399,7 +1397,7 @@ pub const PublishCommand = struct {
             headers.count("Host", registry.url.host);
 
             if (maybe_json_len) |json_len| {
-                try print_writer.print("{d}", .{json_len});
+                try print_buf.print(allocator, "{d}", .{json_len});
                 headers.count("Content-Length", print_buf.items);
                 print_buf.clearRetainingCapacity();
             }
@@ -1412,11 +1410,11 @@ pub const PublishCommand = struct {
             headers.append("accept-encoding", "gzip,deflate");
 
             if (registry.token.len > 0) {
-                try print_writer.print("Bearer {s}", .{registry.token});
+                try print_buf.print(allocator, "Bearer {s}", .{registry.token});
                 headers.append("authorization", print_buf.items);
                 print_buf.clearRetainingCapacity();
             } else if (registry.auth.len > 0) {
-                try print_writer.print("Basic {s}", .{registry.auth});
+                try print_buf.print(allocator, "Basic {s}", .{registry.auth});
                 headers.append("authorization", print_buf.items);
                 print_buf.clearRetainingCapacity();
             }
@@ -1432,7 +1430,7 @@ pub const PublishCommand = struct {
             }
             headers.append("npm-command", "publish");
 
-            try print_writer.print("{s} {s} {s} workspaces/{}{s}{s}", .{ Global.user_agent, Global.os_name, Global.arch_name, uses_workspaces, if (ci_name != null) " ci/" else "", ci_name orelse "" });
+            try print_buf.print(allocator, "{s} {s} {s} workspaces/{}{s}{s}", .{ Global.user_agent, Global.os_name, Global.arch_name, uses_workspaces, if (ci_name != null) " ci/" else "", ci_name orelse "" });
             // headers.append("user-agent", "npm/10.8.3 node/v24.3.0 darwin arm64 workspaces/false");
             headers.append("user-agent", print_buf.items);
             print_buf.clearRetainingCapacity();
@@ -1441,7 +1439,7 @@ pub const PublishCommand = struct {
             headers.append("Host", registry.url.host);
 
             if (maybe_json_len) |json_len| {
-                try print_writer.print("{d}", .{json_len});
+                try print_buf.print(allocator, "{d}", .{json_len});
                 headers.append("Content-Length", print_buf.items);
                 print_buf.clearRetainingCapacity();
             }
@@ -1469,35 +1467,34 @@ pub const PublishCommand = struct {
                 ctx.abs_tarball_path.len +
                 encoded_tarball_len,
         );
-        var writer = buf.writer(ctx.allocator);
 
-        try writer.print("{{\"_id\":\"{s}\",\"name\":\"{s}\"", .{
+        try buf.print(ctx.allocator, "{{\"_id\":\"{s}\",\"name\":\"{s}\"", .{
             ctx.package_name,
             ctx.package_name,
         });
 
-        try writer.print(",\"dist-tags\":{{\"{s}\":\"{s}\"}}", .{
+        try buf.print(ctx.allocator, ",\"dist-tags\":{{\"{s}\":\"{s}\"}}", .{
             tag,
             version_without_build_tag,
         });
 
         // "versions"
         {
-            try writer.print(",\"versions\":{{\"{s}\":{s}}}", .{
+            try buf.print(ctx.allocator, ",\"versions\":{{\"{s}\":{s}}}", .{
                 version_without_build_tag,
                 ctx.normalized_pkg_info,
             });
         }
 
         if (ctx.manager.options.publish_config.access) |access| {
-            try writer.print(",\"access\":\"{s}\"", .{@tagName(access)});
+            try buf.print(ctx.allocator, ",\"access\":\"{s}\"", .{@tagName(access)});
         } else {
-            try writer.writeAll(",\"access\":null");
+            try buf.appendSlice(ctx.allocator, ",\"access\":null");
         }
 
         // "_attachments"
         {
-            try writer.print(",\"_attachments\":{{\"{f}\":{{\"content_type\":\"{s}\",\"data\":\"", .{
+            try buf.print(ctx.allocator, ",\"_attachments\":{{\"{f}\":{{\"content_type\":\"{s}\",\"data\":\"", .{
                 Pack.fmtTarballFilename(ctx.package_name, ctx.package_version, .raw),
                 "application/octet-stream",
             });
@@ -1507,7 +1504,7 @@ pub const PublishCommand = struct {
             const count = bun.simdutf.base64.encode(ctx.tarball_bytes, buf.items[buf.items.len - encoded_tarball_len ..], false);
             bun.assertWithLocation(count == encoded_tarball_len, @src());
 
-            try writer.print("\",\"length\":{d}}}}}}}", .{
+            try buf.print(ctx.allocator, "\",\"length\":{d}}}}}}}", .{
                 ctx.tarball_bytes.len,
             });
         }

@@ -921,7 +921,7 @@ pub const PackCommand = struct {
         invalid_field: {
             switch (bundled_deps.data) {
                 .e_array => {
-                    var iter = bundled_deps.asArray() orelse return .{};
+                    var iter = bundled_deps.asArray() orelse return .empty;
 
                     while (iter.next()) |bundled_dep_item| {
                         const bundled_dep = try bundled_dep_item.asStringCloned(allocator) orelse break :invalid_field;
@@ -1442,7 +1442,7 @@ pub const PackCommand = struct {
 
         ctx.bundled_deps = try getBundledDeps(ctx.allocator, json.root, "bundledDependencies") orelse
             try getBundledDeps(ctx.allocator, json.root, "bundleDependencies") orelse
-            .{};
+            .empty;
 
         var pack_queue: PackQueue = .init(ctx.allocator, {});
         defer pack_queue.deinit();

@@ -1015,7 +1015,7 @@ pub const Archive = opaque {
 
             return Return.initRes(.{
                 .archive = archive,
-                .filter = std.EnumSet(std.Io.File.Kind).initEmpty(),
+                .filter = std.EnumSet(std.Io.File.Kind).empty,
             });
         }
 
