@@ -16,21 +16,21 @@ const symbol_replacements = std.StaticStringMap([]const u8).initComptime(&.{
 
 pub fn main() !void {
     const gpa = std.heap.smp_allocator;
+    var io_threaded: std.Io.Threaded = .init_single_threaded;
+    const io = io_threaded.io();
     var args = try std.process.argsWithAllocator(gpa);
     errdefer args.deinit();
     assert(args.skip());
 
     const in = brk: {
         const in_path = args.next() orelse @panic("missing argument");
-        const in = try std.fs.cwd().openFile(in_path, .{});
-        defer in.close();
-        break :brk try in.readToEndAllocOptions(gpa, std.math.maxInt(u32), null, .fromByteUnits(1), 0);
+        break :brk try std.Io.Dir.cwd().readFileAllocOptions(io, in_path, gpa, .limited(std.math.maxInt(u32)), .of(u8), 0);
     };
     defer gpa.free(in);
 
-    var out = try std.array_list.Managed(u8).initCapacity(gpa, in.len);
-    defer out.deinit();
-    const w = out.writer();
+    var aw = try std.Io.Writer.Allocating.initCapacity(gpa, in.len);
+    defer aw.deinit();
+    const w = &aw.writer;
 
     var i: usize = 0;
     while (mem.indexOfPos(u8, in, i, "pub const ")) |pub_i| {
@@ -59,9 +59,9 @@ pub fn main() !void {
         i = end_of_line;
     }
     try w.writeAll(in[i..]);
-    try std.fs.cwd().writeFile(.{
+    try std.Io.Dir.cwd().writeFile(io, .{
         .sub_path = args.next() orelse @panic("missing argument"),
-        .data = out.items,
+        .data = aw.writer.buffered(),
     });
 }
 

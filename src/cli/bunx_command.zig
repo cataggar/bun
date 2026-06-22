@@ -290,7 +290,7 @@ pub const BunxCommand = struct {
             if (is_stale) {
                 _ = target_package_json.close();
                 // If delete fails, oh well. Hope installation takes care of it.
-                std.fs.cwd().deleteTree(tempdir_name) catch {};
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), tempdir_name) catch {};
                 return error.NeedToInstall;
             }
             _ = target_package_json.close();
@@ -744,13 +744,13 @@ pub const BunxCommand = struct {
             Global.exit(1);
         }
 
-        const bunx_install_dir = try std.fs.cwd().makeOpenPath(bunx_cache_dir, .{});
+        const bunx_install_dir = try std.Io.Dir.cwd().createDirPathOpen(bun.blockingIo(), bunx_cache_dir, .{ .open_options = .{} });
 
         create_package_json: {
             // create package.json, but only if it doesn't exist
-            var package_json = bunx_install_dir.createFileZ("package.json", .{ .truncate = true }) catch break :create_package_json;
-            defer package_json.close();
-            package_json.writeAll("{}\n") catch {};
+            var package_json = bunx_install_dir.createFile(bun.blockingIo(), "package.json", .{ .truncate = true }) catch break :create_package_json;
+            defer package_json.close(bun.blockingIo());
+            package_json.writeStreamingAll(bun.blockingIo(), "{}\n") catch {};
         }
 
         var args = bun.BoundedArray([]const u8, 8).fromSlice(&.{

@@ -1223,7 +1223,7 @@ pub const Transpiler = struct {
         var paths = [_]string{_entry};
         var entry = transpiler.fs.abs(&paths);
 
-        std.fs.accessAbsolute(entry, .{}) catch
+        if (!bun.sys.exists(entry))
             return _entry;
 
         entry = transpiler.fs.relativeTo(entry);

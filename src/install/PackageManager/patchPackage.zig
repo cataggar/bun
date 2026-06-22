@@ -218,11 +218,11 @@ pub fn doPatchCommit(
         // There isn't an option to exclude it with `git diff --no-index`, so we
         // will `rename()` it out and back again.
         const has_nested_node_modules = has_nested_node_modules: {
-            var new_folder_handle = std.fs.cwd().openDir(new_folder, .{}) catch |e| {
+            var new_folder_handle = std.Io.Dir.cwd().openDir(bun.blockingIo(), new_folder, .{}) catch |e| {
                 Output.err(e, "failed to open directory <b>{s}<r>", .{new_folder});
                 Global.crash();
             };
-            defer new_folder_handle.close();
+            defer new_folder_handle.close(bun.blockingIo());
 
             if (bun.sys.renameatConcurrently(
                 .fromStdDir(new_folder_handle),
@@ -253,11 +253,11 @@ pub fn doPatchCommit(
                 }
                 break :has_bun_patch_tag null;
             };
-            var new_folder_handle = std.fs.cwd().openDir(new_folder, .{}) catch |e| {
+            var new_folder_handle = std.Io.Dir.cwd().openDir(bun.blockingIo(), new_folder, .{}) catch |e| {
                 Output.err(e, "failed to open directory <b>{s}<r>", .{new_folder});
                 Global.crash();
             };
-            defer new_folder_handle.close();
+            defer new_folder_handle.close(bun.blockingIo());
 
             if (bun.sys.renameatConcurrently(
                 .fromStdDir(new_folder_handle),
@@ -273,14 +273,14 @@ pub fn doPatchCommit(
         };
         defer {
             if (has_nested_node_modules or bun_patch_tag != null) {
-                var new_folder_handle = std.fs.cwd().openDir(new_folder, .{}) catch |e| {
+                var new_folder_handle = std.Io.Dir.cwd().openDir(bun.blockingIo(), new_folder, .{}) catch |e| {
                     Output.prettyError(
                         "<r><red>error<r>: failed to open directory <b>{s}<r> {s}<r>\n",
                         .{ new_folder, @errorName(e) },
                     );
                     Global.crash();
                 };
-                defer new_folder_handle.close();
+                defer new_folder_handle.close(bun.blockingIo());
 
                 if (has_nested_node_modules) {
                     if (bun.sys.renameatConcurrently(
@@ -822,8 +822,8 @@ fn overwritePackageInNodeModulesFolder(
     };
     defer src_path.deinit();
 
-    var cached_package_folder = try cache_dir.openDir(cache_dir_subpath, .{ .iterate = true });
-    defer cached_package_folder.close();
+    var cached_package_folder = try cache_dir.openDir(bun.blockingIo(), cache_dir_subpath, .{ .iterate = true });
+    defer cached_package_folder.close(bun.blockingIo());
 
     const ignore_directories: []const bun.OSPathSlice = &.{
         comptime bun.OSPathLiteral("node_modules"),

@@ -98,14 +98,14 @@ pub const UpdateInteractiveCommand = struct {
         const new_package_json_source = try manager.allocator.dupe(u8, package_json_writer.ctx.writtenWithoutTrailingZero());
 
         // Write the updated package.json
-        const write_file = std.fs.cwd().createFile(package_json_path, .{}) catch |err| {
+        const write_file = std.Io.Dir.cwd().createFile(bun.blockingIo(), package_json_path, .{}) catch |err| {
             manager.allocator.free(new_package_json_source);
             Output.errGeneric("Failed to write package.json at {s}: {s}", .{ package_json_path, @errorName(err) });
             return err;
         };
-        defer write_file.close();
+        defer write_file.close(bun.blockingIo());
 
-        write_file.writeAll(new_package_json_source) catch |err| {
+        write_file.writeStreamingAll(bun.blockingIo(), new_package_json_source) catch |err| {
             manager.allocator.free(new_package_json_source);
             Output.errGeneric("Failed to write package.json at {s}: {s}", .{ package_json_path, @errorName(err) });
             return err;

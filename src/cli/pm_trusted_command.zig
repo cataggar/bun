@@ -224,11 +224,11 @@ pub const TrustCommand = struct {
             defer node_modules_path_save.restore();
             node_modules_path.append(node_modules.relative_path);
 
-            var node_modules_dir = bun.openDir(std.fs.cwd(), node_modules.relative_path) catch |err| {
+            var node_modules_dir = bun.openDir(std.Io.Dir.cwd(), node_modules.relative_path) catch |err| {
                 if (err == error.ENOENT) continue;
                 return err;
             };
-            defer node_modules_dir.close();
+            defer node_modules_dir.close(bun.blockingIo());
 
             for (node_modules.dependencies) |dep_id| {
                 if (untrusted_dep_ids.contains(dep_id)) {
@@ -347,7 +347,8 @@ pub const TrustCommand = struct {
             progress.* = .{};
         }
 
-        const package_json_contents = try pm.root_package_json_file.readToEndAlloc(ctx.allocator, try pm.root_package_json_file.getEndPos());
+        const root_pkg_read = (bun.sys.File{ .handle = bun.FD.fromStdFile(pm.root_package_json_file) }).readToEnd(ctx.allocator);
+        const package_json_contents = try root_pkg_read.unwrap();
         defer ctx.allocator.free(package_json_contents);
 
         const package_json_source = logger.Source.initPathString(PackageManager.root_package_json_path, package_json_contents);
@@ -412,9 +413,9 @@ pub const TrustCommand = struct {
 
         const new_package_json_contents = package_json_writer.ctx.writtenWithoutTrailingZero();
 
-        try pm.root_package_json_file.pwriteAll(new_package_json_contents, 0);
+        try (bun.sys.File{ .handle = bun.FD.fromStdFile(pm.root_package_json_file) }).pwriteAll(new_package_json_contents, 0).unwrap();
         std.posix.ftruncate(pm.root_package_json_file.handle, new_package_json_contents.len) catch {};
-        pm.root_package_json_file.close();
+        pm.root_package_json_file.close(bun.blockingIo());
 
         if (comptime Environment.allow_assert) {
             bun.assertWithLocation(total_scripts_ran > 0, @src());

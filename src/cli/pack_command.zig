@@ -266,7 +266,7 @@ pub const PackCommand = struct {
             var dir, const dir_subpath, const dir_depth = dir_info;
             defer {
                 if (dir_depth != 1) {
-                    dir.close();
+                    dir.close(bun.blockingIo());
                 }
             }
 
@@ -418,7 +418,7 @@ pub const PackCommand = struct {
 
         while (dirs.pop()) |dir_info| {
             var dir, const dir_subpath, const dir_depth = dir_info;
-            defer dir.close();
+            defer dir.close(bun.blockingIo());
 
             while (ignores.getLastOrNull()) |last| {
                 if (last.depth < dir_depth) break;
@@ -502,7 +502,7 @@ pub const PackCommand = struct {
         entry_name: string,
         entry_subpath: stringZ,
     ) std.Io.Dir {
-        return dir.openDirZ(
+        return dir.openDir(bun.blockingIo(), 
             entryNameZ(entry_name, entry_subpath),
             .{ .iterate = true },
         ) catch |err| {
@@ -539,7 +539,7 @@ pub const PackCommand = struct {
         var bundled_pack_queue = PackQueue.init(ctx.allocator, {});
         if (ctx.bundled_deps.items.len == 0) return bundled_pack_queue;
 
-        var dir = root_dir.openDirZ("node_modules", .{ .iterate = true }) catch |err| {
+        var dir = root_dir.openDir(bun.blockingIo(), "node_modules", .{ .iterate = true }) catch |err| {
             switch (err) {
                 // ignore node_modules if it isn't a directory, or doesn't exist
                 error.NotDir, error.FileNotFound => return bundled_pack_queue,
@@ -550,7 +550,7 @@ pub const PackCommand = struct {
                 },
             }
         };
-        defer dir.close();
+        defer dir.close(bun.blockingIo());
 
         // A set of bundled dependency locations
         // - node_modules/is-even
@@ -572,10 +572,10 @@ pub const PackCommand = struct {
             if (strings.startsWithChar(_entry_name, '@')) {
                 const concat = try entrySubpath(ctx.allocator, "node_modules", _entry_name);
 
-                var scoped_dir = root_dir.openDirZ(concat, .{ .iterate = true }) catch {
+                var scoped_dir = root_dir.openDir(bun.blockingIo(), concat, .{ .iterate = true }) catch {
                     continue;
                 };
-                defer scoped_dir.close();
+                defer scoped_dir.close(bun.blockingIo());
 
                 var scoped_iter = DirIterator.iterate(.fromStdDir(scoped_dir), .u8);
                 while (scoped_iter.next().unwrap() catch null) |sub_entry| {
@@ -685,7 +685,7 @@ pub const PackCommand = struct {
 
         while (dirs.pop()) |dir_info| {
             var dir, const dir_subpath, const dir_depth = dir_info;
-            defer dir.close();
+            defer dir.close(bun.blockingIo());
 
             var iter = DirIterator.iterate(.fromStdDir(dir), .u8);
             while (iter.next().unwrap() catch null) |entry| {
@@ -729,7 +729,7 @@ pub const PackCommand = struct {
                                 // starting at `node_modules/is-even/node_modules/is-odd`
                                 var dep_dir_depth: usize = bundled_dir_info[2] + 2;
 
-                                if (root_dir.openDirZ(dep_subpath, .{ .iterate = true })) |dep_dir| {
+                                if (root_dir.openDir(bun.blockingIo(), dep_subpath, .{ .iterate = true })) |dep_dir| {
                                     const dedupe_entry = try dedupe.getOrPut(dep_subpath);
                                     if (dedupe_entry.found_existing) continue;
 
@@ -749,7 +749,7 @@ pub const PackCommand = struct {
                                         const parent_dep_subpath = dep_subpath[0 .. node_modules_end + 1 + dep_name.len :0];
                                         remain = remain[0..node_modules_start];
 
-                                        const parent_dep_dir = root_dir.openDirZ(parent_dep_subpath, .{ .iterate = true }) catch continue;
+                                        const parent_dep_dir = root_dir.openDir(bun.blockingIo(), parent_dep_subpath, .{ .iterate = true }) catch continue;
 
                                         const dedupe_entry = try dedupe.getOrPut(parent_dep_subpath);
                                         if (dedupe_entry.found_existing) continue :next_dep;
@@ -822,7 +822,7 @@ pub const PackCommand = struct {
             var dir, const dir_subpath, const dir_depth = dir_info;
             defer {
                 if (dir_depth != 1) {
-                    dir.close();
+                    dir.close(bun.blockingIo());
                 }
             }
 
@@ -1423,14 +1423,14 @@ pub const PackCommand = struct {
             var path_buf: PathBuffer = undefined;
             @memcpy(path_buf[0..abs_workspace_path.len], abs_workspace_path);
             path_buf[abs_workspace_path.len] = 0;
-            break :root_dir std.fs.openDirAbsoluteZ(path_buf[0..abs_workspace_path.len :0], .{
+            break :root_dir std.Io.Dir.openDirAbsolute(bun.blockingIo(), path_buf[0..abs_workspace_path.len :0], .{
                 .iterate = true,
             }) catch |err| {
                 Output.err(err, "failed to open root directory: {s}\n", .{abs_workspace_path});
                 Global.crash();
             };
         };
-        defer root_dir.close();
+        defer root_dir.close(bun.blockingIo());
 
         // Scan for a README file so the registry receives the same
         // `readme` / `readmeFilename` metadata that `npm publish` sends.
@@ -1456,7 +1456,7 @@ pub const PackCommand = struct {
                     try pack_queue.add(.{ .path = bin.path, .optional = true });
                 },
                 .dir => {
-                    const bin_dir = root_dir.openDir(bin.path, .{ .iterate = true }) catch {
+                    const bin_dir = root_dir.openDir(bun.blockingIo(), bin.path, .{ .iterate = true }) catch {
                         // non-existent bins are ignored
                         continue;
                     };
@@ -2461,14 +2461,14 @@ pub const PackCommand = struct {
 
             var ignore_kind: Kind = .@".npmignore";
 
-            const ignore_file = dir.openFileZ(".npmignore", .{}) catch |err| ignore_file: {
+            const ignore_file = dir.openFile(bun.blockingIo(), ".npmignore", .{}) catch |err| ignore_file: {
                 if (err != error.FileNotFound) {
                     // Crash if the file exists and fails to open. Don't want to create a tarball
                     // with files you want to ignore.
                     ignoreFileFail(dir, ignore_kind, .open, err);
                 }
                 ignore_kind = .@".gitignore";
-                break :ignore_file dir.openFileZ(".gitignore", .{}) catch |err2| {
+                break :ignore_file dir.openFile(bun.blockingIo(), ".gitignore", .{}) catch |err2| {
                     if (err2 != error.FileNotFound) {
                         ignoreFileFail(dir, ignore_kind, .open, err2);
                     }
@@ -2476,7 +2476,7 @@ pub const PackCommand = struct {
                     return null;
                 };
             };
-            defer ignore_file.close();
+            defer ignore_file.close(bun.blockingIo());
 
             const contents = File.from(ignore_file).readToEnd(allocator).unwrap() catch |err| {
                 ignoreFileFail(dir, ignore_kind, .read, err);

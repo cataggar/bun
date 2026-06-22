@@ -292,9 +292,9 @@ pub const Archiver = struct {
 
                     const size: usize = @intCast(@max(entry.size(), 0));
                     if (size > 0) {
-                        var opened = dir.openFileZ(pathname, .{ .mode = .write_only }) catch continue :loop;
-                        defer opened.close();
-                        const stat_size = try opened.getEndPos();
+                        var opened = dir.openFile(bun.blockingIo(), pathname, .{ .mode = .write_only }) catch continue :loop;
+                        defer opened.close(bun.blockingIo());
+                        const stat_size = (try opened.stat(bun.blockingIo())).size;
 
                         if (stat_size > 0) {
                             const is_already_top_level = dirname.len == 0;

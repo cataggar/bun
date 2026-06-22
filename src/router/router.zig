@@ -917,11 +917,13 @@ pub const MockServer = struct {
 fn makeTest(cwd_path: string, data: anytype) !void {
     Output.initTest();
     bun.assert(cwd_path.len > 1 and !strings.eql(cwd_path, "/") and !strings.endsWith(cwd_path, "bun"));
-    const bun_tests_dir = try std.fs.cwd().makeOpenPath("bun-test-scratch", .{});
-    bun_tests_dir.deleteTree(cwd_path) catch {};
+    const bun_tests_dir = try bun.MakePath.makeOpenPath(std.Io.Dir.cwd(), "bun-test-scratch", .{});
+    bun_tests_dir.deleteTree(bun.blockingIo(), cwd_path) catch {};
 
-    const cwd = try bun_tests_dir.makeOpenPath(cwd_path, .{});
-    try cwd.setAsCwd();
+    const cwd = try bun.MakePath.makeOpenPath(bun_tests_dir, cwd_path, .{});
+    var cwd_path_buf: bun.PathBuffer = undefined;
+    const cwd_abs = try bun.sys.getFdPath(.fromStdDir(cwd), &cwd_path_buf).unwrap();
+    try bun.sys.chdir(cwd_abs, cwd_abs).unwrap();
 
     const Data = @TypeOf(data);
     const fields: []const bun.meta.StructField = comptime bun.meta.fields(Data);
@@ -930,12 +932,12 @@ fn makeTest(cwd_path: string, data: anytype) !void {
         const value = @field(data, field.name);
 
         if (std.fs.path.dirname(field.name)) |dir| {
-            try cwd.makePath(dir);
+            try bun.makePath(cwd, dir);
         }
-        var file = try cwd.createFile(field.name, .{ .truncate = true });
-        try file.writeAll(value);
+        var file = try cwd.createFile(bun.blockingIo(), field.name, .{ .truncate = true });
+        try file.writeStreamingAll(bun.blockingIo(), value);
 
-        file.close();
+        file.close(bun.blockingIo());
     }
 }
 

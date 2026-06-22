@@ -127,7 +127,7 @@ pub const PackageInstaller = struct {
         pub fn makeAndOpenDir(this: *NodeModulesFolder, root: std.Io.Dir) !std.Io.Dir {
             const out = brk: {
                 if (comptime Environment.isPosix) {
-                    break :brk try root.makeOpenPath(this.path.items, .{ .iterate = true, .access_sub_paths = true });
+                    break :brk try bun.MakePath.makeOpenPath(root, this.path.items, .{ .iterate = true, .access_sub_paths = true });
                 }
 
                 break :brk (try bun.sys.openDirAtWindowsA(.fromStdDir(root), this.path.items, .{
@@ -892,7 +892,7 @@ pub const PackageInstaller = struct {
                         this.folder_path_buf[folder.len] = 0;
                         installer.cache_dir_subpath = this.folder_path_buf[0..folder.len :0];
                     }
-                    installer.cache_dir = std.fs.cwd();
+                    installer.cache_dir = std.Io.Dir.cwd();
                 } else {
                     // transitive folder dependencies are relative to their parent. they are not hoisted
                     @memcpy(this.folder_path_buf[0..folder.len], folder);
@@ -900,7 +900,7 @@ pub const PackageInstaller = struct {
                     installer.cache_dir_subpath = this.folder_path_buf[0..folder.len :0];
 
                     // cache_dir might not be created yet (if it's in node_modules)
-                    installer.cache_dir = std.fs.cwd();
+                    installer.cache_dir = std.Io.Dir.cwd();
                 }
             },
             .local_tarball => {
@@ -921,11 +921,11 @@ pub const PackageInstaller = struct {
                     this.folder_path_buf[folder.len] = 0;
                     installer.cache_dir_subpath = this.folder_path_buf[0..folder.len :0];
                 }
-                installer.cache_dir = std.fs.cwd();
+                installer.cache_dir = std.Io.Dir.cwd();
             },
             .root => {
                 installer.cache_dir_subpath = ".";
-                installer.cache_dir = std.fs.cwd();
+                installer.cache_dir = std.Io.Dir.cwd();
             },
             .symlink => {
                 const directory = this.manager.globalLinkDir();
@@ -934,7 +934,7 @@ pub const PackageInstaller = struct {
 
                 if (folder.len == 0 or (folder.len == 1 and folder[0] == '.')) {
                     installer.cache_dir_subpath = ".";
-                    installer.cache_dir = std.fs.cwd();
+                    installer.cache_dir = std.Io.Dir.cwd();
                 } else {
                     const global_link_dir = this.manager.globalLinkDirPath();
                     var ptr = &this.folder_path_buf;
@@ -1128,7 +1128,7 @@ pub const PackageInstaller = struct {
                         // and is not hoisted.
                         const dirname = std.fs.path.dirname(this.node_modules.path.items) orelse this.node_modules.path.items;
 
-                        installer.cache_dir = this.root_node_modules_folder.openDir(dirname, .{ .iterate = true, .access_sub_paths = true }) catch |err|
+                        installer.cache_dir = this.root_node_modules_folder.openDir(bun.blockingIo(), dirname, .{ .iterate = true, .access_sub_paths = true }) catch |err|
                             break :result .fail(err, .opening_cache_dir, @errorReturnTrace());
 
                         const result = if (resolution.tag == .root)

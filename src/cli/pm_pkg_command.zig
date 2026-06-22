@@ -756,7 +756,7 @@ pub const PmPkgCommand = struct {
         };
 
         const content = writer.ctx.writtenWithoutTrailingZero();
-        std.fs.cwd().writeFile(.{
+        std.Io.Dir.cwd().writeFile(bun.blockingIo(), .{
             .sub_path = path,
             .data = content,
         }) catch |err| {

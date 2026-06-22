@@ -416,7 +416,7 @@ pub const CreateCommand = struct {
                 progress.refresh();
 
                 const abs_template_path = filesystem.abs(&template_parts);
-                const template_dir = std.fs.openDirAbsolute(abs_template_path, .{ .iterate = true }) catch |err| {
+                const template_dir = std.Io.Dir.openDirAbsolute(bun.blockingIo(), abs_template_path, .{ .iterate = true }) catch |err| {
                     node.end();
                     progress.refresh();
 
@@ -424,8 +424,8 @@ pub const CreateCommand = struct {
                     Global.exit(1);
                 };
 
-                std.fs.deleteTreeAbsolute(destination) catch {};
-                const destination_dir__ = std.fs.cwd().makeOpenPath(destination, .{}) catch |err| {
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), destination) catch {};
+                const destination_dir__ = std.Io.Dir.cwd().createDirPathOpen(bun.blockingIo(), destination, .{ .open_options = .{} }) catch |err| {
                     node.end();
 
                     progress.refresh();
@@ -513,11 +513,11 @@ pub const CreateCommand = struct {
                             }
                             if (entry.kind != .file) continue;
 
-                            var outfile = bun.FD.fromStdFile(destination_dir_.createFile(entry.path, .{}) catch brk: {
+                            var outfile = bun.FD.fromStdFile(destination_dir_.createFile(bun.blockingIo(), entry.path, .{}) catch brk: {
                                 if (bun.Dirname.dirname(bun.OSPathChar, entry.path)) |entry_dirname| {
                                     bun.MakePath.makePath(bun.OSPathChar, destination_dir_, entry_dirname) catch {};
                                 }
-                                break :brk destination_dir_.createFile(entry.path, .{}) catch |err| {
+                                break :brk destination_dir_.createFile(bun.blockingIo(), entry.path, .{}) catch |err| {
                                     node_.end();
                                     progress_.refresh();
                                     Output.err(err, "failed to copy file {f}", .{bun.fmt.fmtOSPath(entry.path, .{})});
@@ -559,7 +559,7 @@ pub const CreateCommand = struct {
                     if (comptime Environment.isWindows) &template_path_buf,
                 );
 
-                package_json_file = destination_dir.openFile("package.json", .{ .mode = .read_write }) catch null;
+                package_json_file = destination_dir.openFile(bun.blockingIo(), "package.json", .{ .mode = .read_write }) catch null;
 
                 read_package_json: {
                     if (package_json_file) |pkg| {
@@ -568,7 +568,7 @@ pub const CreateCommand = struct {
                                 break :brk try pkg.getEndPos();
                             }
 
-                            const stat = pkg.stat() catch |err| {
+                            const stat = pkg.stat(bun.blockingIo()) catch |err| {
                                 node.end();
 
                                 progress.refresh();
@@ -593,7 +593,7 @@ pub const CreateCommand = struct {
                         package_json_contents.list.expandToCapacity();
 
                         const prev_file_pos = if (comptime Environment.isWindows) try pkg.getPos() else 0;
-                        _ = pkg.preadAll(package_json_contents.list.items, 0) catch |err| {
+                        _ = (bun.sys.File{ .handle = bun.FD.fromStdFile(pkg) }).readAll(package_json_contents.list.items).unwrap() catch |err| {
                             package_json_file = null;
 
                             node.end();
@@ -626,21 +626,21 @@ pub const CreateCommand = struct {
         const PATH = env_loader.map.get("PATH") orelse "";
 
         {
-            var parent_dir = try std.fs.openDirAbsolute(destination, .{});
-            defer parent_dir.close();
+            var parent_dir = try std.Io.Dir.openDirAbsolute(bun.blockingIo(), destination, .{});
+            defer parent_dir.close(bun.blockingIo());
             if (comptime Environment.isWindows) {
-                parent_dir.copyFile("gitignore", parent_dir, ".gitignore", .{}) catch {};
+                parent_dir.copyFile("gitignore", parent_dir, ".gitignore", bun.blockingIo(), .{}) catch {};
             } else {
-                std.posix.linkat(parent_dir.fd, "gitignore", parent_dir.fd, ".gitignore", 0) catch {};
+                std.posix.linkat(parent_dir.handle, "gitignore", parent_dir.handle, ".gitignore", 0) catch {};
             }
 
             std.posix.unlinkat(
-                parent_dir.fd,
+                parent_dir.handle,
                 "gitignore",
                 0,
             ) catch {};
             std.posix.unlinkat(
-                parent_dir.fd,
+                parent_dir.handle,
                 ".npmignore",
                 0,
             ) catch {};
@@ -1624,18 +1624,20 @@ pub const CreateCommand = struct {
 
         if (create_options.open) {
             if (which(&bun_path_buf, PATH, destination, "bun")) |bin| {
-                var argv = [_]string{bun.asByteSlice(bin)};
-                var child = std.process.Child.init(&argv, ctx.allocator);
-                child.cwd = destination;
-                child.stdin_behavior = .Inherit;
-                child.stdout_behavior = .Inherit;
-                child.stderr_behavior = .Inherit;
-
                 const open = @import("./open.zig");
                 open.openURL("http://localhost:3000/");
 
-                try child.spawn();
-                _ = child.wait() catch {};
+                _ = bun.spawnSync(&.{
+                    .argv = &.{bun.asByteSlice(bin)},
+                    .envp = null,
+                    .cwd = destination,
+                    .stdin = .inherit,
+                    .stdout = .inherit,
+                    .stderr = .inherit,
+                    .windows = if (bun.Environment.isWindows) .{
+                        .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                    },
+                }) catch {};
             }
         }
     }
@@ -1876,27 +1878,27 @@ pub const Example = struct {
             if (env_loader.map.get("BUN_CREATE_DIR")) |home_dir| {
                 var parts = [_]string{home_dir};
                 const outdir_path = filesystem.absBuf(&parts, &home_dir_buf);
-                folders[0] = std.fs.cwd().openDir(outdir_path, .{}) catch bun.invalid_fd.stdDir();
+                folders[0] = std.Io.Dir.cwd().openDir(bun.blockingIo(), outdir_path, .{}) catch bun.invalid_fd.stdDir();
             }
 
             {
                 var parts = [_]string{ filesystem.top_level_dir, BUN_CREATE_DIR };
                 const outdir_path = filesystem.absBuf(&parts, &home_dir_buf);
-                folders[1] = std.fs.cwd().openDir(outdir_path, .{}) catch bun.invalid_fd.stdDir();
+                folders[1] = std.Io.Dir.cwd().openDir(bun.blockingIo(), outdir_path, .{}) catch bun.invalid_fd.stdDir();
             }
 
             if (env_loader.map.get(bun.env_var.HOME.key())) |home_dir| {
                 var parts = [_]string{ home_dir, BUN_CREATE_DIR };
                 const outdir_path = filesystem.absBuf(&parts, &home_dir_buf);
-                folders[2] = std.fs.cwd().openDir(outdir_path, .{}) catch bun.invalid_fd.stdDir();
+                folders[2] = std.Io.Dir.cwd().openDir(bun.blockingIo(), outdir_path, .{}) catch bun.invalid_fd.stdDir();
             }
 
             // subfolders with package.json
             for (folders) |folder| {
-                if (folder.fd != bun.invalid_fd.cast()) {
+                if (folder.handle != bun.invalid_fd.cast()) {
                     var iter = folder.iterate();
 
-                    loop: while (iter.next() catch null) |entry_| {
+                    loop: while (iter.next(bun.blockingIo()) catch null) |entry_| {
                         const entry: std.Io.Dir.Entry = entry_;
 
                         switch (entry.kind) {
@@ -1914,7 +1916,7 @@ pub const Example = struct {
 
                                 const path: [:0]u8 = home_dir_buf[0 .. entry.name.len + 1 + "package.json".len :0];
 
-                                folder.accessZ(path, .{ .mode = .read_only }) catch continue :loop;
+                                folder.access(bun.blockingIo(), path, .{}) catch continue :loop;
 
                                 try examples.append(
                                     Example{
@@ -2406,14 +2408,17 @@ const GitHandler = struct {
 
             inline for (comptime std.meta.fieldNames(@TypeOf(Commands))) |command_field| {
                 const command: []const string = @field(git_commands, command_field);
-                var process = std.process.Child.init(command, default_allocator);
-                process.cwd = destination;
-                process.stdin_behavior = .Inherit;
-                process.stdout_behavior = .Inherit;
-                process.stderr_behavior = .Inherit;
-
-                _ = try process.spawnAndWait();
-                _ = process.kill() catch {};
+                _ = bun.spawnSync(&.{
+                    .argv = command,
+                    .envp = null,
+                    .cwd = destination,
+                    .stdin = .inherit,
+                    .stdout = .inherit,
+                    .stderr = .inherit,
+                    .windows = if (bun.Environment.isWindows) .{
+                        .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                    },
+                }) catch {};
             }
 
             Output.prettyError("\n", .{});

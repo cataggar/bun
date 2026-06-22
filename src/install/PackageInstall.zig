@@ -1269,8 +1269,9 @@ pub const PackageInstall = struct {
         // cache_dir_subpath in here is actually the full path to the symlink pointing to the linked package
         const symlinked_path = this.cache_dir_subpath;
         var to_buf: bun.PathBuffer = undefined;
-        const to_path = this.cache_dir.realpath(symlinked_path, &to_buf) catch |err|
+        const to_path_len = this.cache_dir.realPathFile(bun.blockingIo(), symlinked_path, &to_buf) catch |err|
             return Result.fail(err, .linking_dependency, @errorReturnTrace());
+        const to_path = to_buf[0..to_path_len];
 
         const dest = std.fs.path.basename(dest_path);
         // When we're linking on Windows, we want to avoid keeping the source directory handle open

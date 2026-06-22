@@ -765,8 +765,16 @@ pub const PublishCommand = struct {
 
         while ('\n' != Output.buffered_stdin.reader().readByte() catch return) {}
 
-        var child = std.process.Child.init(&.{ Open.opener, auth_url }, bun.default_allocator);
-        _ = child.spawnAndWait() catch return;
+        _ = bun.spawnSync(&.{
+            .argv = &.{ Open.opener, auth_url },
+            .envp = null,
+            .stdin = .inherit,
+            .stdout = .inherit,
+            .stderr = .inherit,
+            .windows = if (bun.Environment.isWindows) .{
+                .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+            },
+        }) catch return;
     }
 
     fn getOTP(
@@ -1103,8 +1111,8 @@ pub const PublishCommand = struct {
         allocator: std.mem.Allocator,
         abs_workspace_path: string,
     ) OOM!?ReadmeInfo {
-        var workspace_dir = std.fs.openDirAbsolute(abs_workspace_path, .{ .iterate = true }) catch return null;
-        defer workspace_dir.close();
+        var workspace_dir = std.Io.Dir.openDirAbsolute(bun.blockingIo(), abs_workspace_path, .{ .iterate = true }) catch return null;
+        defer workspace_dir.close(bun.blockingIo());
 
         var iter = bun.DirIterator.iterate(.fromStdDir(workspace_dir), .u8);
         while (iter.next().unwrap() catch null) |entry| {
@@ -1287,7 +1295,7 @@ pub const PublishCommand = struct {
 
                 while (dirs.pop()) |dir_info| {
                     var dir, const dir_subpath, const close_dir = dir_info;
-                    defer if (close_dir) dir.close();
+                    defer if (close_dir) dir.close(bun.blockingIo());
 
                     var iter = bun.DirIterator.iterate(.fromStdDir(dir), .u8);
                     while (iter.next().unwrap() catch null) |entry| {
@@ -1321,7 +1329,7 @@ pub const PublishCommand = struct {
                         });
 
                         if (entry.kind == .directory) {
-                            const subdir = dir.openDirZ(name, .{ .iterate = true }) catch {
+                            const subdir = dir.openDir(bun.blockingIo(), name, .{ .iterate = true }) catch {
                                 continue;
                             };
                             try dirs.append(allocator, .{ subdir, subpath, true });

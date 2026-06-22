@@ -408,7 +408,7 @@ pub fn moveToCacheDirectory(
                                 )) {
                                     .err => {},
                                     .result => {
-                                        tmpdir.deleteTree(tempdest) catch {};
+                                        tmpdir.deleteTree(bun.blockingIo(), tempdest) catch {};
                                     },
                                 }
                                 did_retry = true;

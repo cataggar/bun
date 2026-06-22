@@ -507,7 +507,7 @@ pub const FD = packed struct(backing_int) {
 
     // TODO: make our own version of deleteTree
     pub fn deleteTree(dir: FD, subpath: []const u8) !void {
-        try dir.stdDir().deleteTree(subpath);
+        try dir.stdDir().deleteTree(bun.blockingIo(), subpath);
     }
 
     // The following functions are from bun.sys but with the 'f' prefix dropped

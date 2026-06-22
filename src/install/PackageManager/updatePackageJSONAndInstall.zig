@@ -433,7 +433,7 @@ fn updatePackageJSONAndInstallWithManagerWithUpdates(
                 return;
             }
 
-            var cwd = std.fs.cwd();
+            var cwd = std.Io.Dir.cwd();
             // This is not exactly correct
             var node_modules_buf: bun.PathBuffer = undefined;
             bun.copy(u8, &node_modules_buf, "node_modules" ++ std.fs.path.sep_str);
@@ -446,7 +446,7 @@ fn updatePackageJSONAndInstallWithManagerWithUpdates(
                 // This is a quick & dirty cleanup intended for when deleting top-level dependencies
                 if (std.mem.indexOfScalar(PackageNameHash, name_hashes, String.Builder.stringHash(request.name)) == null) {
                     bun.copy(u8, offset_buf, request.name);
-                    cwd.deleteTree(node_modules_buf[0 .. "node_modules/".len + request.name.len]) catch {};
+                    cwd.deleteTree(bun.blockingIo(), node_modules_buf[0 .. "node_modules/".len + request.name.len]) catch {};
                 }
             }
 
@@ -454,9 +454,9 @@ fn updatePackageJSONAndInstallWithManagerWithUpdates(
             // This could be slow if there are a lot of symlinks
             if (bun.openDir(cwd, manager.options.bin_path)) |node_modules_bin_handle| {
                 var node_modules_bin: std.Io.Dir = node_modules_bin_handle;
-                defer node_modules_bin.close();
+                defer node_modules_bin.close(bun.blockingIo());
                 var iter: std.Io.Dir.Iterator = node_modules_bin.iterate();
-                iterator: while (iter.next() catch null) |entry| {
+                iterator: while (iter.next(bun.blockingIo()) catch null) |entry| {
                     switch (entry.kind) {
                         std.Io.Dir.Entry.Kind.sym_link => {
 
@@ -466,12 +466,12 @@ fn updatePackageJSONAndInstallWithManagerWithUpdates(
                             node_modules_buf[entry.name.len] = 0;
                             const buf: [:0]u8 = node_modules_buf[0..entry.name.len :0];
 
-                            var file = node_modules_bin.openFileZ(buf, .{ .mode = .read_only }) catch {
-                                node_modules_bin.deleteFileZ(buf) catch {};
+                            var file = node_modules_bin.openFile(bun.blockingIo(), buf, .{ .mode = .read_only }) catch {
+                                node_modules_bin.deleteFile(bun.blockingIo(), buf) catch {};
                                 continue :iterator;
                             };
 
-                            file.close();
+                            file.close(bun.blockingIo());
                         },
                         else => {},
                     }

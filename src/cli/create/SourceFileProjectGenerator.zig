@@ -96,7 +96,7 @@ fn createFile(filename: []const u8, contents: []const u8) bun.sys.Maybe(bool) {
 
     // Create parent directories if needed
     if (std.fs.path.dirname(filename)) |dirname| {
-        bun.makePath(std.fs.cwd(), dirname) catch {};
+        bun.makePath(std.Io.Dir.cwd(), dirname) catch {};
     }
 
     // Open file for writing
