@@ -472,7 +472,7 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> creating node-gyp tempdir", .{@errorName(err)});
             Global.crash();
         };
-        defer node_gyp_tempdir.close();
+        defer node_gyp_tempdir.close(bun.blockingIo());
 
         const file_name = switch (Environment.os) {
             else => "node-gyp",
@@ -483,11 +483,11 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             .windows => 0, // windows does not have an executable bit
         };
 
-        var node_gyp_file = node_gyp_tempdir.createFile(file_name, .{ .mode = mode }) catch |err| {
+        var node_gyp_file = node_gyp_tempdir.createFile(bun.blockingIo(), file_name, .{ .mode = mode }) catch |err| {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> creating node-gyp tempdir", .{@errorName(err)});
             Global.crash();
         };
-        defer node_gyp_file.close();
+        defer node_gyp_file.close(bun.blockingIo());
 
         const content = switch (Environment.os) {
             .windows =>
@@ -508,7 +508,7 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             ,
         };
 
-        node_gyp_file.writeAll(content) catch |err| {
+        node_gyp_file.writeStreamingAll(bun.blockingIo(), content) catch |err| {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> writing to " ++ file_name ++ " file", .{@errorName(err)});
             Global.crash();
         };
@@ -633,7 +633,7 @@ pub fn init(
                 package_json_path_buf[this_cwd.len + "/package.json".len] = 0;
                 const package_json_path = package_json_path_buf[0 .. this_cwd.len + "/package.json".len :0];
 
-                break :child std.fs.cwd().openFileZ(
+                break :child bun.openFileZ(
                     package_json_path,
                     .{ .mode = if (need_write) .read_write else .read_only },
                 ) catch |err| switch (err) {
@@ -700,17 +700,17 @@ pub fn init(
                     parent_path_buf[parent_without_trailing_slash.len..parent_path_buf.len][0.."/package.json".len].* = "/package.json".*;
                     parent_path_buf[parent_without_trailing_slash.len + "/package.json".len] = 0;
 
-                    const json_file = std.fs.cwd().openFileZ(
-                        parent_path_buf[0 .. parent_without_trailing_slash.len + "/package.json".len :0].ptr,
+                    const json_file = bun.openFileZ(
+                        parent_path_buf[0 .. parent_without_trailing_slash.len + "/package.json".len :0],
                         .{ .mode = .read_write },
                     ) catch {
                         continue;
                     };
-                    defer if (!found) json_file.close();
-                    const json_stat_size = try json_file.getEndPos();
+                    defer if (!found) json_file.close(bun.blockingIo());
+                    const json_stat_size = (try json_file.stat(bun.blockingIo())).size;
                     const json_buf = try ctx.allocator.alloc(u8, json_stat_size + 64);
                     defer ctx.allocator.free(json_buf);
-                    const json_len = try json_file.preadAll(json_buf, 0);
+                    const json_len = try (bun.sys.File{ .handle = bun.FD.fromStdFile(json_file) }).readAll(json_buf).unwrap();
                     const json_path = try bun.getFdPath(.fromStdFile(json_file), &root_package_json_path_buf);
                     const json_source = logger.Source.initPathString(json_path, json_buf[0..json_len]);
                     initializeStore();
@@ -757,7 +757,7 @@ pub fn init(
                             if (strings.eqlLong(maybe_workspace_path, path, true)) {
                                 fs.top_level_dir = try bun.default_allocator.dupeZ(u8, parent);
                                 found = true;
-                                child_json.close();
+                                child_json.close(bun.blockingIo());
                                 if (comptime Environment.isWindows) {
                                     try json_file.seekTo(0);
                                 }
