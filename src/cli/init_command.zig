@@ -854,17 +854,19 @@ pub const InitCommand = struct {
 
                 if (existsZ("package.json") and need_run_bun_install) {
                     Output.prettyln("", .{});
-                    var process = std.process.Child.init(
-                        &.{
+                    _ = bun.spawnSync(&.{
+                        .argv = &.{
                             try bun.selfExePath(),
                             "install",
                         },
-                        alloc,
-                    );
-                    process.stderr_behavior = .Inherit;
-                    process.stdin_behavior = .Inherit;
-                    process.stdout_behavior = .Inherit;
-                    _ = try process.spawnAndWait();
+                        .envp = null,
+                        .stderr = .inherit,
+                        .stdin = .inherit,
+                        .stdout = .inherit,
+                        .windows = if (bun.Environment.isWindows) .{
+                            .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                        },
+                    }) catch {};
                 }
             },
             else => {},
