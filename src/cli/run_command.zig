@@ -676,16 +676,19 @@ pub const RunCommand = struct {
                 var retried = false;
                 while (true) {
                     inner: {
-                        std.posix.symlinkZ(argv0, path) catch |err| {
-                            if (err == error.PathAlreadyExists) break :inner;
-                            if (retried)
-                                return;
+                        switch (bun.sys.symlink(argv0, path)) {
+                            .result => {},
+                            .err => |err| {
+                                if (err.getErrno() == .EXIST) break :inner;
+                                if (retried)
+                                    return;
 
-                            std.fs.makeDirAbsoluteZ(bun_node_dir) catch {};
+                                std.Io.Dir.cwd().createDir(bun.blockingIo(), bun_node_dir, .default_dir) catch {};
 
-                            retried = true;
-                            continue;
-                        };
+                                retried = true;
+                                continue;
+                            },
+                        }
                     }
                     break;
                 }
