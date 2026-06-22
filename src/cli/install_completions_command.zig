@@ -13,11 +13,11 @@ pub const InstallCompletionsCommand = struct {
         // first try installing the symlink into the same directory as the bun executable
         const exe = try bun.selfExePath();
         var target_buf: bun.PathBuffer = undefined;
-        var target = std.fmt.bufPrintZ(&target_buf, "{s}/" ++ bunx_name, .{std.fs.path.dirname(exe).?}) catch unreachable;
+        var target = bun.fmt.bufPrintZ(&target_buf, "{s}/" ++ bunx_name, .{std.fs.path.dirname(exe).?}) catch unreachable;
         bun.sys.symlink(exe, target).unwrap() catch {
             outer: {
                 if (bun.env_var.BUN_INSTALL.get()) |install_dir| {
-                    target = std.fmt.bufPrintZ(&target_buf, "{s}/bin/" ++ bunx_name, .{install_dir}) catch unreachable;
+                    target = bun.fmt.bufPrintZ(&target_buf, "{s}/bin/" ++ bunx_name, .{install_dir}) catch unreachable;
                     bun.sys.symlink(exe, target).unwrap() catch break :outer;
                     return;
                 }
@@ -26,7 +26,7 @@ pub const InstallCompletionsCommand = struct {
             // if that fails, try $HOME/.bun/bin
             outer: {
                 if (bun.env_var.HOME.get()) |home_dir| {
-                    target = std.fmt.bufPrintZ(&target_buf, "{s}/.bun/bin/" ++ bunx_name, .{home_dir}) catch unreachable;
+                    target = bun.fmt.bufPrintZ(&target_buf, "{s}/.bun/bin/" ++ bunx_name, .{home_dir}) catch unreachable;
                     bun.sys.symlink(exe, target).unwrap() catch break :outer;
                     return;
                 }
@@ -35,7 +35,7 @@ pub const InstallCompletionsCommand = struct {
             // if that fails, try $HOME/.local/bin
             outer: {
                 if (bun.env_var.HOME.get()) |home_dir| {
-                    target = std.fmt.bufPrintZ(&target_buf, "{s}/.local/bin/" ++ bunx_name, .{home_dir}) catch unreachable;
+                    target = bun.fmt.bufPrintZ(&target_buf, "{s}/.local/bin/" ++ bunx_name, .{home_dir}) catch unreachable;
                     bun.sys.symlink(exe, target).unwrap() catch break :outer;
                     return;
                 }
