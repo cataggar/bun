@@ -906,7 +906,7 @@ pub const FileSystem = struct {
                     .inode = stat.inode,
                     .size = stat.size,
                     .mtime = stat.mtime,
-                    .mode = stat.mode,
+                    .mode = stat.permissions.toMode(),
                     // .uid = stat.
                 };
             }

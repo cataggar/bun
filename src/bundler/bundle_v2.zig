@@ -1576,7 +1576,7 @@ pub const BundleV2 = struct {
 
         this.waitForParse();
 
-        minify_duration.* = @as(u64, @intCast(@divTrunc(@as(i64, @truncate(std.time.nanoTimestamp())) - @as(i64, @truncate(bun.cli.start_time)), @as(i64, std.time.ns_per_ms))));
+        minify_duration.* = @as(u64, @intCast(@divTrunc(@as(i64, @truncate(bun.SystemTimer.nanoTimestamp())) - @as(i64, @truncate(bun.cli.start_time)), @as(i64, std.time.ns_per_ms))));
         source_code_size.* = this.source_code_length;
 
         if (this.transpiler.log.hasErrors()) {

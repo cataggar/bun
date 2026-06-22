@@ -719,10 +719,17 @@ pub const BuildCommand = struct {
 fn exitOrWatch(code: u8, watch: bool) noreturn {
     if (watch) {
         // the watcher thread will exit the process
-        std.Thread.sleep(std.math.maxInt(u64) - 1);
+        // Zig 0.17 removed std.Thread.sleep; block this thread on libc nanosleep.
+        const sec_t = @FieldType(std.c.timespec, "sec");
+        while (true) {
+            var req: std.c.timespec = .{ .sec = std.math.maxInt(sec_t), .nsec = 0 };
+            _ = nanosleep(&req, null);
+        }
     }
     Global.exit(code);
 }
+
+extern "c" fn nanosleep(rqtp: *const std.c.timespec, rmtp: ?*std.c.timespec) c_int;
 
 fn printSummary(bundled_end: i128, minify_duration: u64, minified: bool, input_code_length: usize, reachable_file_count: usize, output_files: []const options.OutputFile) void {
     const padding_buf = @as([16]u8, @splat(' '));

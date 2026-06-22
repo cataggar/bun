@@ -260,7 +260,7 @@ pub fn writeToDisk(f: OutputFile, root_dir: std.Io.Dir, root_dir_path: []const u
                 rel_path = resolve_path.relative(root_dir_path, f.dest_path);
                 if (std.fs.path.dirname(rel_path)) |parent| {
                     if (parent.len > root_dir_path.len) {
-                        try root_dir.makePath(parent);
+                        try bun.makePath(root_dir, parent);
                     }
                 }
             }
