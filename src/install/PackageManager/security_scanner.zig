@@ -551,8 +551,9 @@ const JSONBuilder = struct {
     collector: *PackageCollector,
 
     pub fn buildPackageJSON(this: JSONBuilder) ![]const u8 {
-        var json_buf: std.ArrayList(u8) = .empty;
-        var writer = json_buf.writer(this.manager.allocator);
+        var json_aw: std.Io.Writer.Allocating = .init(this.manager.allocator);
+        defer json_aw.deinit();
+        const writer = &json_aw.writer;
 
         const pkgs = this.manager.lockfile.packages.slice();
         const pkg_names = pkgs.items(.name);
@@ -609,7 +610,7 @@ const JSONBuilder = struct {
         }
 
         try writer.writeAll("\n]");
-        return json_buf.toOwnedSlice(this.manager.allocator);
+        return json_aw.toOwnedSlice();
     }
 };
 
