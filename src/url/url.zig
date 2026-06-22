@@ -818,9 +818,8 @@ pub const PercentEncoding = struct {
         const buf = try allocator.alloc(u8, input.len);
         errdefer allocator.free(buf);
 
-        var stream = std.io.fixedBufferStream(buf);
-        const writer = stream.writer();
-        const len = try decode(@TypeOf(writer), writer, input);
+        var writer = std.Io.Writer.fixed(buf);
+        const len = try decode(@TypeOf(&writer), &writer, input);
 
         return buf[0..len];
     }

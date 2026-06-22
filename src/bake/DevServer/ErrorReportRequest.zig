@@ -38,11 +38,10 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
     var should_finalize_self = false;
     defer if (should_finalize_self) ctx.finalize();
 
-    var s = std.io.fixedBufferStream(body);
-    const reader = s.reader();
+    var reader = std.Io.Reader.fixed(body);
 
-    var sfa_general = std.heap.stackFallback(65536, ctx.dev.allocator());
-    var sfa_sourcemap = std.heap.stackFallback(65536, ctx.dev.allocator());
+    var sfa_general = bun.stackFallback(65536, ctx.dev.allocator());
+    var sfa_sourcemap = bun.stackFallback(65536, ctx.dev.allocator());
     const temp_alloc = sfa_general.get();
     var arena = std.heap.ArenaAllocator.init(temp_alloc);
     defer arena.deinit();

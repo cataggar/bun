@@ -185,7 +185,7 @@ pub const State = opaque {
                 .int, .comptime_int => {
                     s.defineSymbol(
                         field.name,
-                        std.fmt.bufPrintZ(&buf, "{d}", .{value}) catch unreachable,
+                        std.fmt.bufPrintSentinel(&buf, "{d}", .{value}, 0) catch unreachable,
                     );
                 },
                 .pointer => {

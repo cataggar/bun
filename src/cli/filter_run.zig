@@ -339,7 +339,7 @@ const State = struct {
     }
 
     fn flushDrawBuf(this: *This) void {
-        std.fs.File.stdout().writeAll(this.draw_buf.items) catch {};
+        std.Io.File.stdout().writeAll(this.draw_buf.items) catch {};
     }
 
     pub fn abort(this: *This) void {

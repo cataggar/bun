@@ -18,7 +18,7 @@ const Progress = @This();
 
 /// `null` if the current node (and its children) should
 /// not print on update()
-terminal: ?std.fs.File = undefined,
+terminal: ?std.Io.File = undefined,
 
 /// Is this a windows API terminal (note: this is not the same as being run on windows
 /// because other terminals exist like MSYS/git-bash)
@@ -177,7 +177,7 @@ pub const Node = struct {
 /// API to return Progress rather than accept it as a parameter.
 /// `estimated_total_items` value of 0 means unknown.
 pub fn start(self: *Progress, name: []const u8, estimated_total_items: usize) *Node {
-    const stderr = std.fs.File.stderr();
+    const stderr = std.Io.File.stderr();
     self.terminal = null;
     if (stderr.supportsAnsiEscapeCodes()) {
         self.terminal = stderr;
@@ -363,7 +363,7 @@ pub fn log(self: *Progress, comptime format: []const u8, args: anytype) void {
         (std.debug).print(format, args);
         return;
     };
-    var file_writer = file.writerStreaming(&.{});
+    var file_writer = file.writerStreaming(bun.blockingIo(), &.{});
     const writer = &file_writer.interface;
     self.refresh();
     writer.print(format, args) catch {

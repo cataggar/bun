@@ -16,7 +16,7 @@ fn alert(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) bun.JSErr
 
     // 2. If the method was invoked with no arguments, then let message be the empty string; otherwise, let message be the method's first argument.
     if (has_message) {
-        var state = std.heap.stackFallback(2048, bun.default_allocator);
+        var state = bun.stackFallback(2048, bun.default_allocator);
         const allocator = state.get();
         const message = try arguments[0].toSlice(globalObject, allocator);
         defer message.deinit();
@@ -46,9 +46,9 @@ fn alert(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) bun.JSErr
     bun.Output.flush();
 
     // 7. Optionally, pause while waiting for the user to acknowledge the message.
-    var stdin = std.fs.File.stdin();
+    var stdin = std.Io.File.stdin();
     var stdin_buf: [1]u8 = undefined;
-    var stdin_reader = stdin.readerStreaming(&stdin_buf);
+    var stdin_reader = stdin.readerStreaming(bun.blockingIo(), &stdin_buf);
     const reader = &stdin_reader.interface;
     while (true) {
         const byte = reader.takeByte() catch break;
@@ -67,7 +67,7 @@ fn confirm(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) bun.JSE
     const has_message = arguments.len != 0;
 
     if (has_message) {
-        var state = std.heap.stackFallback(1024, bun.default_allocator);
+        var state = bun.stackFallback(1024, bun.default_allocator);
         const allocator = state.get();
         // 2. Set message to the result of normalizing newlines given message.
         // *  Not pertinent to a server runtime so we will just let the terminal handle this.
@@ -96,9 +96,9 @@ fn confirm(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) bun.JSE
     bun.Output.flush();
 
     // 6. Pause until the user responds either positively or negatively.
-    var stdin = std.fs.File.stdin();
+    var stdin = std.Io.File.stdin();
     var stdin_buf: [1024]u8 = undefined;
-    var stdin_reader = stdin.readerStreaming(&stdin_buf);
+    var stdin_reader = stdin.readerStreaming(bun.blockingIo(), &stdin_buf);
     const reader = &stdin_reader.interface;
 
     const first_byte = reader.takeByte() catch {
@@ -201,7 +201,7 @@ pub const prompt = struct {
         callframe: *jsc.CallFrame,
     ) bun.JSError!jsc.JSValue {
         const arguments = callframe.arguments_old(3).slice();
-        var state = std.heap.stackFallback(2048, bun.default_allocator);
+        var state = bun.stackFallback(2048, bun.default_allocator);
         const allocator = state.get();
         var output = bun.Output.writer();
         const has_message = arguments.len != 0;

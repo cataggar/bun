@@ -1071,7 +1071,7 @@ pub fn normalizePathWindows(
     }
 
     const base_fd = if (dir_fd == bun.invalid_fd)
-        std.fs.cwd().fd
+        std.Io.Dir.cwd().handle
     else
         dir_fd.cast();
 
@@ -1140,7 +1140,7 @@ fn openDirAtWindowsNtPath(
         .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(path))
             null
         else if (dirFd == bun.invalid_fd)
-            std.fs.cwd().fd
+            std.Io.Dir.cwd().handle
         else
             dirFd.cast(),
         .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
@@ -1350,7 +1350,7 @@ pub fn openFileAtWindowsNtPath(
         .RootDirectory = if (bun.strings.hasPrefixComptimeType(u16, path, windows.nt_object_prefix))
             null
         else if (dir == bun.invalid_fd)
-            std.fs.cwd().fd
+            std.Io.Dir.cwd().handle
         else
             dir.cast(),
         .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
@@ -2275,7 +2275,7 @@ pub inline fn sigaddset(set: *sigset_t, sig: u8) void {
         set.* |= @as(c_ulong, 1) << @as(u6, @intCast(sig - 1));
         return;
     }
-    posix.sigaddset(set, sig);
+    posix.sigaddset(set, @enumFromInt(sig));
 }
 
 pub fn sigaction(sig: u8, noalias act: ?*const Sigaction, noalias oact: ?*Sigaction) void {
@@ -2289,7 +2289,11 @@ pub fn sigaction(sig: u8, noalias act: ?*const Sigaction, noalias oact: ?*Sigact
         *const fn (c_int, noalias ?*const Sigaction, noalias ?*Sigaction) callconv(.c) c_int,
         .{ .name = "sigaction" },
     ) else std.c.sigaction;
-    _ = libc_sigaction(sig, act, oact);
+    if (comptime Environment.isAndroid) {
+        _ = libc_sigaction(sig, act, oact);
+    } else {
+        _ = libc_sigaction(@enumFromInt(sig), act, oact);
+    }
 }
 
 pub fn ppoll(fds: []std.posix.pollfd, timeout: ?*std.posix.timespec, sigmask: ?*const std.posix.sigset_t) Maybe(usize) {
@@ -2998,7 +3002,7 @@ pub fn unlinkat(dirfd: bun.FD, to: anytype) Maybe(void) {
 /// on host devfs, so readlink fails. Use fdescfs at /dev/fd instead.
 fn getFdPathFreeBSDLinuxulator(fd: bun.FD, out_buffer: *bun.PathBuffer) Maybe([]u8) {
     var buf: ["/dev/fd/-2147483648".len + 1:0]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&buf, "/dev/fd/{d}", .{fd.cast()}) catch unreachable;
+    const path = bun.fmt.bufPrintZ(&buf, "/dev/fd/{d}", .{fd.cast()}) catch unreachable;
     return switch (readlink(path, out_buffer)) {
         .result => |r| .{ .result = r },
         .err => |err| .{ .err = err },
@@ -3033,7 +3037,7 @@ pub fn getFdPath(fd: bun.FD, out_buffer: *bun.PathBuffer) Maybe([]u8) {
                 return getFdPathFreeBSDLinuxulator(fd, out_buffer);
             }
             var buf: ["/proc/self/fd/-2147483648".len + 1:0]u8 = undefined;
-            const path = std.fmt.bufPrintZ(&buf, "/proc/self/fd/{d}", .{fd.cast()}) catch unreachable;
+            const path = bun.fmt.bufPrintZ(&buf, "/proc/self/fd/{d}", .{fd.cast()}) catch unreachable;
             return switch (readlink(path, out_buffer)) {
                 .result => |r| .{ .result = r },
                 .err => |err| {
@@ -3642,14 +3646,14 @@ fn utimensWithFlags(path: bun.OSPathSliceZ, atime: jsc.Node.TimeLike, mtime: jsc
             .{ .sec = @intCast(mtime.sec), .nsec = mtime.nsec },
         };
         const rc = syscall.utimensat(
-            std.fs.cwd().fd,
+            std.Io.Dir.cwd().handle,
             path,
             // this var should be a const, the zig type definition is wrong.
             &times,
             flags,
         );
 
-        log("utimensat({d}, atime=({d}, {d}), mtime=({d}, {d})) = {d}", .{ std.fs.cwd().fd, atime.sec, atime.nsec, mtime.sec, mtime.nsec, rc });
+        log("utimensat({d}, atime=({d}, {d}), mtime=({d}, {d})) = {d}", .{ std.Io.Dir.cwd().handle, atime.sec, atime.nsec, mtime.sec, mtime.nsec, rc });
 
         if (rc == 0) {
             return .success;
@@ -3731,7 +3735,7 @@ pub fn existsAtType(fd: bun.FD, subpath: anytype) Maybe(ExistsAtType) {
             .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(path))
                 null
             else if (fd == bun.invalid_fd)
-                std.fs.cwd().fd
+                std.Io.Dir.cwd().handle
             else
                 fd.cast(),
             .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
@@ -4064,7 +4068,7 @@ pub fn linkatTmpfile(tmpfd: bun.FD, dirfd: bun.FD, name: [:0]const u8) Maybe(voi
             //        AT_SYMLINK_FOLLOW);
             //
             var procfs_buf: ["/proc/self/fd/-2147483648".len + 1:0]u8 = undefined;
-            const path = std.fmt.bufPrintZ(&procfs_buf, "/proc/self/fd/{d}", .{tmpfd.cast()}) catch unreachable;
+            const path = bun.fmt.bufPrintZ(&procfs_buf, "/proc/self/fd/{d}", .{tmpfd.cast()}) catch unreachable;
 
             break :brk std.os.linux.linkat(
                 posix.AT.FDCWD,
@@ -4277,7 +4281,7 @@ pub fn lstat_absolute(path: [:0]const u8) !Stat {
     const atime = st.atime();
     const mtime = st.mtime();
     const ctime = st.ctime();
-    const Kind = std.fs.File.Kind;
+    const Kind = std.Io.File.Kind;
     return Stat{
         .inode = st.ino,
         .size = @as(u64, @bitCast(st.size)),
@@ -4432,15 +4436,15 @@ pub fn copyFileZSlowWithHandle(in_handle: bun.FD, to_dir: bun.FD, destination: [
     }
 }
 
-pub fn kindFromMode(mode: mode_t) std.fs.File.Kind {
+pub fn kindFromMode(mode: mode_t) std.Io.File.Kind {
     return switch (mode & bun.S.IFMT) {
-        bun.S.IFBLK => std.fs.File.Kind.block_device,
-        bun.S.IFCHR => std.fs.File.Kind.character_device,
-        bun.S.IFDIR => std.fs.File.Kind.directory,
-        bun.S.IFIFO => std.fs.File.Kind.named_pipe,
-        bun.S.IFLNK => std.fs.File.Kind.sym_link,
-        bun.S.IFREG => std.fs.File.Kind.file,
-        bun.S.IFSOCK => std.fs.File.Kind.unix_domain_socket,
+        bun.S.IFBLK => std.Io.File.Kind.block_device,
+        bun.S.IFCHR => std.Io.File.Kind.character_device,
+        bun.S.IFDIR => std.Io.File.Kind.directory,
+        bun.S.IFIFO => std.Io.File.Kind.named_pipe,
+        bun.S.IFLNK => std.Io.File.Kind.sym_link,
+        bun.S.IFREG => std.Io.File.Kind.file,
+        bun.S.IFSOCK => std.Io.File.Kind.unix_domain_socket,
         else => .unknown,
     };
 }
@@ -4648,7 +4652,7 @@ pub fn dlsymWithHandle(comptime Type: type, comptime name: [:0]const u8, comptim
     const Wrapper = struct {
         pub var function: Type = undefined;
         var failed = false;
-        pub var once = std.once(loadOnce);
+        pub var once = bun.once(loadOnce);
         fn loadOnce() void {
             function = bun.cast(Type, dlsymImpl(@call(bun.callmod_inline, handle_getter, .{}), name) orelse {
                 failed = true;
@@ -4656,7 +4660,7 @@ pub fn dlsymWithHandle(comptime Type: type, comptime name: [:0]const u8, comptim
             });
         }
     };
-    Wrapper.once.call();
+    Wrapper.once.call(.{});
     if (Wrapper.failed) {
         return null;
     }
@@ -4696,7 +4700,7 @@ const std = @import("std");
 const mem = std.mem;
 const page_size_min = std.heap.page_size_min;
 const w = std.os.windows;
-const Stat = std.fs.File.Stat;
+const Stat = std.Io.File.Stat;
 
 const posix = std.posix;
 const libc = std.posix.system;

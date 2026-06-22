@@ -254,9 +254,9 @@ pub fn killDescendants() void {
 
     const self_pid = std.c.getpid();
 
-    var to_visit: std.ArrayListUnmanaged(std.c.pid_t) = .{};
+    var to_visit: std.ArrayListUnmanaged(std.c.pid_t) = .empty;
     defer to_visit.deinit(bun.default_allocator);
-    var to_kill: std.ArrayListUnmanaged(std.c.pid_t) = .{};
+    var to_kill: std.ArrayListUnmanaged(std.c.pid_t) = .empty;
     defer to_kill.deinit(bun.default_allocator);
 
     to_visit.append(bun.default_allocator, self_pid) catch return;
@@ -351,9 +351,9 @@ pub fn killSubreaperAdoptees(siblings: []const std.c.pid_t) void {
 fn killTreeRootedAt(root: std.c.pid_t, expected_ppid_of_root: std.c.pid_t) void {
     if (comptime !Environment.isPosix) return;
 
-    var to_visit: std.ArrayListUnmanaged(std.c.pid_t) = .{};
+    var to_visit: std.ArrayListUnmanaged(std.c.pid_t) = .empty;
     defer to_visit.deinit(bun.default_allocator);
-    var to_kill: std.ArrayListUnmanaged(std.c.pid_t) = .{};
+    var to_kill: std.ArrayListUnmanaged(std.c.pid_t) = .empty;
     defer to_kill.deinit(bun.default_allocator);
 
     if (std.c.kill(root, std.posix.SIG.STOP) != 0) return;
@@ -406,7 +406,7 @@ fn parentPidOf(pid: std.c.pid_t) std.c.pid_t {
     }
     if (comptime Environment.isLinux) {
         var path_buf: [64]u8 = undefined;
-        const path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/stat", .{pid}) catch return 0;
+        const path = bun.fmt.bufPrintZ(&path_buf, "/proc/{d}/stat", .{pid}) catch return 0;
         var read_buf: [512]u8 = undefined;
         const stat = readFileOnce(path, &read_buf) orelse return 0;
         // Format: "pid (comm) state ppid …". `comm` may contain spaces and
@@ -464,7 +464,7 @@ fn listChildPidsLinux(parent: std.c.pid_t, out: []std.c.pid_t) ?usize {
         if (written >= out.len) break;
         // Each entry is a tid (numeric directory).
         const tid = std.fmt.parseInt(std.c.pid_t, entry.name.slice(), 10) catch continue;
-        const children_path = std.fmt.bufPrintZ(&path_buf, "/proc/{d}/task/{d}/children", .{ parent, tid }) catch continue;
+        const children_path = bun.fmt.bufPrintZ(&path_buf, "/proc/{d}/task/{d}/children", .{ parent, tid }) catch continue;
         const data = readFileOnce(children_path, &read_buf) orelse continue;
         var tok = std.mem.tokenizeAny(u8, data, " \n");
         while (tok.next()) |pid_str| {

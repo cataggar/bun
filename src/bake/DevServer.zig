@@ -225,7 +225,7 @@ active_websocket_connections: std.AutoHashMapUnmanaged(*HmrSocket, void),
 
 // Debugging
 
-dump_dir: if (bun.FeatureFlags.bake_debugging_features) ?std.fs.Dir else void,
+dump_dir: if (bun.FeatureFlags.bake_debugging_features) ?std.Io.Dir else void,
 /// Reference count to number of active sockets with the incremental_visualizer enabled.
 emit_incremental_visualizer_events: u32,
 /// Reference count to number of active sockets with the memory_visualizer enabled.
@@ -973,8 +973,8 @@ inline fn wrapGenericRequestHandler(
     resp: *uws.NewApp(is_ssl).Response,
 ) void {
     const fn_info = @typeInfo(@TypeOf(handler)).@"fn";
-    assert(fn_info.params.len == 3);
-    const uses_any_response = if (fn_info.params[2].type) |t| t == AnyResponse else false;
+    assert(fn_info.param_types.len == 3);
+    const uses_any_response = if (fn_info.param_types[2]) |t| t == AnyResponse else false;
     return struct {
         fn handle(dev: *DevServer, req: *Request, resp: *uws.NewApp(is_ssl).Response) void {
             assert(dev.magic == .valid);
@@ -1146,7 +1146,7 @@ fn ensureRouteIsBundled(
             }
 
             // Prepare a bundle with just this route.
-            var sfa = std.heap.stackFallback(4096, dev.allocator());
+            var sfa = bun.stackFallback(4096, dev.allocator());
             const temp_alloc = sfa.get();
 
             var entry_points: EntryPointList = .empty;
@@ -1279,7 +1279,7 @@ fn checkRouteFailures(
     route_bundle_index: RouteBundle.Index,
     resp: DevResponse,
 ) !enum { stop, ok, rebuild } {
-    var sfa_state = std.heap.stackFallback(65536, dev.allocator());
+    var sfa_state = bun.stackFallback(65536, dev.allocator());
     const sfa = sfa_state.get();
     var gts = try dev.initGraphTraceState(sfa, 0);
     defer gts.deinit(sfa);
@@ -1572,7 +1572,7 @@ fn generateHTMLPayload(dev: *DevServer, route_bundle_index: RouteBundle.Index, r
     defer dev.graph_safety_lock.unlock();
 
     // Prepare bitsets for tracing
-    var sfa_state = std.heap.stackFallback(65536, dev.allocator());
+    var sfa_state = bun.stackFallback(65536, dev.allocator());
     const sfa = sfa_state.get();
     var gts = try dev.initGraphTraceState(sfa, 0);
     defer gts.deinit(sfa);
@@ -1624,7 +1624,7 @@ fn generateJavaScriptCodeForHTMLFile(
     input_file_sources: []bun.logger.Source,
     loaders: []bun.options.Loader,
 ) bun.OOM![]const u8 {
-    var sfa_state = std.heap.stackFallback(65536, dev.allocator());
+    var sfa_state = bun.stackFallback(65536, dev.allocator());
     const sfa = sfa_state.get();
     var array = bun.handleOom(std.ArrayListUnmanaged(u8).initCapacity(sfa, 65536));
     defer array.deinit(sfa);
@@ -1873,7 +1873,7 @@ pub fn startAsyncBundle(
 
     // Notify inspector about bundle start
     if (dev.inspector()) |agent| {
-        var sfa_state = std.heap.stackFallback(256, dev.allocator());
+        var sfa_state = bun.stackFallback(256, dev.allocator());
         const sfa = sfa_state.get();
         var trigger_files = try std.array_list.Managed(bun.String).initCapacity(sfa, entry_points.set.count());
         defer trigger_files.deinit();
@@ -1968,7 +1968,7 @@ pub fn prepareAndLogResolutionFailures(dev: *DevServer) !void {
 
 fn indexFailures(dev: *DevServer) !void {
     // After inserting failures into the IncrementalGraphs, they are traced to their routes.
-    var sfa_state = std.heap.stackFallback(65536, dev.allocator());
+    var sfa_state = bun.stackFallback(65536, dev.allocator());
     const sfa = sfa_state.get();
 
     if (dev.incremental_result.failures_added.items.len > 0) {
@@ -2051,7 +2051,7 @@ fn generateClientBundle(dev: *DevServer, route_bundle: *RouteBundle) bun.OOM![]u
     defer dev.graph_safety_lock.unlock();
 
     // Prepare bitsets
-    var sfa_state = std.heap.stackFallback(65536, dev.allocator());
+    var sfa_state = bun.stackFallback(65536, dev.allocator());
     const sfa = sfa_state.get();
     var gts = try dev.initGraphTraceState(sfa, 0);
     defer gts.deinit(sfa);
@@ -2123,7 +2123,7 @@ fn generateCssJSArray(dev: *DevServer, route_bundle: *RouteBundle) bun.JSError!j
     defer dev.graph_safety_lock.unlock();
 
     // Prepare bitsets
-    var sfa_state = std.heap.stackFallback(65536, dev.allocator());
+    var sfa_state = bun.stackFallback(65536, dev.allocator());
 
     const sfa = sfa_state.get();
     var gts = try dev.initGraphTraceState(sfa, 0);
@@ -2298,7 +2298,7 @@ pub fn finalizeBundle(
     const targets = bv2.graph.ast.items(.target);
     const scbs = bv2.graph.server_component_boundaries.slice();
 
-    var sfa = std.heap.stackFallback(65536, bv2.allocator());
+    var sfa = bun.stackFallback(65536, bv2.allocator());
     const stack_alloc = sfa.get();
     var scb_bitset = try bun.bit_set.DynamicBitSetUnmanaged.initEmpty(stack_alloc, input_file_sources.len);
     for (
@@ -2616,7 +2616,7 @@ pub fn finalizeBundle(
 
     var has_route_bits_set = false;
 
-    var hot_update_payload_sfa = std.heap.stackFallback(65536, dev.allocator());
+    var hot_update_payload_sfa = bun.stackFallback(65536, dev.allocator());
     var hot_update_payload = std.array_list.Managed(u8).initCapacity(hot_update_payload_sfa.get(), 65536) catch
         unreachable; // enough space
     defer hot_update_payload.deinit();
@@ -3023,7 +3023,7 @@ fn startNextBundleIfPresent(dev: *DevServer) void {
 
     // If there were pending requests, begin another bundle.
     if (dev.next_bundle.reload_event != null or dev.next_bundle.requests.first != null or dev.next_bundle.promise.strong.hasValue()) {
-        var sfb = std.heap.stackFallback(4096, dev.allocator());
+        var sfb = bun.stackFallback(4096, dev.allocator());
         const temp_alloc = sfb.get();
         var entry_points: EntryPointList = .empty;
         defer entry_points.deinit(temp_alloc);
@@ -3605,7 +3605,7 @@ pub const ChunkKind = enum(u1) {
 pub const SerializedFailure = @import("./DevServer/SerializedFailure.zig");
 
 // For debugging, it is helpful to be able to see bundles.
-pub fn dumpBundle(dump_dir: std.fs.Dir, graph: bake.Graph, rel_path: []const u8, chunk: []const u8, wrap: bool) !void {
+pub fn dumpBundle(dump_dir: std.Io.Dir, graph: bake.Graph, rel_path: []const u8, chunk: []const u8, wrap: bool) !void {
     const buf = bun.path_buffer_pool.get();
     defer bun.path_buffer_pool.put(buf);
     const name = bun.path.joinAbsStringBuf("/", buf, &.{
@@ -3618,7 +3618,7 @@ pub fn dumpBundle(dump_dir: std.fs.Dir, graph: bake.Graph, rel_path: []const u8,
     const file = try inner_dir.createFile(bun.path.basename(name), .{});
     defer file.close();
     var file_buffer: [1024]u8 = undefined;
-    var file_writer = file.writerStreaming(&file_buffer);
+    var file_writer = file.writerStreaming(bun.blockingIo(), &file_buffer);
     const bufw = &file_writer.interface;
 
     if (!bun.strings.hasSuffixComptime(rel_path, ".map")) {
@@ -3645,7 +3645,7 @@ pub fn dumpBundle(dump_dir: std.fs.Dir, graph: bake.Graph, rel_path: []const u8,
     try bufw.flush();
 }
 
-pub noinline fn dumpBundleForChunk(dev: *DevServer, dump_dir: std.fs.Dir, side: bake.Side, key: []const u8, code: []const u8, wrap: bool, is_ssr_graph: bool) void {
+pub noinline fn dumpBundleForChunk(dev: *DevServer, dump_dir: std.Io.Dir, side: bake.Side, key: []const u8, code: []const u8, wrap: bool, is_ssr_graph: bool) void {
     const cwd = dev.root;
     var a: bun.PathBuffer = undefined;
     var b: [bun.MAX_PATH_BYTES * 2]u8 = undefined;
@@ -3667,7 +3667,7 @@ pub fn emitVisualizerMessageIfNeeded(dev: *DevServer) void {
     defer dev.emitMemoryVisualizerMessageIfNeeded();
     if (dev.emit_incremental_visualizer_events == 0) return;
 
-    var sfb = std.heap.stackFallback(65536, dev.allocator());
+    var sfb = bun.stackFallback(65536, dev.allocator());
     var payload = std.array_list.Managed(u8).initCapacity(sfb.get(), 65536) catch
         unreachable; // enough capacity on the stack
     defer payload.deinit();
@@ -3696,7 +3696,7 @@ pub fn emitMemoryVisualizerMessage(dev: *DevServer) void {
     comptime assert(bun.FeatureFlags.bake_debugging_features);
     bun.debugAssert(dev.emit_memory_visualizer_events > 0);
 
-    var sfb = std.heap.stackFallback(65536, dev.allocator());
+    var sfb = bun.stackFallback(65536, dev.allocator());
     var payload = std.array_list.Managed(u8).initCapacity(sfb.get(), 65536) catch
         unreachable; // enough capacity on the stack
     defer payload.deinit();
@@ -4250,7 +4250,7 @@ fn dumpStateDueToCrash(dev: *DevServer) !void {
 
     // being conservative about how much stuff is put on the stack.
     var filepath_buf: [@min(4096, bun.MAX_PATH_BYTES)]u8 = undefined;
-    const filepath = std.fmt.bufPrintZ(&filepath_buf, "incremental-graph-crash-dump.{d}.html", .{std.time.timestamp()}) catch "incremental-graph-crash-dump.html";
+    const filepath = bun.fmt.bufPrintZ(&filepath_buf, "incremental-graph-crash-dump.{d}.html", .{std.time.timestamp()}) catch "incremental-graph-crash-dump.html";
     const file = std.fs.cwd().createFileZ(filepath, .{}) catch |err| {
         bun.handleErrorReturnTrace(err, @errorReturnTrace());
         Output.warn("Could not open file for dumping incremental graph: {}", .{err});
@@ -4267,7 +4267,7 @@ fn dumpStateDueToCrash(dev: *DevServer) !void {
     try file.writeAll(start);
     try file.writeAll("\nlet inlinedData = Uint8Array.from(atob(\"");
 
-    var sfb = std.heap.stackFallback(4096, dev.allocator());
+    var sfb = bun.stackFallback(4096, dev.allocator());
     var payload = try std.array_list.Managed(u8).initCapacity(sfb.get(), 4096);
     defer payload.deinit();
     try dev.writeVisualizerMessage(&payload);

@@ -1718,11 +1718,11 @@ pub const RunCommand = struct {
             log("Executing from stdin", .{});
 
             // read from stdin
-            var stack_fallback = std.heap.stackFallback(2048, bun.default_allocator);
+            var stack_fallback = bun.stackFallback(2048, bun.default_allocator);
             var list = std.Io.Writer.Allocating.init(stack_fallback.get());
             errdefer list.deinit();
 
-            var file_reader = std.fs.File.stdin().readerStreaming(&.{});
+            var file_reader = std.Io.File.stdin().readerStreaming(bun.blockingIo(), &.{});
             _ = file_reader.interface.streamRemaining(&list.writer) catch return false;
             ctx.runtime_options.eval.script = list.written();
 

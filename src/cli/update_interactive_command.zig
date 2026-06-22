@@ -544,7 +544,7 @@ pub const UpdateInteractiveCommand = struct {
         const packages = lockfile.packages.slice();
         const pkg_resolutions = packages.items(.resolution);
 
-        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .{};
+        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .empty;
         for (pkg_resolutions, 0..) |resolution, pkg_id| {
             if (resolution.tag != .workspace and resolution.tag != .root) continue;
             try workspace_pkg_ids.append(allocator, @intCast(pkg_id));
@@ -565,7 +565,7 @@ pub const UpdateInteractiveCommand = struct {
         const pkg_resolutions = packages.items(.resolution);
         const string_buf = lockfile.buffers.string_bytes.items;
 
-        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .{};
+        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .empty;
         for (pkg_resolutions, 0..) |resolution, pkg_id| {
             if (resolution.tag != .workspace and resolution.tag != .root) continue;
             try workspace_pkg_ids.append(allocator, @intCast(pkg_id));
@@ -1644,7 +1644,7 @@ pub const UpdateInteractiveCommand = struct {
 
             // Read input
             var reader_buffer: [1]u8 = undefined;
-            var reader_file = std.fs.File.stdin().readerStreaming(&reader_buffer);
+            var reader_file = std.Io.File.stdin().readerStreaming(bun.blockingIo(), &reader_buffer);
             const reader = &reader_file.interface;
             const byte = reader.takeByte() catch return state.selected;
 

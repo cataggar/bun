@@ -35,7 +35,7 @@ pub fn BundleThread(CompletionStruct: type) type {
         /// Lazily-initialized singleton. This is used for `Bun.build` since the
         /// bundle thread may not be needed.
         pub const singleton = struct {
-            var once = std.once(loadOnceImpl);
+            var once = bun.once(loadOnceImpl);
             var instance: ?*Self = null;
 
             // Blocks the calling thread until the bun build thread is created.
@@ -52,7 +52,7 @@ pub fn BundleThread(CompletionStruct: type) type {
             }
 
             pub fn get() *Self {
-                once.call();
+                once.call(.{});
                 return instance.?;
             }
 

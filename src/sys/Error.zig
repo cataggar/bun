@@ -269,8 +269,7 @@ pub fn toSystemError(this: Error) SystemError {
     // search keyword: `Local<Value> UVException(Isolate* isolate,`
     var message_buf: [4096]u8 = @splat(0);
     const message = message: {
-        var stream = std.io.fixedBufferStream(&message_buf);
-        const writer = stream.writer();
+        var writer = std.Io.Writer.fixed(&message_buf);
         brk: {
             if (maybe_code) |code| {
                 writer.writeAll(code) catch break :brk;
@@ -291,7 +290,7 @@ pub fn toSystemError(this: Error) SystemError {
                 }
             }
         }
-        break :message stream.getWritten();
+        break :message writer.buffered();
     };
     err.message = bun.String.cloneUTF8(message);
 

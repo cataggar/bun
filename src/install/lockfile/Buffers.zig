@@ -1,6 +1,6 @@
 const Buffers = @This();
 
-trees: Tree.List = .{},
+trees: Tree.List = .empty,
 hoisted_dependencies: DependencyIDList = .{},
 /// This is the underlying buffer used for the `resolutions` external slices inside of `Package`
 /// Should be the same length as `dependencies`

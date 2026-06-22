@@ -242,7 +242,7 @@ pub const CreateCommand = struct {
         }
 
         var package_json_contents: MutableString = undefined;
-        var package_json_file: ?std.fs.File = null;
+        var package_json_file: ?std.Io.File = null;
 
         if (example_tag != .local_folder) {
             if (create_options.verbose) {
@@ -455,7 +455,7 @@ pub const CreateCommand = struct {
 
                 const FileCopier = struct {
                     pub fn copy(
-                        destination_dir_: std.fs.Dir,
+                        destination_dir_: std.Io.Dir,
                         walker: *Walker,
                         node_: *Progress.Node,
                         progress_: *Progress,
@@ -1222,7 +1222,7 @@ pub const CreateCommand = struct {
                 //             "./{s}",
 
                 //             .{
-                //                 std.mem.trimLeft(
+                //                 std.mem.trimStart(
                 //                     u8,
                 //                     entry_point_path[destination.len..],
                 //                     "/",
@@ -1868,7 +1868,7 @@ pub const Example = struct {
 
         var examples = std.array_list.Managed(Example).fromOwnedSlice(ctx.allocator, remote_examples);
         {
-            var folders = [3]std.fs.Dir{
+            var folders = [3]std.Io.Dir{
                 bun.invalid_fd.stdDir(),
                 bun.invalid_fd.stdDir(),
                 bun.invalid_fd.stdDir(),
@@ -1897,7 +1897,7 @@ pub const Example = struct {
                     var iter = folder.iterate();
 
                     loop: while (iter.next() catch null) |entry_| {
-                        const entry: std.fs.Dir.Entry = entry_;
+                        const entry: std.Io.Dir.Entry = entry_;
 
                         switch (entry.kind) {
                             .directory => {

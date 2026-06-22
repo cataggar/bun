@@ -71,7 +71,7 @@ pub fn doPatchCommit(
 
     // Attempt to open the existing node_modules folder
     var root_node_modules = switch (bun.sys.openatOSPath(bun.FD.cwd(), bun.OSPathLiteral("node_modules"), bun.O.DIRECTORY | bun.O.RDONLY, 0o755)) {
-        .result => |fd| std.fs.Dir{ .fd = fd.cast() },
+        .result => |fd| std.Io.Dir{ .fd = fd.cast() },
         .err => |e| {
             Output.prettyError(
                 "<r><red>error<r>: failed to open root <b>node_modules<r> folder: {f}<r>\n",
@@ -84,7 +84,7 @@ pub fn doPatchCommit(
 
     var iterator = Lockfile.Tree.Iterator(.node_modules).init(lockfile);
     var resolution_buf: [1024]u8 = undefined;
-    const _cache_dir: std.fs.Dir, const _cache_dir_subpath: stringZ, const _changes_dir: []const u8, const _pkg: Package = switch (arg_kind) {
+    const _cache_dir: std.Io.Dir, const _cache_dir_subpath: stringZ, const _changes_dir: []const u8, const _pkg: Package = switch (arg_kind) {
         .path => result: {
             const package_json_source: *const logger.Source = &brk: {
                 const package_json_path = bun.path.joinZ(&[_][]const u8{ argument, "package.json" }, .auto);
@@ -181,7 +181,7 @@ pub fn doPatchCommit(
     };
 
     // zls
-    const cache_dir: std.fs.Dir = _cache_dir;
+    const cache_dir: std.Io.Dir = _cache_dir;
     const cache_dir_subpath: stringZ = _cache_dir_subpath;
     const changes_dir: []const u8 = _changes_dir;
     const pkg: Package = _pkg;
@@ -484,7 +484,7 @@ fn patchCommitGetVersion(
 
     // maybe if someone opens it in their editor and hits save a newline will be inserted,
     // so trim that off
-    return .{ .result = std.mem.trimRight(u8, version, " \n\r\t") };
+    return .{ .result = std.mem.trimEnd(u8, version, " \n\r\t") };
 }
 
 fn escapePatchFilename(allocator: std.mem.Allocator, name: []const u8) ?[]const u8 {
@@ -567,7 +567,7 @@ pub fn preparePatch(manager: *PackageManager) !void {
     } else argument;
     defer if (free_argument) manager.allocator.free(argument);
 
-    const cache_dir: std.fs.Dir, const cache_dir_subpath: []const u8, const module_folder: []const u8, const pkg_name: []const u8 = switch (arg_kind) {
+    const cache_dir: std.Io.Dir, const cache_dir_subpath: []const u8, const module_folder: []const u8, const pkg_name: []const u8 = switch (arg_kind) {
         .path => brk: {
             var lockfile = manager.lockfile;
 
@@ -631,7 +631,7 @@ pub fn preparePatch(manager: *PackageManager) !void {
             };
 
             const existing_patchfile_hash = existing_patchfile_hash: {
-                var __sfb = std.heap.stackFallback(1024, manager.allocator);
+                var __sfb = bun.stackFallback(1024, manager.allocator);
                 const allocator = __sfb.get();
                 const name_and_version = std.fmt.allocPrint(allocator, "{s}@{f}", .{ name, actual_package.resolution.fmt(strbuf, .posix) }) catch unreachable;
                 defer allocator.free(name_and_version);
@@ -669,7 +669,7 @@ pub fn preparePatch(manager: *PackageManager) !void {
             const pkg_name = pkg.name.slice(strbuf);
 
             const existing_patchfile_hash = existing_patchfile_hash: {
-                var __sfb = std.heap.stackFallback(1024, manager.allocator);
+                var __sfb = bun.stackFallback(1024, manager.allocator);
                 const sfballoc = __sfb.get();
                 const name_and_version = std.fmt.allocPrint(sfballoc, "{s}@{f}", .{ name, pkg.resolution.fmt(strbuf, .posix) }) catch unreachable;
                 defer sfballoc.free(name_and_version);
@@ -797,7 +797,7 @@ fn detachModuleFolderFromSharedStore(module_folder: []const u8) void {
 }
 
 fn overwritePackageInNodeModulesFolder(
-    cache_dir: std.fs.Dir,
+    cache_dir: std.Io.Dir,
     cache_dir_subpath: []const u8,
     node_modules_folder_path: []const u8,
 ) !void {
@@ -870,7 +870,7 @@ fn pkgInfoForNameAndVersion(
     name: []const u8,
     version: ?[]const u8,
 ) struct { PackageID, Lockfile.Tree.Iterator(.node_modules).Next } {
-    var sfb = std.heap.stackFallback(@sizeOf(IdPair) * 4, lockfile.allocator);
+    var sfb = bun.stackFallback(@sizeOf(IdPair) * 4, lockfile.allocator);
     var pairs = bun.handleOom(std.array_list.Managed(IdPair).initCapacity(sfb.get(), 8));
     defer pairs.deinit();
 

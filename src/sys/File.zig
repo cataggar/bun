@@ -1,4 +1,4 @@
-//! This is a similar API to std.fs.File, except it:
+//! This is a similar API to std.Io.File, except it:
 //! - Preserves errors from the operating system
 //! - Supports normalizing BOM to UTF-8
 //! - Has several optimizations somewhat specific to Bun
@@ -7,7 +7,7 @@
 
 const File = @This();
 
-// "handle" matches std.fs.File
+// "handle" matches std.Io.File
 handle: bun.FD,
 
 pub fn openat(dir: bun.FD, path: [:0]const u8, flags: i32, mode: bun.Mode) Maybe(File) {
@@ -66,11 +66,11 @@ pub fn from(other: anytype) File {
         return .{ .handle = other };
     }
 
-    if (T == std.fs.File) {
+    if (T == std.Io.File) {
         return .{ .handle = .fromStdFile(other) };
     }
 
-    if (T == std.fs.Dir) {
+    if (T == std.Io.Dir) {
         return File{ .handle = .fromStdDir(other) };
     }
 
@@ -217,7 +217,7 @@ pub fn stat(self: File) Maybe(bun.Stat) {
 /// Be careful about using this on Linux or macOS.
 ///
 /// File calls stat() internally.
-pub fn kind(self: File) Maybe(std.fs.File.Kind) {
+pub fn kind(self: File) Maybe(std.Io.File.Kind) {
     if (Environment.isWindows) {
         const rt = windows.GetFileType(self.handle.cast());
         if (rt == windows.FILE_TYPE_UNKNOWN) {

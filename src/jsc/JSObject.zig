@@ -55,7 +55,7 @@ pub const JSObject = opaque {
             const val = if (comptime null_prototype)
                 JSValue.createEmptyObjectWithNullPrototype(global)
             else
-                JSValue.createEmptyObject(global, comptime info.fields.len);
+                JSValue.createEmptyObject(global, comptime info.field_names.len);
             if (bun.Environment.isDebug)
                 bun.assert(val.isObject());
             break :obj val.uncheckedPtrCast(JSObject);

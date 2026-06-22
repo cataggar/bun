@@ -542,7 +542,7 @@ pub const UrlProtocolPair = struct {
         // statistical distribution of URL lengths and found nothing.
         const long_url_thresh = 2048;
 
-        var alloc = std.heap.stackFallback(long_url_thresh, allocator);
+        var alloc = bun.stackFallback(long_url_thresh, allocator);
 
         var protocol_buf: WellDefinedProtocol.StringWithColonBuffer = undefined;
 

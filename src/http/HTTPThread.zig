@@ -22,7 +22,7 @@ queued_tasks: Queue = Queue{},
 /// `active_requests_count >= max_simultaneous_requests`. Kept in FIFO order
 /// and processed before `queued_tasks` on the next `drainEvents`. Owned by
 /// the HTTP thread; never accessed concurrently.
-deferred_tasks: std.ArrayListUnmanaged(*AsyncHTTP) = .{},
+deferred_tasks: std.ArrayListUnmanaged(*AsyncHTTP) = .empty,
 /// Set by `drainQueuedShutdowns` when a shutdown's `async_http_id` wasn't in
 /// `socket_async_http_abort_tracker` — the request is either not yet started
 /// (still in `queued_tasks`/`deferred_tasks`) or already done. `drainEvents`
@@ -74,7 +74,7 @@ pub const HeapRequestBodyBuffer = struct {
 
 pub const RequestBodyBuffer = union(enum) {
     heap: *HeapRequestBodyBuffer,
-    stack: std.heap.StackFallbackAllocator(request_body_send_stack_buffer_size),
+    stack: bun.StackFallbackComptime(request_body_send_stack_buffer_size),
 
     pub fn deinit(this: *@This()) void {
         switch (this.*) {
@@ -147,7 +147,7 @@ pub inline fn getRequestBodySendBuffer(this: *@This(), estimated_size: usize) Re
         return .{ .heap = bun.take(&this.lazy_request_body_buffer).? };
     }
     return .{
-        .stack = std.heap.stackFallback(request_body_send_stack_buffer_size, bun.default_allocator),
+        .stack = bun.stackFallback(request_body_send_stack_buffer_size, bun.default_allocator),
     };
 }
 

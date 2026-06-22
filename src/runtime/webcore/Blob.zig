@@ -668,10 +668,9 @@ fn _onStructuredCloneDeserialize(
 
 pub fn onStructuredCloneDeserialize(globalThis: *jsc.JSGlobalObject, ptr: *[*]u8, end: [*]u8) bun.JSError!JSValue {
     const total_length: usize = @intFromPtr(end) - @intFromPtr(ptr.*);
-    var buffer_stream = std.io.fixedBufferStream(ptr.*[0..total_length]);
-    const reader = buffer_stream.reader();
+    var reader = std.Io.Reader.fixed(ptr.*[0..total_length]);
 
-    const result = _onStructuredCloneDeserialize(globalThis, @TypeOf(reader), reader) catch |err| switch (err) {
+    const result = _onStructuredCloneDeserialize(globalThis, @TypeOf(&reader), &reader) catch |err| switch (err) {
         error.EndOfStream, error.TooSmall, error.InvalidValue => {
             return globalThis.throw("Blob.onStructuredCloneDeserialize failed", .{});
         },
@@ -681,7 +680,7 @@ pub fn onStructuredCloneDeserialize(globalThis: *jsc.JSGlobalObject, ptr: *[*]u8
     };
 
     // Advance the pointer by the number of bytes consumed
-    ptr.* = ptr.* + buffer_stream.pos;
+    ptr.* = ptr.* + reader.end;
 
     return result;
 }
@@ -721,7 +720,7 @@ pub fn fromDOMFormData(
 ) Blob {
     var arena = bun.ArenaAllocator.init(allocator);
     defer arena.deinit();
-    var stack_allocator = std.heap.stackFallback(1024, arena.allocator());
+    var stack_allocator = bun.stackFallback(1024, arena.allocator());
     const stack_mem_all = stack_allocator.get();
 
     var hex_buf: [70]u8 = undefined;
@@ -3901,7 +3900,7 @@ pub fn toJSONWithBytes(this: *Blob, global: *JSGlobalObject, raw_bytes: []const 
     defer if (comptime lifetime == .temporary) bun.default_allocator.free(raw_bytes);
 
     if (could_be_all_ascii == null or !could_be_all_ascii.?) {
-        var stack_fallback = std.heap.stackFallback(4096, bun.default_allocator);
+        var stack_fallback = bun.stackFallback(4096, bun.default_allocator);
         const allocator = stack_fallback.get();
         // if toUTF16Alloc returns null, it means there are no non-ASCII characters
         if (strings.toUTF16Alloc(allocator, buf, false, false) catch null) |external| {
@@ -4214,7 +4213,7 @@ fn fromJSWithoutDeferGC(
         }
     }
 
-    var stack_allocator = std.heap.stackFallback(1024, bun.default_allocator);
+    var stack_allocator = bun.stackFallback(1024, bun.default_allocator);
     const stack_mem_all = stack_allocator.get();
     var stack: std.array_list.Managed(JSValue) = std.array_list.Managed(JSValue).init(stack_mem_all);
     var joiner = StringJoiner{ .allocator = stack_mem_all };

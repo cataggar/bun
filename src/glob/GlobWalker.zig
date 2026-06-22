@@ -207,7 +207,7 @@ pub const DirEntryAccessor = struct {
 
         const IterResult = struct {
             name: NameWrapper,
-            kind: std.fs.File.Kind,
+            kind: std.Io.File.Kind,
 
             const NameWrapper = struct {
                 value: []const u8,
@@ -224,8 +224,8 @@ pub const DirEntryAccessor = struct {
                 const name = nextval.key_ptr.*;
                 const kind = nextval.value_ptr.*.kind(&FS.instance.fs, true);
                 const fskind = switch (kind) {
-                    .file => std.fs.File.Kind.file,
-                    .dir => std.fs.File.Kind.directory,
+                    .file => std.Io.File.Kind.file,
+                    .dir => std.Io.File.Kind.directory,
                 };
                 return .{
                     .result = .{
@@ -341,7 +341,7 @@ pub fn GlobWalker_(
         end_byte_of_basename_excluding_special_syntax: u32 = 0,
         basename_excluding_special_syntax_component_idx: u32 = 0,
 
-        patternComponents: ArrayList(Component) = .{},
+        patternComponents: ArrayList(Component) = .empty,
         matchedPaths: MatchedMap = .{},
         i: u32 = 0,
 
@@ -355,7 +355,7 @@ pub fn GlobWalker_(
 
         pathBuf: bun.PathBuffer = undefined,
         // iteration state
-        workbuf: ArrayList(WorkItem) = ArrayList(WorkItem){},
+        workbuf: ArrayList(WorkItem) = ArrayList(WorkItem).empty,
 
         /// Array hashmap used as a set (values are the keys)
         /// to store matched paths and prevent duplicates
@@ -686,7 +686,7 @@ pub fn GlobWalker_(
                     {
                         defer this.closeDisallowingCwd(fd);
                         const stackbuf_size = 256;
-                        var stfb = std.heap.stackFallback(stackbuf_size, this.walker.arena.allocator());
+                        var stfb = bun.stackFallback(stackbuf_size, this.walker.arena.allocator());
                         const pathz = try stfb.get().dupeZ(u8, this.walker.patternComponents.items[idx].patternSlice(this.walker.pattern));
                         const stat_result: bun.Stat = switch (Accessor.statat(fd, pathz)) {
                             .err => |e_| {
@@ -937,7 +937,7 @@ pub fn GlobWalker_(
                                     if (!this.walker.evalImpl(active, entry_name)) continue;
 
                                     const stackbuf_size = 256;
-                                    var stfb = std.heap.stackFallback(stackbuf_size, this.walker.arena.allocator());
+                                    var stfb = bun.stackFallback(stackbuf_size, this.walker.arena.allocator());
                                     const name_z = bun.handleOom(stfb.get().dupeZ(u8, entry_name));
                                     const stat_result = Accessor.lstatat(dir.fd, name_z);
                                     const real_kind = switch (stat_result) {

@@ -14,7 +14,7 @@ pub const Params = extern struct {
 pub const RareData = struct {
     libdeflate_compressor: ?*libdeflate.Compressor = null,
     libdeflate_decompressor: ?*libdeflate.Decompressor = null,
-    stack_fallback: std.heap.StackFallbackAllocator(RareData.stack_buffer_size) = undefined,
+    stack_fallback: bun.StackFallbackComptime(RareData.stack_buffer_size) = undefined,
 
     pub const stack_buffer_size = 128 * 1024;
 

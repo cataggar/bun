@@ -295,7 +295,7 @@ pub const JSValkeyClient = struct {
             }
 
             const corrected_url = get_url_slice: {
-                const written = std.fmt.bufPrintZ(
+                const written = bun.fmt.bufPrintZ(
                     &fallback_url_buf,
                     "valkey://{s}",
                     .{url_byte_slice},
@@ -806,11 +806,11 @@ pub const JSValkeyClient = struct {
         var buf: [128]u8 = undefined;
         switch (this.client.status) {
             .connected => {
-                const msg = std.fmt.bufPrintZ(&buf, "Idle timeout reached after {d}ms", .{this.client.idle_timeout_interval_ms}) catch unreachable;
+                const msg = bun.fmt.bufPrintZ(&buf, "Idle timeout reached after {d}ms", .{this.client.idle_timeout_interval_ms}) catch unreachable;
                 this.clientFail(msg, protocol.RedisError.IdleTimeout) catch {}; // TODO: properly propagate exception upwards
             },
             .disconnected, .connecting => {
-                const msg = std.fmt.bufPrintZ(&buf, "Connection timeout reached after {d}ms", .{this.client.connection_timeout_ms}) catch unreachable;
+                const msg = bun.fmt.bufPrintZ(&buf, "Connection timeout reached after {d}ms", .{this.client.connection_timeout_ms}) catch unreachable;
                 this.clientFail(msg, protocol.RedisError.ConnectionTimeout) catch {}; // TODO: properly propagate exception upwards
             },
         }

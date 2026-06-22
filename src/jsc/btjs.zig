@@ -26,7 +26,7 @@ fn dumpBtjsTraceDebugImpl() [*:0]const u8 {
     // std.log.info("jsc_llint_begin: {x}", .{@intFromPtr(&jsc_llint_begin)});
     // std.log.info("jsc_llint_end: {x}", .{@intFromPtr(&jsc_llint_end)});
 
-    const tty_config = std.io.tty.detectConfig(std.fs.File.stdout());
+    const tty_config = std.io.tty.detectConfig(std.Io.File.stdout());
 
     var context: std.debug.ThreadContext = undefined;
     const has_context = std.debug.getContext(&context);

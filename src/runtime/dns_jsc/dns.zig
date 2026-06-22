@@ -68,7 +68,7 @@ const LibInfo = struct {
             return dns_lookup.promise.value();
         }
 
-        var stack_fallback = std.heap.stackFallback(1024, bun.default_allocator);
+        var stack_fallback = bun.stackFallback(1024, bun.default_allocator);
         const name_allocator = stack_fallback.get();
         const name_z = bun.handleOom(name_allocator.dupeZ(u8, query.name));
         defer name_allocator.free(name_z);
@@ -1249,7 +1249,7 @@ pub const internal = struct {
         key: Key,
         result: ?Result = null,
 
-        notify: std.ArrayListUnmanaged(DNSRequestOwner) = .{},
+        notify: std.ArrayListUnmanaged(DNSRequestOwner) = .empty,
 
         /// number of sockets that have a reference to result or are waiting for the result
         /// while this is non-zero, this entry cannot be freed
@@ -1562,7 +1562,7 @@ pub const internal = struct {
         };
         var notify = req.notify;
         defer notify.deinit(bun.default_allocator);
-        req.notify = .{};
+        req.notify = .empty;
         req.refcount -= 1;
 
         // is this correct, or should it go after the loop?
@@ -1576,7 +1576,7 @@ pub const internal = struct {
     fn workPoolCallback(req: *Request) void {
         var service_buf: [bun.fmt.fastDigitCount(std.math.maxInt(u16)) + 2]u8 = undefined;
         const service: ?[*:0]const u8 = if (req.key.port > 0)
-            (std.fmt.bufPrintZ(&service_buf, "{d}", .{req.key.port}) catch unreachable).ptr
+            (bun.fmt.bufPrintZ(&service_buf, "{d}", .{req.key.port}) catch unreachable).ptr
         else
             null;
 
@@ -1633,7 +1633,7 @@ pub const internal = struct {
         var machport: bun.mach_port = 0;
         var service_buf: [bun.fmt.fastDigitCount(std.math.maxInt(u16)) + 2]u8 = undefined;
         const service: ?[*:0]const u8 = if (req.key.port > 0)
-            (std.fmt.bufPrintZ(&service_buf, "{d}", .{req.key.port}) catch unreachable).ptr
+            (bun.fmt.bufPrintZ(&service_buf, "{d}", .{req.key.port}) catch unreachable).ptr
         else
             null;
 
@@ -1679,7 +1679,7 @@ pub const internal = struct {
             req.can_retry_for_addrconfig = false;
             var service_buf: [bun.fmt.fastDigitCount(std.math.maxInt(u16)) + 2]u8 = undefined;
             const service: ?[*:0]const u8 = if (req.key.port > 0)
-                (std.fmt.bufPrintZ(&service_buf, "{d}", .{req.key.port}) catch unreachable).ptr
+                (bun.fmt.bufPrintZ(&service_buf, "{d}", .{req.key.port}) catch unreachable).ptr
             else
                 null;
             const getaddrinfo_async_start_ = LibInfo.getaddrinfo_async_start() orelse break :retry;

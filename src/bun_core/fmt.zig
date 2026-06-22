@@ -1571,7 +1571,7 @@ fn TrimmedPrecisionFormatter(comptime precision: usize) type {
                 var buf: [2 + precision]u8 = undefined;
                 var formatted = std.fmt.bufPrint(&buf, "{d:." ++ std.fmt.comptimePrint("{d}", .{precision}) ++ "}", .{rem}) catch unreachable;
                 formatted = formatted[2..];
-                const trimmed = std.mem.trimRight(u8, formatted, "0");
+                const trimmed = std.mem.trimEnd(u8, formatted, "0");
                 try writer.print(".{s}", .{trimmed});
             }
         }
@@ -1849,3 +1849,8 @@ const strings = bun.strings;
 
 const std = @import("std");
 const fmt = std.fmt;
+
+/// Drop-in for the removed `bun.fmt.bufPrintZ`; writes a sentinel-0 terminated slice.
+pub fn bufPrintZ(buf: []u8, comptime format: []const u8, args: anytype) std.fmt.BufPrintError![:0]u8 {
+    return std.fmt.bufPrintSentinel(buf, format, args, 0);
+}

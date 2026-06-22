@@ -318,7 +318,7 @@ fn renderAST(
 const ParseRenderer = struct {
     #globalObject: *jsc.JSGlobalObject,
     #marked_args: *jsc.MarkedArgumentBuffer,
-    #stack: std.ArrayListUnmanaged(StackEntry) = .{},
+    #stack: std.ArrayListUnmanaged(StackEntry) = .empty,
     #stack_check: bun.StackCheck,
     #src_text: []const u8,
     #heading_tracker: md.helpers.HeadingIdTracker = md.helpers.HeadingIdTracker.init(false),
@@ -777,7 +777,7 @@ const JsCallbackRenderer = struct {
     #globalObject: *jsc.JSGlobalObject,
     #allocator: std.mem.Allocator,
     #src_text: []const u8,
-    #stack: std.ArrayListUnmanaged(StackEntry) = .{},
+    #stack: std.ArrayListUnmanaged(StackEntry) = .empty,
     #callbacks: Callbacks = .{},
     #heading_tracker: md.helpers.HeadingIdTracker = md.helpers.HeadingIdTracker.init(false),
     #stack_check: bun.StackCheck,
@@ -819,7 +819,7 @@ const JsCallbackRenderer = struct {
     };
 
     const StackEntry = struct {
-        buffer: std.ArrayListUnmanaged(u8) = .{},
+        buffer: std.ArrayListUnmanaged(u8) = .empty,
         block_type: md.BlockType = .doc,
         data: u32 = 0,
         flags: u32 = 0,

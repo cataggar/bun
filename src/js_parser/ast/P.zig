@@ -481,7 +481,7 @@ pub fn NewParser_(
         /// will be set to the most recently visited node (as a way to mark that this
         /// node has metadata) and "tsNamespaceMemberData" will be set to the metadata.
         ts_namespace: RecentlyVisitedTSNamespace = .{},
-        top_level_enums: std.ArrayListUnmanaged(Ref) = .{},
+        top_level_enums: std.ArrayListUnmanaged(Ref) = .empty,
 
         scopes_in_order_for_enum: std.AutoArrayHashMapUnmanaged(logger.Loc, []ScopeOrder) = .{},
 
@@ -3658,7 +3658,7 @@ pub fn NewParser_(
             // Insert any relocated variable statements now
             if (p.relocated_top_level_vars.items.len > 0) {
                 var already_declared = RefMap{};
-                var already_declared_allocator_stack = std.heap.stackFallback(1024, allocator);
+                var already_declared_allocator_stack = bun.stackFallback(1024, allocator);
                 const already_declared_allocator = already_declared_allocator_stack.get();
                 defer if (already_declared_allocator_stack.fixed_buffer_allocator.end_index >= 1023) already_declared.deinit(already_declared_allocator);
 

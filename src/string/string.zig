@@ -217,7 +217,7 @@ pub const String = extern struct {
             return String.static(fmt);
         }
 
-        var sba = std.heap.stackFallback(512, bun.default_allocator);
+        var sba = bun.stackFallback(512, bun.default_allocator);
         const alloc = sba.get();
         const buf = try std.fmt.allocPrint(alloc, fmt, args);
         defer alloc.free(buf);
@@ -342,7 +342,7 @@ pub const String = extern struct {
                 const info = @typeInfo(Type);
 
                 // Zig string literals
-                if (info == .pointer and info.pointer.size == .one and info.pointer.is_const) {
+                if (info == .pointer and info.pointer.size == .one and info.pointer.attrs.@"const") {
                     const child_info = @typeInfo(info.pointer.child);
                     if (child_info == .array and child_info.array.child == u8) {
                         if (child_info.array.len == 0) return String.empty;

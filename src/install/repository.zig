@@ -10,10 +10,10 @@ const SloppyGlobalGitConfig = struct {
     has_ssh_command: bool = false,
 
     var holder: SloppyGlobalGitConfig = .{};
-    var load_and_parse_once = std.once(loadAndParse);
+    var load_and_parse_once = bun.once(loadAndParse);
 
     pub fn get() SloppyGlobalGitConfig {
-        load_and_parse_once.call();
+        load_and_parse_once.call(.{});
         return holder;
     }
 
@@ -22,7 +22,7 @@ const SloppyGlobalGitConfig = struct {
 
         var config_file_path_buf: bun.PathBuffer = undefined;
         const config_file_path = bun.path.joinAbsStringBufZ(home_dir, &config_file_path_buf, &.{".gitconfig"}, .auto);
-        var stack_fallback = std.heap.stackFallback(4096, bun.default_allocator);
+        var stack_fallback = bun.stackFallback(4096, bun.default_allocator);
         const allocator = stack_fallback.get();
         const source = File.toSource(config_file_path, allocator, .{ .convert_bom = true }).unwrap() catch {
             return;
@@ -497,14 +497,14 @@ pub const Repository = extern struct {
         allocator: std.mem.Allocator,
         env: DotEnv.Map,
         log: *logger.Log,
-        cache_dir: std.fs.Dir,
+        cache_dir: std.Io.Dir,
         task_id: Install.Task.Id,
         name: string,
         url: string,
         attempt: u8,
-    ) !std.fs.Dir {
+    ) !std.Io.Dir {
         bun.analytics.Features.git_dependencies += 1;
-        const folder_name = try std.fmt.bufPrintZ(&tl_bufs.get().folder_name_buf, "{f}.git", .{
+        const folder_name = try bun.fmt.bufPrintZ(&tl_bufs.get().folder_name_buf, "{f}.git", .{
             bun.fmt.hexIntLower(task_id.get()),
         });
 
@@ -561,7 +561,7 @@ pub const Repository = extern struct {
         allocator: std.mem.Allocator,
         env: *DotEnv.Loader,
         log: *logger.Log,
-        repo_dir: std.fs.Dir,
+        repo_dir: std.Io.Dir,
         name: string,
         committish: string,
         task_id: Install.Task.Id,
@@ -595,8 +595,8 @@ pub const Repository = extern struct {
         allocator: std.mem.Allocator,
         env: DotEnv.Map,
         log: *logger.Log,
-        cache_dir: std.fs.Dir,
-        repo_dir: std.fs.Dir,
+        cache_dir: std.Io.Dir,
+        repo_dir: std.Io.Dir,
         name: string,
         url: string,
         resolved: string,

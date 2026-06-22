@@ -80,8 +80,7 @@ pub const CronExpression = struct {
     /// Format the expression as a normalized numeric "M H D Mo W" string
     /// suitable for crontab. Returns the written slice of `buf`.
     pub fn formatNumeric(self: CronExpression, buf: *[512]u8) []const u8 {
-        var stream = std.io.fixedBufferStream(buf);
-        const w = stream.writer();
+        var w = std.Io.Writer.fixed(buf);
         formatBitfield(w, u64, self.minutes, 0, 59);
         w.writeByte(' ') catch unreachable;
         formatBitfield(w, u32, self.hours, 0, 23);
@@ -91,7 +90,7 @@ pub const CronExpression = struct {
         formatBitfield(w, u16, self.months, 1, 12);
         w.writeByte(' ') catch unreachable;
         formatBitfield(w, u8, self.weekdays, 0, 6);
-        return stream.getWritten();
+        return w.buffered();
     }
 
     /// Compute the next UTC time (in ms since epoch) that matches this

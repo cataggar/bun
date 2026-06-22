@@ -293,7 +293,7 @@ pub const RuntimeTranspilerCache = struct {
 
         pub fn load(
             this: *Entry,
-            file: std.fs.File,
+            file: std.Io.File,
             sourcemap_allocator: std.mem.Allocator,
             output_code_allocator: std.mem.Allocator,
             esm_record_allocator: std.mem.Allocator,

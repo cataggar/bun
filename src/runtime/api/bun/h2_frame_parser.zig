@@ -820,7 +820,7 @@ pub const H2FrameParser = struct {
             }
         };
         const PendingQueue = struct {
-            data: std.ArrayListUnmanaged(PendingFrame) = .{},
+            data: std.ArrayListUnmanaged(PendingFrame) = .empty,
             front: usize = 0,
             len: usize = 0,
 
@@ -829,7 +829,7 @@ pub const H2FrameParser = struct {
                 self.len = 0;
                 var data = self.data;
                 if (data.capacity > 0) {
-                    self.data = .{};
+                    self.data = .empty;
                     data.clearAndFree(allocator);
                 }
             }

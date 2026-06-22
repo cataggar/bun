@@ -115,7 +115,7 @@ pub const InitCommand = struct {
 
             // Read a single character
             var stdin_b: [1]u8 = undefined;
-            var stdin_r = std.fs.File.stdin().readerStreaming(&stdin_b);
+            var stdin_r = std.Io.File.stdin().readerStreaming(bun.blockingIo(), &stdin_b);
             var stdin_i = &stdin_r.interface;
             const byte = stdin_i.takeByte() catch return selected;
 
@@ -262,7 +262,7 @@ pub const InitCommand = struct {
         ) !void {
             var file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
             defer file.close();
-            var file_w = file.writerStreaming(&.{});
+            var file_w = file.writerStreaming(bun.blockingIo(), &.{});
             const file_i = &file_w.interface;
 
             // Write contents of known assets to the new file. Template assets get formatted.
@@ -293,7 +293,7 @@ pub const InitCommand = struct {
         ) !void {
             var file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
             defer file.close();
-            var file_w = file.writerStreaming(&.{});
+            var file_w = file.writerStreaming(bun.blockingIo(), &.{});
             var file_i = &file_w.interface;
 
             if (comptime is_template) {
@@ -1083,7 +1083,7 @@ const Template = enum {
             if (bun.getenvZAnyCase("USER")) |user| {
                 const pathbuf = bun.path_buffer_pool.get();
                 defer bun.path_buffer_pool.put(pathbuf);
-                const path = std.fmt.bufPrintZ(pathbuf, "C:\\Users\\{s}\\AppData\\Local\\Programs\\Cursor\\Cursor.exe", .{user}) catch {
+                const path = bun.fmt.bufPrintZ(pathbuf, "C:\\Users\\{s}\\AppData\\Local\\Programs\\Cursor\\Cursor.exe", .{user}) catch {
                     return false;
                 };
 

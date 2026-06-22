@@ -123,7 +123,7 @@ pub fn spawnMaybeSync(
     const allocator = arena.allocator();
 
     var override_env = false;
-    var env_array = std.ArrayListUnmanaged(?[*:0]const u8){};
+    var env_array = std.ArrayListUnmanaged(?[*:0]const u8).empty;
     var jsc_vm = globalThis.bunVM();
 
     var cwd = jsc_vm.transpiler.fs.top_level_dir;
@@ -513,7 +513,7 @@ pub fn spawnMaybeSync(
             }
         };
 
-        const pipe_env = std.fmt.bufPrintZ(
+        const pipe_env = bun.fmt.bufPrintZ(
             &ipc_env_buf,
             "NODE_CHANNEL_FD={d}",
             .{ipc_fd},

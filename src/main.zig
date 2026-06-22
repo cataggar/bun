@@ -27,8 +27,8 @@ pub fn main() void {
             .mask = _bun.sys.sigemptyset(),
             .flags = 0,
         };
-        _bun.sys.sigaction(std.posix.SIG.PIPE, &act, null);
-        _bun.sys.sigaction(std.posix.SIG.XFSZ, &act, null);
+        _bun.sys.sigaction(@intFromEnum(std.posix.SIG.PIPE), &act, null);
+        _bun.sys.sigaction(@intFromEnum(std.posix.SIG.XFSZ), &act, null);
     }
 
     if (Environment.isDebug) {

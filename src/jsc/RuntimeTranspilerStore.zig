@@ -17,7 +17,7 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
     if (bun.feature_flag.BUN_DEBUG_NO_DUMP.get()) return;
 
     const BunDebugHolder = struct {
-        pub var dir: ?std.fs.Dir = null;
+        pub var dir: ?std.Io.Dir = null;
         pub var lock: bun.Mutex = .{};
     };
 
@@ -71,7 +71,7 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
             defer bun.default_allocator.free(source_file);
 
             var bufw_buffer: [4096]u8 = undefined;
-            var bufw = file.writerStreaming(&bufw_buffer);
+            var bufw = file.writerStreaming(bun.blockingIo(), &bufw_buffer);
             const w = &bufw.interface;
             try w.print(
                 \\{{

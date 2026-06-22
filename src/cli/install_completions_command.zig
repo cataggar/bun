@@ -1,5 +1,5 @@
 pub const InstallCompletionsCommand = struct {
-    pub fn testPath(_: string) !std.fs.Dir {}
+    pub fn testPath(_: string) !std.Io.Dir {}
 
     const bunx_name = if (Environment.isDebug) "bunx-debug" else "bunx";
 
@@ -127,7 +127,7 @@ pub const InstallCompletionsCommand = struct {
 
         var cwd_buf: bun.PathBuffer = undefined;
 
-        var stdout = std.fs.File.stdout();
+        var stdout = std.Io.File.stdout();
 
         var shell = ShellCompletions.Shell.unknown;
         if (bun.env_var.SHELL.platformGet()) |shell_name| {
@@ -183,7 +183,7 @@ pub const InstallCompletionsCommand = struct {
         }
 
         var completions_dir: string = "";
-        var output_dir: std.fs.Dir = found: {
+        var output_dir: std.Io.Dir = found: {
             for (bun.argv, 0..) |arg, i| {
                 if (strings.eqlComptime(arg, "completions")) {
                     if (bun.argv.len > i + 1) {
@@ -434,7 +434,7 @@ pub const InstallCompletionsCommand = struct {
             const completions_path = bun.getFdPath(.fromStdFile(output_file), &completions_absolute_path_buf) catch unreachable;
             var zshrc_filepath: bun.PathBuffer = undefined;
             const needs_to_tell_them_to_add_completions_file = brk: {
-                var dot_zshrc: std.fs.File = zshrc: {
+                var dot_zshrc: std.Io.File = zshrc: {
                     first: {
 
                         // https://zsh.sourceforge.io/Intro/intro_3.html

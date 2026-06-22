@@ -570,7 +570,7 @@ pub fn buildWithVm(ctx: bun.cli.Command.Context, cwd: []const u8, vm: *VirtualMa
     // Example: ["/assets/main.css", "/assets/blog.css"]
     const route_style_references = try JSValue.createEmptyArray(global, navigatable_routes.items.len);
 
-    var params_buf: std.ArrayListUnmanaged([]const u8) = .{};
+    var params_buf: std.ArrayListUnmanaged([]const u8) = .empty;
     for (navigatable_routes.items, 0..) |route_index, nav_index| {
         defer params_buf.clearRetainingCapacity();
 
@@ -795,7 +795,7 @@ pub export fn BakeToWindowsPath(input: bun.String) callconv(.c) bun.String {
     if (comptime bun.Environment.isPosix) {
         @panic("This code should not be called on POSIX systems.");
     }
-    var sfa = std.heap.stackFallback(1024, bun.default_allocator);
+    var sfa = bun.stackFallback(1024, bun.default_allocator);
     const alloc = sfa.get();
     const input_utf8 = input.toUTF8(alloc);
     defer input_utf8.deinit();
@@ -807,7 +807,7 @@ pub export fn BakeToWindowsPath(input: bun.String) callconv(.c) bun.String {
 }
 
 pub export fn BakeProdResolve(global: *jsc.JSGlobalObject, a_str: bun.String, specifier_str: bun.String) callconv(.c) bun.String {
-    var sfa = std.heap.stackFallback(@sizeOf(bun.PathBuffer) * 2, bun.default_allocator);
+    var sfa = bun.stackFallback(@sizeOf(bun.PathBuffer) * 2, bun.default_allocator);
     const alloc = sfa.get();
 
     const specifier = specifier_str.toUTF8(alloc);
@@ -1020,7 +1020,7 @@ pub const PerThread = struct {
 
 /// Given a key, returns the source code to load.
 pub export fn BakeProdLoad(pt: *PerThread, key: bun.String) bun.String {
-    var sfa = std.heap.stackFallback(4096, bun.default_allocator);
+    var sfa = bun.stackFallback(4096, bun.default_allocator);
     const allocator = sfa.get();
     const utf8 = key.toUTF8(allocator);
     defer utf8.deinit();
@@ -1033,7 +1033,7 @@ pub export fn BakeProdLoad(pt: *PerThread, key: bun.String) bun.String {
 }
 
 pub export fn BakeProdSourceMap(pt: *PerThread, key: bun.String) bun.String {
-    var sfa = std.heap.stackFallback(4096, bun.default_allocator);
+    var sfa = bun.stackFallback(4096, bun.default_allocator);
     const allocator = sfa.get();
     const utf8 = key.toUTF8(allocator);
     defer utf8.deinit();

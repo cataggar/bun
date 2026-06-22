@@ -71,7 +71,7 @@ pub fn writeTestStatusLine(comptime status: bun_test.Execution.Result, writer: a
 // - Add stdout/stderr to the JUnit report
 // - Add timestamp field to the JUnit report
 pub const JunitReporter = struct {
-    contents: std.ArrayListUnmanaged(u8) = .{},
+    contents: std.ArrayListUnmanaged(u8) = .empty,
     total_metrics: Metrics = .{},
     testcases_metrics: Metrics = .{},
     offset_of_testsuites_value: usize = 0,
@@ -79,7 +79,7 @@ pub const JunitReporter = struct {
     current_file: string = "",
     properties_list_to_repeat_in_every_test_suite: ?[]const u8 = null,
 
-    suite_stack: std.ArrayListUnmanaged(SuiteInfo) = .{},
+    suite_stack: std.ArrayListUnmanaged(SuiteInfo) = .empty,
     current_depth: u32 = 0,
 
     hostname_value: ?string = null,
@@ -177,7 +177,7 @@ pub const JunitReporter = struct {
         };
         var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
         defer arena.deinit();
-        var stack = std.heap.stackFallback(1024, arena.allocator());
+        var stack = bun.stackFallback(1024, arena.allocator());
         const allocator = stack.get();
 
         const properties: PropertiesList = .{
@@ -337,7 +337,7 @@ pub const JunitReporter = struct {
 
         var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
         defer arena.deinit();
-        var stack_fallback_allocator = std.heap.stackFallback(4096, arena.allocator());
+        var stack_fallback_allocator = bun.stackFallback(4096, arena.allocator());
         const allocator = stack_fallback_allocator.get();
 
         const elapsed_time_ms = suite_info.metrics.elapsed_time;
@@ -527,7 +527,7 @@ pub const JunitReporter = struct {
         {
             var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
             defer arena.deinit();
-            var stack_fallback_allocator = std.heap.stackFallback(4096, arena.allocator());
+            var stack_fallback_allocator = bun.stackFallback(4096, arena.allocator());
             const allocator = stack_fallback_allocator.get();
             const metrics = this.total_metrics;
             const elapsed_time = @as(f64, @floatFromInt(std.time.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
@@ -579,9 +579,9 @@ pub const CommandLineReporter = struct {
     /// the terminal.
     worker_ipc_file_idx: ?u32 = null,
 
-    failures_to_repeat_buf: std.ArrayListUnmanaged(u8) = .{},
-    skips_to_repeat_buf: std.ArrayListUnmanaged(u8) = .{},
-    todos_to_repeat_buf: std.ArrayListUnmanaged(u8) = .{},
+    failures_to_repeat_buf: std.ArrayListUnmanaged(u8) = .empty,
+    skips_to_repeat_buf: std.ArrayListUnmanaged(u8) = .empty,
+    todos_to_repeat_buf: std.ArrayListUnmanaged(u8) = .empty,
 
     reporters: struct {
         dots: bool = false,
@@ -843,7 +843,7 @@ pub const CommandLineReporter = struct {
 
                     var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
                     defer arena.deinit();
-                    var stack_fallback = std.heap.stackFallback(4096, arena.allocator());
+                    var stack_fallback = bun.stackFallback(4096, arena.allocator());
                     const allocator = stack_fallback.get();
                     var concatenated_describe_scopes = std.array_list.Managed(u8).init(allocator);
 
@@ -1170,7 +1170,7 @@ pub const CommandLineReporter = struct {
             var base64_bytes: [8]u8 = undefined;
             var shortname_buf: [512]u8 = undefined;
             bun.csprng(&base64_bytes);
-            const tmpname = std.fmt.bufPrintZ(&shortname_buf, ".lcov.info.{x}.tmp", .{&base64_bytes}) catch unreachable;
+            const tmpname = bun.fmt.bufPrintZ(&shortname_buf, ".lcov.info.{x}.tmp", .{&base64_bytes}) catch unreachable;
             const path = bun.path.joinAbsStringBufZ(relative_dir, &lcov_name_buf, &.{ opts.reports_directory, tmpname }, .auto);
             const file = bun.sys.File.openat(
                 .cwd(),

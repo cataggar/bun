@@ -1098,7 +1098,7 @@ pub const AsyncReaddirRecursiveTask = struct {
                     .with_file_types => bun.jsc.Node.Dirent,
                     .buffers => Buffer,
                 };
-                var stack = std.heap.stackFallback(8192, bun.default_allocator);
+                var stack = bun.stackFallback(8192, bun.default_allocator);
 
                 // This is a stack-local copy to avoid resizing heap-allocated arrays in the common case of a small directory
                 var entries = std.array_list.Managed(ResultType).init(stack.get());
@@ -4833,9 +4833,9 @@ pub const NodeFS = struct {
         comptime ExpectedType: type,
         entries: *std.array_list.Managed(ExpectedType),
     ) Maybe(void) {
-        var iterator_stack = std.heap.stackFallback(128, bun.default_allocator);
+        var iterator_stack = bun.stackFallback(128, bun.default_allocator);
         var stack = bun.LinearFifo([:0]const u8, .{ .Dynamic = {} }).init(iterator_stack.get());
-        var basename_stack = std.heap.stackFallback(8192 * 2, bun.default_allocator);
+        var basename_stack = bun.stackFallback(8192 * 2, bun.default_allocator);
         const basename_allocator = basename_stack.get();
         defer {
             while (stack.readItem()) |name| {
@@ -6926,15 +6926,15 @@ comptime {
     _ = Bun__mkdirp;
 }
 
-/// Copied from std.fs.Dir.deleteTree. This function returns `FileNotFound` instead of ignoring it, which
+/// Copied from std.Io.Dir.deleteTree. This function returns `FileNotFound` instead of ignoring it, which
 /// is required to match the behavior of Node.js's `fs.rm` { recursive: true, force: false }.
-pub fn zigDeleteTree(self: std.fs.Dir, sub_path: []const u8, kind_hint: std.fs.File.Kind) !void {
+pub fn zigDeleteTree(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.File.Kind) !void {
     var initial_iterable_dir = (try zigDeleteTreeOpenInitialSubpath(self, sub_path, kind_hint)) orelse return;
 
     const StackItem = struct {
         name: []const u8,
-        parent_dir: std.fs.Dir,
-        iter: std.fs.Dir.Iterator,
+        parent_dir: std.Io.Dir,
+        iter: std.Io.Dir.Iterator,
 
         fn closeAll(items: []@This()) void {
             for (items) |*item| item.iter.dir.close();
@@ -7120,7 +7120,7 @@ pub fn zigDeleteTree(self: std.fs.Dir, sub_path: []const u8, kind_hint: std.fs.F
     }
 }
 
-fn zigDeleteTreeOpenInitialSubpath(self: std.fs.Dir, sub_path: []const u8, kind_hint: std.fs.File.Kind) !?std.fs.Dir {
+fn zigDeleteTreeOpenInitialSubpath(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.File.Kind) !?std.Io.Dir {
     return iterable_dir: {
         // Treat as a file by default
         var treat_as_dir = kind_hint == .directory;
@@ -7181,10 +7181,10 @@ fn zigDeleteTreeOpenInitialSubpath(self: std.fs.Dir, sub_path: []const u8, kind_
     };
 }
 
-fn zigDeleteTreeMinStackSizeWithKindHint(self: std.fs.Dir, sub_path: []const u8, kind_hint: std.fs.File.Kind) !void {
+fn zigDeleteTreeMinStackSizeWithKindHint(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.File.Kind) !void {
     start_over: while (true) {
         var dir = (try zigDeleteTreeOpenInitialSubpath(self, sub_path, kind_hint)) orelse return;
-        var cleanup_dir_parent: ?std.fs.Dir = null;
+        var cleanup_dir_parent: ?std.Io.Dir = null;
         defer if (cleanup_dir_parent) |*d| d.close();
 
         var cleanup_dir = true;

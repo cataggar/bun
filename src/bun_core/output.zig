@@ -23,7 +23,7 @@ pub const Source = struct {
             break :brk std.io.FixedBufferStream([]u8);
         } else {
             break :brk File;
-            // var stdout = std.fs.File.stdout();
+            // var stdout = std.Io.File.stdout();
             // return @TypeOf(bun.deprecated.bufferedWriter(stdout.writer()));
         }
     };
@@ -241,8 +241,8 @@ pub const Source = struct {
                 WindowsStdio.init();
             }
 
-            const stdout = bun.sys.File.from(std.fs.File.stdout());
-            const stderr = bun.sys.File.from(std.fs.File.stderr());
+            const stdout = bun.sys.File.from(std.Io.File.stdout());
+            const stderr = bun.sys.File.from(std.Io.File.stderr());
 
             Source.setInit(stdout, stderr);
 
@@ -268,7 +268,7 @@ pub const Source = struct {
         @"16m",
     };
     var lazy_color_depth: ColorDepth = .none;
-    var color_depth_once = std.once(getColorDepthOnce);
+    var color_depth_once = bun.once(getColorDepthOnce);
     fn getColorDepthOnce() void {
         if (getForceColorDepth()) |depth| {
             lazy_color_depth = depth;
@@ -374,7 +374,7 @@ pub const Source = struct {
         lazy_color_depth = .none;
     }
     pub fn colorDepth() ColorDepth {
-        color_depth_once.call();
+        color_depth_once.call(.{});
         return lazy_color_depth;
     }
 
@@ -489,10 +489,10 @@ pub fn isAIAgent() bool {
             value = evaluate();
         }
 
-        var once = std.once(setValue);
+        var once = bun.once(setValue);
 
         pub fn isEnabled() bool {
-            once.call();
+            once.call(.{});
             return value;
         }
     };
@@ -742,7 +742,7 @@ noinline fn writeBytes(dest: Destination, bytes: []const u8) void {
 }
 
 inline fn hasNoArgs(comptime Args: type) bool {
-    return @typeInfo(Args).@"struct".fields.len == 0;
+    return @typeInfo(Args).@"struct".field_names.len == 0;
 }
 
 inline fn printTo(dest: Destination, comptime fmt: string, args: anytype) void {
@@ -856,7 +856,7 @@ fn ScopedLogger(comptime tagname: []const u8, comptime visibility: Visibility) t
 
         var lock = bun.Mutex{};
 
-        var is_visible_once = std.once(evaluateIsVisible);
+        var is_visible_once = bun.once(evaluateIsVisible);
 
         fn evaluateIsVisible() void {
             if (bun.getenvZAnyCase("BUN_DEBUG_" ++ tagname)) |val| {
@@ -879,7 +879,7 @@ fn ScopedLogger(comptime tagname: []const u8, comptime visibility: Visibility) t
         }
 
         pub fn isVisible() bool {
-            is_visible_once.call();
+            is_visible_once.call(.{});
             return !really_disable.load(.monotonic);
         }
 
@@ -1217,7 +1217,7 @@ pub inline fn err(error_name: anytype, comptime fmt: []const u8, args: anytype) 
     const display_name, const is_comptime_name = display_name: {
         // Zig string literals are of type *const [n:0]u8
         // we assume that no one will pass this type from not using a string literal.
-        if (info == .pointer and info.pointer.size == .one and info.pointer.is_const) {
+        if (info == .pointer and info.pointer.size == .one and info.pointer.attrs.@"const") {
             const child_info = @typeInfo(info.pointer.child);
             if (child_info == .array and child_info.array.child == u8) {
                 if (child_info.array.len == 0) @compileError("Output.err should not be passed an empty string (use errGeneric)");

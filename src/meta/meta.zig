@@ -70,7 +70,7 @@ pub inline fn typeBaseName(comptime fullname: [:0]const u8) [:0]const u8 {
 }
 
 pub fn enumFieldNames(comptime Type: type) []const []const u8 {
-    var names: [std.meta.fields(Type).len][]const u8 = std.meta.fieldNames(Type).*;
+    var names: [std.meta.fieldNames(Type).len][]const u8 = std.meta.fieldNames(Type).*;
     var i: usize = 0;
     for (names) |name| {
         // zig seems to include "_" or an empty string in the list of enum field names
@@ -86,9 +86,10 @@ pub fn enumFieldNames(comptime Type: type) []const []const u8 {
 
 pub fn banFieldType(comptime Container: type, comptime T: type) void {
     comptime {
-        for (std.meta.fields(Container)) |field| {
-            if (field.type == T) {
-                @compileError(std.fmt.comptimePrint(typeName(T) ++ " field \"" ++ field.name ++ "\" not allowed in " ++ typeName(Container), .{}));
+        const info = @typeInfo(Container).@"struct";
+        for (info.field_names, info.field_types) |field_name, field_type| {
+            if (field_type == T) {
+                @compileError(typeName(T) ++ " field \"" ++ field_name ++ "\" not allowed in " ++ typeName(Container));
             }
         }
     }

@@ -393,9 +393,9 @@ pub const Bin = extern struct {
         bin: Bin,
         i: usize = 0,
         done: bool = false,
-        dir_iterator: ?std.fs.Dir.Iterator = null,
+        dir_iterator: ?std.Io.Dir.Iterator = null,
         package_name: String,
-        destination_node_modules: std.fs.Dir = bun.invalid_fd.stdDir(),
+        destination_node_modules: std.Io.Dir = bun.invalid_fd.stdDir(),
         buf: bun.PathBuffer = undefined,
         string_buffer: []const u8,
         extern_string_buf: []const ExternalString,
@@ -741,7 +741,7 @@ pub const Bin = extern struct {
 
             const shebang = shebang: {
                 const first_content_chunk = contents: {
-                    var reader = target.stdFile().readerStreaming(&.{});
+                    var reader = target.stdFile().readerStreaming(bun.blockingIo(), &.{});
                     var readvec_buf: []u8 = &read_in_buf;
                     const read = reader.interface.readVec((&readvec_buf)[0..1]) catch break :contents null;
                     if (read == 0) break :contents null;

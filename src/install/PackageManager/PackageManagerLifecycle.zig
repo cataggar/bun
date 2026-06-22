@@ -8,7 +8,7 @@ pub const LifecycleScriptTimeLog = struct {
     };
 
     mutex: bun.Mutex = .{},
-    list: std.ArrayListUnmanaged(Entry) = .{},
+    list: std.ArrayListUnmanaged(Entry) = .empty,
 
     pub fn appendConcurrent(log: *LifecycleScriptTimeLog, allocator: std.mem.Allocator, entry: Entry) void {
         log.mutex.lock();
@@ -90,7 +90,7 @@ pub fn determinePreinstallState(
 
             const patch_hash: ?u64 = brk: {
                 if (manager.lockfile.patched_dependencies.entries.len == 0) break :brk null;
-                var sfb = std.heap.stackFallback(1024, manager.lockfile.allocator);
+                var sfb = bun.stackFallback(1024, manager.lockfile.allocator);
                 const name_and_version = std.fmt.allocPrint(
                     sfb.get(),
                     "{s}@{f}",

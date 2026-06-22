@@ -293,9 +293,9 @@ pub fn DifferWithEql(comptime Line: type, comptime opts: Options, comptime areLi
 
 pub fn printDiff(T: type, diffs: std.array_list.Managed(Diff(T))) !void {
     const stdout = if (builtin.is_test)
-        std.fs.File.stderr().writer()
+        std.Io.File.stderr().writer()
     else
-        std.fs.File.stdout().writer();
+        std.Io.File.stdout().writer();
 
     const specifier = switch (T) {
         u8 => "c",
@@ -623,7 +623,63 @@ const builtin = @import("builtin");
 const std = @import("std");
 const t = std.testing;
 const assert = std.debug.assert;
-const stackFallback = std.heap.stackFallback;
+/// Local copy of the removed `std.heap.stackFallback` (this file intentionally
+/// avoids `@import("bun")`; see the note at the top of the file).
+fn stackFallback(comptime size: usize, fallback_allocator: std.mem.Allocator) StackFallbackComptime(size) {
+    return StackFallbackComptime(size){
+        .buffer = undefined,
+        .fallback_allocator = fallback_allocator,
+        .fixed_buffer_allocator = undefined,
+    };
+}
+
+fn StackFallbackComptime(comptime size: usize) type {
+    return struct {
+        const Self = @This();
+
+        buffer: [size]u8,
+        fallback_allocator: std.mem.Allocator,
+        fixed_buffer_allocator: std.heap.FixedBufferAllocator,
+
+        pub fn get(self: *Self) std.mem.Allocator {
+            self.fixed_buffer_allocator = std.heap.FixedBufferAllocator.init(self.buffer[0..]);
+            return .{
+                .ptr = self,
+                .vtable = &.{ .alloc = alloc, .resize = resize, .remap = remap, .free = free },
+            };
+        }
+
+        fn alloc(ctx: *anyopaque, n: usize, alignment: std.mem.Alignment, ra: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            return std.heap.FixedBufferAllocator.alloc(&self.fixed_buffer_allocator, n, alignment, ra) orelse
+                self.fallback_allocator.rawAlloc(n, alignment, ra);
+        }
+
+        fn resize(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) bool {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(buf.ptr)) {
+                return std.heap.FixedBufferAllocator.resize(&self.fixed_buffer_allocator, buf, alignment, new_len, ra);
+            }
+            return self.fallback_allocator.rawResize(buf, alignment, new_len, ra);
+        }
+
+        fn remap(ctx: *anyopaque, mem_: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(mem_.ptr)) {
+                return std.heap.FixedBufferAllocator.remap(&self.fixed_buffer_allocator, mem_, alignment, new_len, ra);
+            }
+            return self.fallback_allocator.rawRemap(mem_, alignment, new_len, ra);
+        }
+
+        fn free(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ra: usize) void {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(buf.ptr)) {
+                return std.heap.FixedBufferAllocator.free(&self.fixed_buffer_allocator, buf, alignment, ra);
+            }
+            return self.fallback_allocator.rawFree(buf, alignment, ra);
+        }
+    };
+}
 
 const mem = std.mem;
 const Allocator = mem.Allocator;

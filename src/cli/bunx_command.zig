@@ -6,7 +6,7 @@ pub const BunxCommand = struct {
     /// bunx-specific options parsed from argv.
     const Options = struct {
         /// CLI arguments to pass to the command being run.
-        passthrough_list: std.ArrayListUnmanaged(string) = .{},
+        passthrough_list: std.ArrayListUnmanaged(string) = .empty,
         /// `bunx <package_name>`
         package_name: string,
         /// The binary name to run (when using --package)
@@ -252,14 +252,14 @@ pub const BunxCommand = struct {
 
     fn getBinNameFromProjectDirectory(transpiler: *bun.Transpiler, dir_fd: bun.FD, package_name: []const u8) ![]const u8 {
         var subpath: bun.PathBuffer = undefined;
-        const subpath_z = std.fmt.bufPrintZ(&subpath, bun.pathLiteral("node_modules/{s}/package.json"), .{package_name}) catch unreachable;
+        const subpath_z = bun.fmt.bufPrintZ(&subpath, bun.pathLiteral("node_modules/{s}/package.json"), .{package_name}) catch unreachable;
         return try getBinNameFromSubpath(transpiler, dir_fd, subpath_z);
     }
 
     fn getBinNameFromTempDirectory(transpiler: *bun.Transpiler, tempdir_name: []const u8, package_name: []const u8, with_stale_check: bool) ![]const u8 {
         var subpath: bun.PathBuffer = undefined;
         if (with_stale_check) {
-            const subpath_z = std.fmt.bufPrintZ(
+            const subpath_z = bun.fmt.bufPrintZ(
                 &subpath,
                 bun.pathLiteral("{s}/package.json"),
                 .{tempdir_name},
@@ -296,7 +296,7 @@ pub const BunxCommand = struct {
             _ = target_package_json.close();
         }
 
-        const subpath_z = std.fmt.bufPrintZ(
+        const subpath_z = bun.fmt.bufPrintZ(
             &subpath,
             bun.pathLiteral("{s}/node_modules/{s}/package.json"),
             .{ tempdir_name, package_name },

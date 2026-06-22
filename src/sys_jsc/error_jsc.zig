@@ -62,7 +62,7 @@ pub const TestingAPIs = struct {
             fn handler(_: c_int) callconv(.c) void {}
         };
         var mask = bun.sys.sigemptyset();
-        bun.sys.sigaddset(&mask, posix.SIG.USR2);
+        bun.sys.sigaddset(&mask, @intFromEnum(posix.SIG.USR2));
         const act = bun.sys.Sigaction{
             .handler = .{ .handler = &sentry.handler },
             .mask = mask,

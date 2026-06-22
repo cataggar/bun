@@ -366,7 +366,7 @@ const ServePlugins = struct {
         defer this.deref();
 
         const plugin = bun.jsc.API.JSBundler.Plugin.create(global, .browser);
-        var sfb = std.heap.stackFallback(@sizeOf(bun.String) * 4, bun.default_allocator);
+        var sfb = bun.stackFallback(@sizeOf(bun.String) * 4, bun.default_allocator);
         const alloc = sfb.get();
         const bunstring_array = bun.handleOom(alloc.alloc(bun.String, plugin_list.len));
         defer alloc.free(bunstring_array);
@@ -572,7 +572,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
         /// These associate a route to the index in RouteList.cpp.
         /// User routes may get applied multiple times due to SNI.
         /// So we have to store it.
-        user_routes: std.ArrayListUnmanaged(UserRoute) = .{},
+        user_routes: std.ArrayListUnmanaged(UserRoute) = .empty,
 
         on_clienterror: jsc.Strong.Optional = .empty,
 
@@ -2028,7 +2028,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             this.pending_requests += 1;
             defer this.pending_requests -= 1;
             req.setYield(false);
-            var stack_fallback = std.heap.stackFallback(8192, this.allocator);
+            var stack_fallback = bun.stackFallback(8192, this.allocator);
             const allocator = stack_fallback.get();
 
             const buffer_writer = js_printer.BufferWriter.init(allocator);
@@ -3167,7 +3167,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
 
                         if (hostname.len > 2 and hostname[0] == '[') {
                             // remove "[" and "]" from hostname
-                            host = std.fmt.bufPrintZ(&host_buff, "{s}", .{hostname[1 .. hostname.len - 1]}) catch unreachable;
+                            host = bun.fmt.bufPrintZ(&host_buff, "{s}", .{hostname[1 .. hostname.len - 1]}) catch unreachable;
                         } else {
                             host = tcp.hostname;
                         }

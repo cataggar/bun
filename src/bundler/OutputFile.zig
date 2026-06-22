@@ -164,7 +164,7 @@ pub fn initPending(loader: Loader, pending: resolver.Result) OutputFile {
     };
 }
 
-pub fn initFile(file: std.fs.File, pathname: string, size: usize) OutputFile {
+pub fn initFile(file: std.Io.File, pathname: string, size: usize) OutputFile {
     return .{
         .loader = .file,
         .src_path = Fs.Path.init(pathname),
@@ -173,7 +173,7 @@ pub fn initFile(file: std.fs.File, pathname: string, size: usize) OutputFile {
     };
 }
 
-pub fn initFileWithDir(file: std.fs.File, pathname: string, size: usize, dir: std.fs.Dir) OutputFile {
+pub fn initFileWithDir(file: std.Io.File, pathname: string, size: usize, dir: std.Io.Dir) OutputFile {
     var res = initFile(file, pathname, size);
     res.value.copy.dir_handle = .fromStdDir(dir);
     return res;
@@ -199,9 +199,9 @@ pub const Options = struct {
             data: []const u8,
         },
         file: struct {
-            file: std.fs.File,
+            file: std.Io.File,
             size: usize,
-            dir: std.fs.Dir,
+            dir: std.Io.Dir,
         },
         saved: usize,
     },
@@ -248,7 +248,7 @@ pub fn init(options: Options) OutputFile {
     };
 }
 
-pub fn writeToDisk(f: OutputFile, root_dir: std.fs.Dir, root_dir_path: []const u8) !void {
+pub fn writeToDisk(f: OutputFile, root_dir: std.Io.Dir, root_dir_path: []const u8) !void {
     switch (f.value) {
         .noop => {},
         .saved => {

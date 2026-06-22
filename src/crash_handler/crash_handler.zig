@@ -53,7 +53,7 @@ threadlocal var unsupported_uv_function: ?[*:0]const u8 = null;
 /// rate or only crash due to assertion failures, are debug-only. See `Action`.
 pub threadlocal var current_action: ?Action = null;
 
-var before_crash_handlers: std.ArrayListUnmanaged(struct { *anyopaque, *const OnBeforeCrash }) = .{};
+var before_crash_handlers: std.ArrayListUnmanaged(struct { *anyopaque, *const OnBeforeCrash }) = .empty;
 
 var before_crash_handlers_mutex: bun.Mutex = .{};
 
@@ -232,7 +232,7 @@ pub fn crashHandler(
                 //
                 // Output.errorWriter() is not used here because it may not be configured
                 // if the program crashes immediately at startup.
-                var writer_w = std.fs.File.stderr().writerStreaming(&.{});
+                var writer_w = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
                 const writer = &writer_w.interface;
 
                 // The format of the panic trace is slightly different in debug
@@ -257,7 +257,7 @@ pub fn crashHandler(
                     Output.flush();
                     Output.Source.Stdio.restore();
 
-                    writer.writeAll(&(bun.strings.repeatComptime(u8, "=", 60) ++ "\n".*)) catch std.posix.abort();
+                    writer.writeAll(&(bun.strings.repeatComptime(u8, "=", 60) ++ "\n".*)) catch std.process.abort();
                     printMetadata(writer) catch std.posix.abort();
 
                     if (inside_native_plugin) |name| {
@@ -498,7 +498,7 @@ pub fn crashHandler(
             // A panic happened while trying to print a previous panic message,
             // we're still holding the mutex but that's fine as we're going to
             // call abort()
-            var stderr_w = std.fs.File.stderr().writerStreaming(&.{});
+            var stderr_w = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
             const stderr = &stderr_w.interface;
             stderr.print("\npanic: {f}\n", .{reason}) catch std.posix.abort();
             stderr.print("panicked during a panic. Aborting.\n", .{}) catch std.posix.abort();
@@ -872,10 +872,10 @@ fn handleSegfaultPosix(sig: i32, info: *const std.posix.siginfo_t, _: ?*const an
 
     crashHandler(
         switch (sig) {
-            std.posix.SIG.SEGV => .{ .segmentation_fault = addr },
-            std.posix.SIG.ILL => .{ .illegal_instruction = addr },
-            std.posix.SIG.BUS => .{ .bus_error = addr },
-            std.posix.SIG.FPE => .{ .floating_point_error = addr },
+            @intFromEnum(std.posix.SIG.SEGV) => .{ .segmentation_fault = addr },
+            @intFromEnum(std.posix.SIG.ILL) => .{ .illegal_instruction = addr },
+            @intFromEnum(std.posix.SIG.BUS) => .{ .bus_error = addr },
+            @intFromEnum(std.posix.SIG.FPE) => .{ .floating_point_error = addr },
 
             // we do not register this handler for other signals
             else => unreachable,
@@ -904,10 +904,10 @@ fn updatePosixSegfaultHandler(act: ?*bun.sys.Sigaction) !void {
         }
     }
 
-    bun.sys.sigaction(std.posix.SIG.SEGV, act, null);
-    bun.sys.sigaction(std.posix.SIG.ILL, act, null);
-    bun.sys.sigaction(std.posix.SIG.BUS, act, null);
-    bun.sys.sigaction(std.posix.SIG.FPE, act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.SEGV), act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.ILL), act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.BUS), act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.FPE), act, null);
 }
 
 var windows_segfault_handle: ?windows.HANDLE = null;
@@ -915,7 +915,7 @@ var windows_segfault_handle: ?windows.HANDLE = null;
 pub fn resetOnPosix() void {
     if (bun.Environment.enable_asan) return;
     var act = bun.sys.Sigaction{
-        .handler = .{ .sigaction = handleSegfaultPosix },
+        .handler = .{ .sigaction = @ptrCast(&handleSegfaultPosix) },
         .mask = bun.sys.sigemptyset(),
         .flags = (std.posix.SA.SIGINFO | std.posix.SA.RESTART | std.posix.SA.RESETHAND),
     };
@@ -1406,7 +1406,7 @@ fn encodeTraceString(opts: TraceString, writer: anytype) !void {
             }
             const b64_len = bun.base64.encode(&b64_bytes, compressed);
 
-            try writer.writeAll(std.mem.trimRight(u8, b64_bytes[0..b64_len], "="));
+            try writer.writeAll(std.mem.trimEnd(u8, b64_bytes[0..b64_len], "="));
         },
 
         .@"unreachable" => try writer.writeByte('1'),
@@ -1603,7 +1603,7 @@ fn crash() noreturn {
                 std.posix.SIG.HUP,
                 std.posix.SIG.TERM,
             }) |sig| {
-                bun.sys.sigaction(sig, &sigact, null);
+                bun.sys.sigaction(@intFromEnum(sig), &sigact, null);
             }
 
             @trap();
@@ -1613,7 +1613,7 @@ fn crash() noreturn {
 
 pub var verbose_error_trace = false;
 
-noinline fn coldHandleErrorReturnTrace(err_int_workaround_for_zig_ccall_bug: std.meta.Int(.unsigned, @bitSizeOf(anyerror)), trace: *std.builtin.StackTrace, comptime is_root: bool) void {
+noinline fn coldHandleErrorReturnTrace(err_int_workaround_for_zig_ccall_bug: @Int(.unsigned, @bitSizeOf(anyerror)), trace: *std.builtin.StackTrace, comptime is_root: bool) void {
     @branchHint(.cold);
     const err = @errorFromInt(err_int_workaround_for_zig_ccall_bug);
 
@@ -1696,7 +1696,7 @@ extern "c" fn WTF__DumpStackTrace(ptr: [*]usize, count: usize) void;
 /// cases where such logic fails to run.
 pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimits) void {
     Output.flush();
-    var stderr_w = std.fs.File.stderr().writerStreaming(&.{});
+    var stderr_w = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
     const stderr = &stderr_w.interface;
     if (!bun.Environment.show_crash_trace) {
         // debug symbols aren't available, lets print a tracestring
@@ -1715,7 +1715,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
                 stderr.print("Unable to dump stack trace: Unable to open debug info: {s}\nFallback trace:\n", .{@errorName(err)}) catch return;
                 break :attempt_dump;
             };
-            writeStackTrace(trace, stderr, debug_info, std.io.tty.detectConfig(std.fs.File.stderr()), limits) catch |err| {
+            writeStackTrace(trace, stderr, debug_info, std.io.tty.detectConfig(std.Io.File.stderr()), limits) catch |err| {
                 stderr.print("Unable to dump stack trace: {s}\nFallback trace:\n", .{@errorName(err)}) catch return;
                 break :attempt_dump;
             };
@@ -1735,7 +1735,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
                 stderr.print("Unable to dump stack trace: Unable to open debug info: {s}\n", .{@errorName(err)}) catch return;
                 return;
             };
-            writeStackTrace(trace, stderr, debug_info, std.io.tty.detectConfig(std.fs.File.stderr()), limits) catch |err| {
+            writeStackTrace(trace, stderr, debug_info, std.io.tty.detectConfig(std.Io.File.stderr()), limits) catch |err| {
                 stderr.print("Unable to dump stack trace: {s}", .{@errorName(err)}) catch return;
                 return;
             };
@@ -1751,7 +1751,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
     for (programs) |program| {
         var arena = bun.ArenaAllocator.init(bun.default_allocator);
         defer arena.deinit();
-        var sfa = std.heap.stackFallback(16384, arena.allocator());
+        var sfa = bun.stackFallback(16384, arena.allocator());
         spawnSymbolizer(program, sfa.get(), &trace) catch |err| switch (err) {
             // try next program if this one wasn't found
             error.FileNotFound => continue,
@@ -1793,7 +1793,7 @@ fn spawnSymbolizer(program: [:0]const u8, alloc: std.mem.Allocator, trace: *cons
     child.expand_arg0 = .expand;
     child.progress_node = std.Progress.Node.none;
 
-    var stderr_writer = std.fs.File.stderr().writerStreaming(&.{});
+    var stderr_writer = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
     const stderr = &stderr_writer.interface;
     const result = child.spawnAndWait() catch |err| {
         stderr.print("Failed to invoke command: {f}\n", .{bun.fmt.fmtSlice(argv.items, " ")}) catch {};
@@ -2162,7 +2162,7 @@ fn printLineFromFileAnyOs(out_stream: anytype, tty_config: std.io.tty.Config, so
         }
         return;
     }
-    const line_without_newline = std.mem.trimRight(u8, fbs.getWritten(), "\n");
+    const line_without_newline = std.mem.trimEnd(u8, fbs.getWritten(), "\n");
     if (source_location.column > line_without_newline.len) {
         try out_stream.writeAll(line_without_newline);
         try out_stream.writeByte('\n');

@@ -10,7 +10,7 @@ pub const PackCommand = struct {
         // pointer in this file. `manager.lockfile` is incorrect
         lockfile: ?*Lockfile,
 
-        bundled_deps: std.ArrayListUnmanaged(BundledDep) = .{},
+        bundled_deps: std.ArrayListUnmanaged(BundledDep) = .empty,
 
         stats: Stats = .{},
 
@@ -227,7 +227,7 @@ pub const PackCommand = struct {
     const PackQueue = std.PriorityQueue(PackQueueItem, void, PackQueueContext.lessThan);
 
     const DirInfo = struct {
-        std.fs.Dir, // the dir
+        std.Io.Dir, // the dir
         string, // the dir subpath
         usize, // dir depth. used to shrink ignore stack
     };
@@ -238,7 +238,7 @@ pub const PackCommand = struct {
         bins: []const BinInfo,
         includes: []const Pattern,
         excludes: []const Pattern,
-        root_dir: std.fs.Dir,
+        root_dir: std.Io.Dir,
         log_level: LogLevel,
     ) OOM!void {
         if (comptime Environment.isDebug) {
@@ -247,15 +247,15 @@ pub const PackCommand = struct {
             }
         }
 
-        var ignores: std.ArrayListUnmanaged(IgnorePatterns) = .{};
+        var ignores: std.ArrayListUnmanaged(IgnorePatterns) = .empty;
         defer ignores.deinit(allocator);
 
-        var dirs: std.ArrayListUnmanaged(DirInfo) = .{};
+        var dirs: std.ArrayListUnmanaged(DirInfo) = .empty;
         defer dirs.deinit(allocator);
 
         try dirs.append(allocator, .{ root_dir, "", 1 });
 
-        var included_dirs: std.ArrayListUnmanaged(DirInfo) = .{};
+        var included_dirs: std.ArrayListUnmanaged(DirInfo) = .empty;
         defer included_dirs.deinit(allocator);
 
         var subpath_dedupe = bun.StringHashMap(void).init(allocator);
@@ -390,15 +390,15 @@ pub const PackCommand = struct {
         dedupe: *bun.StringHashMap(void),
         log_level: LogLevel,
     ) OOM!void {
-        var dirs: std.ArrayListUnmanaged(DirInfo) = .{};
+        var dirs: std.ArrayListUnmanaged(DirInfo) = .empty;
         defer dirs.deinit(allocator);
 
         try dirs.append(allocator, root_dir_info);
 
-        var ignores: std.ArrayListUnmanaged(IgnorePatterns) = .{};
+        var ignores: std.ArrayListUnmanaged(IgnorePatterns) = .empty;
         defer ignores.deinit(allocator);
 
-        var negated_excludes: std.ArrayListUnmanaged(Pattern) = .{};
+        var negated_excludes: std.ArrayListUnmanaged(Pattern) = .empty;
         defer negated_excludes.deinit(allocator);
 
         if (excludes.len > 0) {
@@ -498,10 +498,10 @@ pub const PackCommand = struct {
     }
 
     fn openSubdir(
-        dir: std.fs.Dir,
+        dir: std.Io.Dir,
         entry_name: string,
         entry_subpath: stringZ,
-    ) std.fs.Dir {
+    ) std.Io.Dir {
         return dir.openDirZ(
             entryNameZ(entry_name, entry_subpath),
             .{ .iterate = true },
@@ -533,7 +533,7 @@ pub const PackCommand = struct {
 
     fn iterateBundledDeps(
         ctx: *Context,
-        root_dir: std.fs.Dir,
+        root_dir: std.Io.Dir,
         log_level: LogLevel,
     ) OOM!PackQueue {
         var bundled_pack_queue = PackQueue.init(ctx.allocator, {});
@@ -560,7 +560,7 @@ pub const PackCommand = struct {
         var dedupe = bun.StringHashMap(void).init(ctx.allocator);
         defer dedupe.deinit();
 
-        var additional_bundled_deps: std.ArrayListUnmanaged(DirInfo) = .{};
+        var additional_bundled_deps: std.ArrayListUnmanaged(DirInfo) = .empty;
         defer additional_bundled_deps.deinit(ctx.allocator);
 
         var iter = DirIterator.iterate(.fromStdDir(dir), .u8);
@@ -669,7 +669,7 @@ pub const PackCommand = struct {
 
     fn addBundledDep(
         ctx: *Context,
-        root_dir: std.fs.Dir,
+        root_dir: std.Io.Dir,
         bundled_dir_info: DirInfo,
         bundled_pack_queue: *PackQueue,
         dedupe: *bun.StringHashMap(void),
@@ -678,7 +678,7 @@ pub const PackCommand = struct {
     ) OOM!void {
         ctx.stats.bundled_deps += 1;
 
-        var dirs: std.ArrayListUnmanaged(DirInfo) = .{};
+        var dirs: std.ArrayListUnmanaged(DirInfo) = .empty;
         defer dirs.deinit(ctx.allocator);
 
         try dirs.append(ctx.allocator, bundled_dir_info);
@@ -808,12 +808,12 @@ pub const PackCommand = struct {
         root_dir: DirInfo,
         log_level: LogLevel,
     ) OOM!void {
-        var ignores: std.ArrayListUnmanaged(IgnorePatterns) = .{};
+        var ignores: std.ArrayListUnmanaged(IgnorePatterns) = .empty;
         defer ignores.deinit(allocator);
 
         // Stacks and depth-first traversal. Doing so means we can push and pop from
         // ignore patterns without needing to clone the entire list for future use.
-        var dirs: std.ArrayListUnmanaged(DirInfo) = .{};
+        var dirs: std.ArrayListUnmanaged(DirInfo) = .empty;
         defer dirs.deinit(allocator);
 
         try dirs.append(allocator, root_dir);
@@ -915,7 +915,7 @@ pub const PackCommand = struct {
         json: Expr,
         comptime field: string,
     ) OOM!?std.ArrayListUnmanaged(BundledDep) {
-        var deps: std.ArrayListUnmanaged(BundledDep) = .{};
+        var deps: std.ArrayListUnmanaged(BundledDep) = .empty;
         const bundled_deps = json.get(field) orelse return null;
 
         invalid_field: {
@@ -977,7 +977,7 @@ pub const PackCommand = struct {
         allocator: std.mem.Allocator,
         json: Expr,
     ) OOM![]const BinInfo {
-        var bins: std.ArrayListUnmanaged(BinInfo) = .{};
+        var bins: std.ArrayListUnmanaged(BinInfo) = .empty;
 
         var path_buf: PathBuffer = undefined;
 
@@ -1470,8 +1470,8 @@ pub const PackCommand = struct {
             if (json.root.get("files")) |files| {
                 files_error: {
                     if (files.asArray()) |_files_array| {
-                        var includes: std.ArrayListUnmanaged(Pattern) = .{};
-                        var excludes: std.ArrayListUnmanaged(Pattern) = .{};
+                        var includes: std.ArrayListUnmanaged(Pattern) = .empty;
+                        var excludes: std.ArrayListUnmanaged(Pattern) = .empty;
                         defer {
                             includes.deinit(ctx.allocator);
                             excludes.deinit(ctx.allocator);
@@ -2044,7 +2044,7 @@ pub const PackCommand = struct {
         ctx: *Context,
         archive: *Archive,
         entry: *Archive.Entry,
-        root_dir: std.fs.Dir,
+        root_dir: std.Io.Dir,
         edited_package_json: string,
     ) OOM!*Archive.Entry {
         const stat = bun.sys.fstatat(.fromStdDir(root_dir), "package.json").unwrap() catch |err| {
@@ -2430,7 +2430,7 @@ pub const PackCommand = struct {
 
         pub const List = std.ArrayListUnmanaged(IgnorePatterns);
 
-        fn ignoreFileFail(dir: std.fs.Dir, ignore_kind: Kind, reason: enum { read, open }, err: anyerror) noreturn {
+        fn ignoreFileFail(dir: std.Io.Dir, ignore_kind: Kind, reason: enum { read, open }, err: anyerror) noreturn {
             var buf: PathBuffer = undefined;
             const dir_path = bun.getFdPath(.fromStdDir(dir), &buf) catch "";
             Output.err(err, "failed to {s} {s} at: \"{s}{s}{s}\"", .{
@@ -2455,8 +2455,8 @@ pub const PackCommand = struct {
         }
 
         // ignore files are always ignored, don't need to worry about opening or reading twice
-        pub fn readFromDisk(allocator: std.mem.Allocator, dir: std.fs.Dir, dir_depth: usize) OOM!?IgnorePatterns {
-            var patterns: std.ArrayListUnmanaged(Pattern) = .{};
+        pub fn readFromDisk(allocator: std.mem.Allocator, dir: std.Io.Dir, dir_depth: usize) OOM!?IgnorePatterns {
+            var patterns: std.ArrayListUnmanaged(Pattern) = .empty;
             errdefer patterns.deinit(allocator);
 
             var ignore_kind: Kind = .@".npmignore";
@@ -2529,7 +2529,7 @@ pub const PackCommand = struct {
 
     fn printArchivedFilesAndPackages(
         ctx: *Context,
-        root_dir_std: std.fs.Dir,
+        root_dir_std: std.Io.Dir,
         comptime is_dry_run: bool,
         pack_list: if (is_dry_run) *PackQueue else PackList,
         package_json_len: usize,

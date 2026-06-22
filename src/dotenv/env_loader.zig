@@ -607,7 +607,7 @@ pub const Loader = struct {
         const start = std.time.nanoTimestamp();
 
         // Create a reusable buffer with stack fallback for parsing multiple files
-        var stack_fallback = std.heap.stackFallback(4096, this.allocator);
+        var stack_fallback = bun.stackFallback(4096, this.allocator);
         var value_buffer = std.array_list.Managed(u8).init(stack_fallback.get());
         defer value_buffer.deinit();
 
@@ -659,7 +659,7 @@ pub const Loader = struct {
         comptime suffix: DotEnvFileSuffix,
         value_buffer: *std.array_list.Managed(u8),
     ) !void {
-        const dir_handle: std.fs.Dir = std.fs.cwd();
+        const dir_handle: std.Io.Dir = std.fs.cwd();
 
         switch (comptime suffix) {
             .development => {
@@ -783,7 +783,7 @@ pub const Loader = struct {
 
     pub fn loadEnvFile(
         this: *Loader,
-        dir: std.fs.Dir,
+        dir: std.Io.Dir,
         comptime base: string,
         comptime override: bool,
         value_buffer: *std.array_list.Managed(u8),

@@ -11,7 +11,7 @@ pub fn installWithManager(
     if (!manager.env.hasHTTPProxy()) {
         // And don't try to resolve DNS if it's an IP address.
         if (manager.options.scope.url.hostname.len > 0 and !manager.options.scope.url.isIPAddress()) {
-            var hostname_stack = std.heap.stackFallback(512, ctx.allocator);
+            var hostname_stack = bun.stackFallback(512, ctx.allocator);
             const allocator = hostname_stack.get();
             const hostname = try allocator.dupeZ(u8, manager.options.scope.url.hostname);
             defer allocator.free(hostname);
@@ -1093,7 +1093,7 @@ pub fn getWorkspaceFilters(manager: *PackageManager, original_cwd: []const u8) !
     const path_buf = bun.path_buffer_pool.get();
     defer bun.path_buffer_pool.put(path_buf);
 
-    var workspace_filters: std.ArrayListUnmanaged(WorkspaceFilter) = .{};
+    var workspace_filters: std.ArrayListUnmanaged(WorkspaceFilter) = .empty;
     // only populated when subcommand is `.install`
     if (manager.subcommand == .install and manager.options.filter_patterns.len > 0) {
         try workspace_filters.ensureUnusedCapacity(manager.allocator, manager.options.filter_patterns.len);

@@ -419,7 +419,7 @@ pub fn len(value: anytype) usize {
             .slice => value.len,
         },
         .@"struct" => |info| if (info.is_tuple) {
-            return info.fields.len;
+            return info.field_names.len;
         } else @compileError("invalid type given to std.mem.len"),
         else => @compileError("invalid type given to std.mem.len"),
     };
@@ -819,7 +819,15 @@ pub const simdutf = @import("./simdutf_sys/simdutf.zig");
 
 pub var start_time: i128 = 0;
 
-pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.fs.File.OpenFlags) !std.fs.File {
+var blocking_io_instance: std.Io.Threaded = .init_single_threaded;
+/// Single-threaded blocking `std.Io` instance for simple file/stdout/stderr
+/// operations migrated off the removed synchronous `std.fs.File`/`std.io` APIs
+/// ("Writergate"). Prefer `bun.Output` or `bun.sys` where available.
+pub fn blockingIo() std.Io {
+    return blocking_io_instance.io();
+}
+
+pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.Io.Dir.OpenFileOptions) !std.Io.File {
     var flags: i32 = 0;
     switch (open_flags.mode) {
         .read_only => flags |= O.RDONLY,
@@ -828,10 +836,10 @@ pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.fs.File.OpenFlags) !std.fs
     }
 
     const res = try sys.open(pathZ, flags, 0).unwrap();
-    return std.fs.File{ .handle = res.cast() };
+    return std.Io.File{ .handle = res.cast() };
 }
 
-pub fn openFile(path_: []const u8, open_flags: std.fs.File.OpenFlags) !std.fs.File {
+pub fn openFile(path_: []const u8, open_flags: std.Io.Dir.OpenFileOptions) !std.Io.File {
     if (comptime Environment.isWindows) {
         var flags: i32 = 0;
         switch (open_flags.mode) {
@@ -847,7 +855,7 @@ pub fn openFile(path_: []const u8, open_flags: std.fs.File.OpenFlags) !std.fs.Fi
     return try openFileZ(&try std.posix.toPosixPath(path_), open_flags);
 }
 
-pub fn openDir(dir: std.fs.Dir, path_: [:0]const u8) !std.fs.Dir {
+pub fn openDir(dir: std.Io.Dir, path_: [:0]const u8) !std.Io.Dir {
     if (comptime Environment.isWindows) {
         const res = try sys.openDirAtWindowsA(.fromStdDir(dir), path_, .{ .iterable = true, .can_rename_or_delete = true, .read_only = true }).unwrap();
         return res.stdDir();
@@ -857,13 +865,13 @@ pub fn openDir(dir: std.fs.Dir, path_: [:0]const u8) !std.fs.Dir {
     }
 }
 
-pub fn openDirNoRenamingOrDeletingWindows(dir: FD, path_: [:0]const u8) !std.fs.Dir {
+pub fn openDirNoRenamingOrDeletingWindows(dir: FD, path_: [:0]const u8) !std.Io.Dir {
     if (comptime !Environment.isWindows) @compileError("use openDir!");
     const res = try sys.openDirAtWindowsA(dir, path_, .{ .iterable = true, .can_rename_or_delete = false, .read_only = true }).unwrap();
     return res.stdDir();
 }
 
-pub fn openDirA(dir: std.fs.Dir, path_: []const u8) !std.fs.Dir {
+pub fn openDirA(dir: std.Io.Dir, path_: []const u8) !std.Io.Dir {
     if (comptime Environment.isWindows) {
         const res = try sys.openDirAtWindowsA(.fromStdDir(dir), path_, .{ .iterable = true, .can_rename_or_delete = true, .read_only = true }).unwrap();
         return res.stdDir();
@@ -887,7 +895,7 @@ pub fn openDirForIterationOSPath(dir: FD, path_: []const OSPathChar) sys.Maybe(F
     return sys.openatA(dir, path_, O.DIRECTORY | O.CLOEXEC | O.RDONLY, 0);
 }
 
-pub fn openDirAbsolute(path_: []const u8) !std.fs.Dir {
+pub fn openDirAbsolute(path_: []const u8) !std.Io.Dir {
     const fd = if (comptime Environment.isWindows)
         try sys.openDirAtWindowsA(invalid_fd, path_, .{ .iterable = true, .can_rename_or_delete = true, .read_only = true }).unwrap()
     else
@@ -896,7 +904,7 @@ pub fn openDirAbsolute(path_: []const u8) !std.fs.Dir {
     return fd.stdDir();
 }
 
-pub fn openDirAbsoluteNotForDeletingOrRenaming(path_: []const u8) !std.fs.Dir {
+pub fn openDirAbsoluteNotForDeletingOrRenaming(path_: []const u8) !std.Io.Dir {
     const fd = if (comptime Environment.isWindows)
         try sys.openDirAtWindowsA(invalid_fd, path_, .{ .iterable = true, .can_rename_or_delete = false, .read_only = true }).unwrap()
     else
@@ -1240,7 +1248,7 @@ var needs_proc_self_workaround: bool = false;
 // necessary on linux because other platforms don't have an optional
 // /proc/self/fd
 fn getFdPathViaCWD(fd: std.posix.fd_t, buf: *bun.PathBuffer) ![]u8 {
-    const prev_fd = try std.posix.openatZ(std.fs.cwd().fd, ".", .{ .DIRECTORY = true }, 0);
+    const prev_fd = try std.posix.openatZ(std.Io.Dir.cwd().handle, ".", .{ .DIRECTORY = true }, 0);
     var needs_chdir = false;
     defer {
         if (needs_chdir) std.posix.fchdir(prev_fd) catch unreachable;
@@ -1897,7 +1905,7 @@ pub fn HiveRef(comptime T: type, comptime capacity: u16) type {
 pub const tracy = @import("./perf/tracy.zig");
 pub const trace = tracy.trace;
 
-pub fn openFileForPath(file_path: [:0]const u8) !std.fs.File {
+pub fn openFileForPath(file_path: [:0]const u8) !std.Io.File {
     if (Environment.isWindows)
         return std.fs.cwd().openFileZ(file_path, .{});
 
@@ -1905,12 +1913,12 @@ pub fn openFileForPath(file_path: [:0]const u8) !std.fs.File {
     const flags: u32 = O.CLOEXEC | O.NOCTTY | O_PATH;
 
     const fd = try std.posix.openZ(file_path, O.toPacked(flags), 0);
-    return std.fs.File{
+    return std.Io.File{
         .handle = fd,
     };
 }
 
-pub fn openDirForPath(file_path: [:0]const u8) !std.fs.Dir {
+pub fn openDirForPath(file_path: [:0]const u8) !std.Io.Dir {
     if (Environment.isWindows)
         return std.fs.cwd().openDirZ(file_path, .{});
 
@@ -1918,7 +1926,7 @@ pub fn openDirForPath(file_path: [:0]const u8) !std.fs.Dir {
     const flags: u32 = O.CLOEXEC | O.NOCTTY | O.DIRECTORY | O_PATH;
 
     const fd = try std.posix.openZ(file_path, O.toPacked(flags), 0);
-    return std.fs.Dir{
+    return std.Io.Dir{
         .fd = fd,
     };
 }
@@ -2283,9 +2291,9 @@ pub inline fn serializableInto(comptime T: type, init: anytype) T {
     return result.*;
 }
 
-/// Like std.fs.Dir.makePath except instead of infinite looping on dangling
+/// Like std.Io.Dir.makePath except instead of infinite looping on dangling
 /// symlink, it deletes the symlink and tries again.
-pub fn makePath(dir: std.fs.Dir, sub_path: []const u8) !void {
+pub fn makePath(dir: std.Io.Dir, sub_path: []const u8) !void {
     var it = try std.fs.path.componentIterator(sub_path);
     var component = it.last() orelse return;
     while (true) {
@@ -2314,9 +2322,9 @@ pub fn makePath(dir: std.fs.Dir, sub_path: []const u8) !void {
     }
 }
 
-/// Like std.fs.Dir.makePath except instead of infinite looping on dangling
+/// Like std.Io.Dir.makePath except instead of infinite looping on dangling
 /// symlink, it deletes the symlink and tries again.
-pub fn makePathW(dir: std.fs.Dir, sub_path: []const u16) !void {
+pub fn makePathW(dir: std.Io.Dir, sub_path: []const u16) !void {
     // was going to copy/paste makePath and use all W versions but they didn't all exist
     // and this buffer was needed anyway
     var buf: PathBuffer = undefined;
@@ -2368,7 +2376,7 @@ pub const MakePath = struct {
     /// Opens the dir if the path already exists and is a directory.
     /// This function is not atomic, and if it returns an error, the file system may
     /// have been modified regardless.
-    fn makeOpenPathAccessMaskW(self: std.fs.Dir, comptime T: type, sub_path: []const T, access_mask: u32, no_follow: bool) !std.fs.Dir {
+    fn makeOpenPathAccessMaskW(self: std.Io.Dir, comptime T: type, sub_path: []const T, access_mask: u32, no_follow: bool) !std.Io.Dir {
         const Iterator = std.fs.path.ComponentIterator(.windows, T);
         var it = try Iterator.init(sub_path);
         // If there are no components in the path, then create a dummy component with the full path.
@@ -2407,8 +2415,8 @@ pub const MakePath = struct {
         create_disposition: u32,
     };
 
-    fn makeOpenDirAccessMaskW(self: std.fs.Dir, sub_path_w: [*:0]const u16, access_mask: u32, flags: MakeOpenDirAccessMaskWOptions) !std.fs.Dir {
-        var result = std.fs.Dir{
+    fn makeOpenDirAccessMaskW(self: std.Io.Dir, sub_path_w: [*:0]const u16, access_mask: u32, flags: MakeOpenDirAccessMaskWOptions) !std.Io.Dir {
+        var result = std.Io.Dir{
             .fd = undefined,
         };
 
@@ -2457,7 +2465,7 @@ pub const MakePath = struct {
         }
     }
 
-    pub fn makeOpenPath(self: std.fs.Dir, sub_path: anytype, opts: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    pub fn makeOpenPath(self: std.Io.Dir, sub_path: anytype, opts: std.Io.Dir.OpenOptions) !std.Io.Dir {
         if (comptime Environment.isWindows) {
             return makeOpenPathAccessMaskW(
                 self,
@@ -2475,10 +2483,10 @@ pub const MakePath = struct {
         return self.makeOpenPath(sub_path, opts);
     }
 
-    /// copy/paste of `std.fs.Dir.makePath` and related functions and modified to support u16 slices.
+    /// copy/paste of `std.Io.Dir.makePath` and related functions and modified to support u16 slices.
     /// inside `MakePath` scope to make deleting later easier.
     /// TODO(dylan-conway) delete `MakePath`
-    pub fn makePath(comptime T: type, self: std.fs.Dir, sub_path: []const T) !void {
+    pub fn makePath(comptime T: type, self: std.Io.Dir, sub_path: []const T) !void {
         if (Environment.isWindows) {
             var dir = try makeOpenPath(self, sub_path, .{});
             dir.close();
@@ -2488,7 +2496,7 @@ pub const MakePath = struct {
         var it = try componentIterator(T, sub_path);
         var component = it.last() orelse return;
         while (true) {
-            std.fs.Dir.makeDir(self, component.path) catch |err| switch (err) {
+            std.Io.Dir.makeDir(self, component.path) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     // TODO stat the file and return an error if it's not a directory
                     // this is important because otherwise a dangling symlink
@@ -2694,11 +2702,76 @@ pub const StackFallbackAllocator = struct {
     }
 };
 
+/// Drop-in replacement for the removed `bun.stackFallback`. Returns an
+/// allocator backed by a comptime-sized inline buffer that falls back to
+/// `fallback_allocator` when the buffer is exhausted. Call `.get()` to obtain
+/// the `Allocator` interface (resets the internal fixed buffer).
+pub fn stackFallback(comptime size: usize, fallback_allocator: std.mem.Allocator) StackFallbackComptime(size) {
+    return StackFallbackComptime(size){
+        .buffer = undefined,
+        .fallback_allocator = fallback_allocator,
+        .fixed_buffer_allocator = undefined,
+    };
+}
+
+pub fn StackFallbackComptime(comptime size: usize) type {
+    return struct {
+        const Self = @This();
+
+        buffer: [size]u8,
+        fallback_allocator: std.mem.Allocator,
+        fixed_buffer_allocator: std.heap.FixedBufferAllocator,
+
+        /// Fetches the `Allocator` interface *and* resets the internal buffer.
+        pub fn get(self: *Self) std.mem.Allocator {
+            self.fixed_buffer_allocator = std.heap.FixedBufferAllocator.init(self.buffer[0..]);
+            return .{
+                .ptr = self,
+                .vtable = &.{
+                    .alloc = alloc,
+                    .resize = resize,
+                    .remap = remap,
+                    .free = free,
+                },
+            };
+        }
+
+        fn alloc(ctx: *anyopaque, n: usize, alignment: std.mem.Alignment, ra: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            return std.heap.FixedBufferAllocator.alloc(&self.fixed_buffer_allocator, n, alignment, ra) orelse
+                self.fallback_allocator.rawAlloc(n, alignment, ra);
+        }
+
+        fn resize(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) bool {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(buf.ptr)) {
+                return std.heap.FixedBufferAllocator.resize(&self.fixed_buffer_allocator, buf, alignment, new_len, ra);
+            }
+            return self.fallback_allocator.rawResize(buf, alignment, new_len, ra);
+        }
+
+        fn remap(ctx: *anyopaque, mem: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(mem.ptr)) {
+                return std.heap.FixedBufferAllocator.remap(&self.fixed_buffer_allocator, mem, alignment, new_len, ra);
+            }
+            return self.fallback_allocator.rawRemap(mem, alignment, new_len, ra);
+        }
+
+        fn free(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ra: usize) void {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(buf.ptr)) {
+                return std.heap.FixedBufferAllocator.free(&self.fixed_buffer_allocator, buf, alignment, ra);
+            }
+            return self.fallback_allocator.rawFree(buf, alignment, ra);
+        }
+    };
+}
+
 pub fn todoPanic(
     src: std.builtin.SourceLocation,
     comptime format: []const u8,
-    args: anytype,
-) noreturn {
+    args: anytype,) noreturn {
     @branchHint(.cold);
     analytics.Features.todo_panic = 1;
     Output.panic("TODO: " ++ format ++ " ({s}:{d})", args ++ .{ src.file, src.line });
@@ -2883,13 +2956,13 @@ pub fn iterateDir(dir: FD) DirIterator.Iterator {
 }
 
 fn ReinterpretSliceType(comptime T: type, comptime slice: type) type {
-    const is_const = @typeInfo(slice).pointer.is_const;
+    const is_const = @typeInfo(slice).pointer.attrs.@"const";
     return if (is_const) []const T else []T;
 }
 
 /// Zig has a todo for @ptrCast changing the `.len`. This is the workaround
 pub fn reinterpretSlice(comptime T: type, slice: anytype) ReinterpretSliceType(T, @TypeOf(slice)) {
-    const is_const = @typeInfo(@TypeOf(slice)).pointer.is_const;
+    const is_const = @typeInfo(@TypeOf(slice)).pointer.attrs.@"const";
     const bytes = std.mem.sliceAsBytes(slice);
     const new_ptr = @as(if (is_const) [*]const T else [*]T, @ptrCast(@alignCast(bytes.ptr)));
     return new_ptr[0..@divTrunc(bytes.len, @sizeOf(T))];
@@ -3490,8 +3563,9 @@ pub const bake = @import("./bake/bake.zig");
 
 /// like std.enums.tagName, except it doesn't lose the sentinel value.
 pub fn tagName(comptime Enum: type, value: Enum) ?[:0]const u8 {
-    return inline for (@typeInfo(Enum).@"enum".fields) |f| {
-        if (@intFromEnum(value) == f.value) break f.name;
+    const e = @typeInfo(Enum).@"enum";
+    return inline for (e.field_names, e.field_values) |f_name, f_value| {
+        if (@intFromEnum(value) == f_value) break f_name;
     } else null;
 }
 
@@ -3599,7 +3673,7 @@ pub fn getThreadCount() u16 {
     const min_threads = 2;
     const ThreadCount = struct {
         pub var cached_thread_count: u16 = 0;
-        var cached_thread_count_once = std.once(getThreadCountOnce);
+        var cached_thread_count_once = bun.once(getThreadCountOnce);
         fn getThreadCountFromUser() ?u16 {
             inline for (.{ "UV_THREADPOOL_SIZE", "GOMAXPROCS" }) |envname| {
                 if (getenvZ(envname)) |env| {
@@ -3621,7 +3695,7 @@ pub fn getThreadCount() u16 {
             cached_thread_count = @min(max_threads, @max(min_threads, getThreadCountFromUser() orelse jsc.wtf.numberOfProcessorCores()));
         }
     };
-    ThreadCount.cached_thread_count_once.call();
+    ThreadCount.cached_thread_count_once.call(.{});
     return ThreadCount.cached_thread_count;
 }
 

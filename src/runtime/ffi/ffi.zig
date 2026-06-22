@@ -48,9 +48,9 @@ const Offsets = extern struct {
     fn loadOnce() void {
         Bun__FFI__ensureOffsetsAreLoaded();
     }
-    var once = std.once(loadOnce);
+    var once = bun.once(loadOnce);
     pub fn get() *const Offsets {
-        once.call();
+        once.call(.{});
         return &Bun__FFI__offsets;
     }
 };
@@ -76,10 +76,10 @@ pub const FFI = struct {
         library_dirs: StringArray = .{},
         include_dirs: StringArray = .{},
         symbols: SymbolsMap = .{},
-        define: std.ArrayListUnmanaged([2][:0]const u8) = .{},
+        define: std.ArrayListUnmanaged([2][:0]const u8) = .empty,
         // Flags to replace the default flags
         flags: [:0]const u8 = "",
-        deferred_errors: std.ArrayListUnmanaged([]const u8) = .{},
+        deferred_errors: std.ArrayListUnmanaged([]const u8) = .empty,
 
         const Source = union(enum) {
             file: [:0]const u8,
@@ -244,7 +244,7 @@ pub const FFI = struct {
 
         var cached_default_system_include_dir: [:0]const u8 = "";
         var cached_default_system_library_dir: [:0]const u8 = "";
-        var cached_default_system_include_dir_once = std.once(getSystemRootDirOnce);
+        var cached_default_system_include_dir_once = bun.once(getSystemRootDirOnce);
         fn getSystemRootDirOnce() void {
             if (Environment.isMac) {
                 var which_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
@@ -306,13 +306,13 @@ pub const FFI = struct {
         }
 
         fn getSystemIncludeDir() ?[:0]const u8 {
-            cached_default_system_include_dir_once.call();
+            cached_default_system_include_dir_once.call(.{});
             if (cached_default_system_include_dir.len == 0) return null;
             return cached_default_system_include_dir;
         }
 
         fn getSystemLibraryDir() ?[:0]const u8 {
-            cached_default_system_include_dir_once.call();
+            cached_default_system_include_dir_once.call(.{});
             if (cached_default_system_library_dir.len == 0) return null;
             return cached_default_system_library_dir;
         }
@@ -1442,7 +1442,7 @@ pub const FFI = struct {
         state: ?*TCC.State = null,
 
         return_type: ABIType = ABIType.void,
-        arg_types: std.ArrayListUnmanaged(ABIType) = .{},
+        arg_types: std.ArrayListUnmanaged(ABIType) = .empty,
         step: Step = Step{ .pending = {} },
         threadsafe: bool = false,
         allocator: Allocator,
@@ -2351,10 +2351,10 @@ const CompilerRT = struct {
         var path_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
         compiler_rt_dir = bun.handleOom(bun.default_allocator.dupeZ(u8, bun.getFdPath(.fromStdDir(bunCC), &path_buf) catch return));
     }
-    var create_compiler_rt_dir_once = std.once(createCompilerRTDir);
+    var create_compiler_rt_dir_once = bun.once(createCompilerRTDir);
 
     pub fn dir() ?[:0]const u8 {
-        create_compiler_rt_dir_once.call();
+        create_compiler_rt_dir_once.call(.{});
         if (compiler_rt_dir.len == 0) return null;
         return compiler_rt_dir;
     }

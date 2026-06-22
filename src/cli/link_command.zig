@@ -56,7 +56,7 @@ fn link(ctx: Command.Context) !void {
         }
 
         // Step 2. Setup the global directory
-        var node_modules: std.fs.Dir = brk: {
+        var node_modules: std.Io.Dir = brk: {
             Bin.Linker.ensureUmask();
             var explicit_global_dir: string = "";
             if (ctx.install) |install_| {

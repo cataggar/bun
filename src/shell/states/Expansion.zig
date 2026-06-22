@@ -241,7 +241,7 @@ pub fn next(this: *Expansion) Yield {
                 comptime {
                     assert(@sizeOf([]std.array_list.Managed(u8)) * stack_max <= 256);
                 }
-                var maybe_stack_alloc = std.heap.stackFallback(@sizeOf([]std.array_list.Managed(u8)) * stack_max, arena_allocator);
+                var maybe_stack_alloc = bun.stackFallback(@sizeOf([]std.array_list.Managed(u8)) * stack_max, arena_allocator);
                 const stack_alloc = maybe_stack_alloc.get();
                 const expanded_strings = bun.handleOom(stack_alloc.alloc(std.array_list.Managed(u8), expansion_count));
 
@@ -523,7 +523,7 @@ pub fn childDone(this: *Expansion, child: ChildPtr, exit_code: ExitCode) Yield {
         if (!this.child_state.cmd_subst.quoted) {
             this.postSubshellExpansion(stdout);
         } else {
-            const trimmed = std.mem.trimRight(u8, stdout, " \n\t\r");
+            const trimmed = std.mem.trimEnd(u8, stdout, " \n\t\r");
             bun.handleOom(this.current_out.appendSlice(trimmed));
         }
 

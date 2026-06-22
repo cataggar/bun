@@ -257,7 +257,7 @@ pub const Archiver = struct {
         defer stream.deinit();
         _ = stream.openRead();
         const archive = stream.archive;
-        const dir: std.fs.Dir = brk: {
+        const dir: std.Io.Dir = brk: {
             const cwd = std.fs.cwd();
 
             // if the destination doesn't exist, we skip the whole thing since nothing can overwrite it.
@@ -334,7 +334,7 @@ pub const Archiver = struct {
 
     pub fn extractToDir(
         file_buffer: []const u8,
-        dir: std.fs.Dir,
+        dir: std.Io.Dir,
         ctx: ?*Archiver.Context,
         comptime ContextType: type,
         appender: ContextType,
@@ -656,7 +656,7 @@ pub const Archiver = struct {
         appender: FilePathAppender,
         comptime options: ExtractOptions,
     ) !u32 {
-        var dir: std.fs.Dir = brk: {
+        var dir: std.Io.Dir = brk: {
             const cwd = std.fs.cwd();
             cwd.makePath(
                 root,

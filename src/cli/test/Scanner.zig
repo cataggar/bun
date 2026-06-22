@@ -116,7 +116,7 @@ pub fn scan(this: *Scanner, path_literal: []const u8) Error!void {
     }
 }
 
-fn readDirWithName(this: *Scanner, name: []const u8, handle: ?std.fs.Dir) !*FileSystem.RealFS.EntriesOption {
+fn readDirWithName(this: *Scanner, name: []const u8, handle: ?std.Io.Dir) !*FileSystem.RealFS.EntriesOption {
     return try this.fs.fs.readDirectoryWithIterator(name, handle, 0, true, *Scanner, this);
 }
 
