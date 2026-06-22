@@ -1346,7 +1346,11 @@ pub const PackageInstall = struct {
             const dest_dir_path = bun.getFdPath(.fromStdDir(dest_dir), &dest_buf) catch |err| return Result.fail(err, .linking_dependency, @errorReturnTrace());
 
             const target = Path.relative(dest_dir_path, to_path);
-            std.posix.symlinkat(target, dest_dir.handle, dest) catch |err| return Result.fail(err, .linking_dependency, null);
+            var target_z_buf: bun.PathBuffer = undefined;
+            var dest_z_buf: bun.PathBuffer = undefined;
+            const target_z = bun.path.z(target, &target_z_buf);
+            const dest_z = bun.path.z(dest, &dest_z_buf);
+            bun.sys.symlinkat(target_z, .fromStdDir(dest_dir), dest_z).unwrap() catch |err| return Result.fail(err, .linking_dependency, null);
         }
 
         if (isDanglingSymlink(symlinked_path)) return Result.fail(error.DanglingSymlink, .linking_dependency, @errorReturnTrace());

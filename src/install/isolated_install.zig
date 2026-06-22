@@ -729,7 +729,7 @@ pub fn installIsolatedPackages(
                     hasher.update(pkg_name.slice(string_buf));
                     const pkg_res = pkg_resolutions[peer_ids.pkg_id];
                     res_fmt_buf.clearRetainingCapacity();
-                    try res_fmt_buf.writer().print("{f}", .{pkg_res.fmt(string_buf, .posix)});
+                    try res_fmt_buf.print("{f}", .{pkg_res.fmt(string_buf, .posix)});
                     hasher.update(res_fmt_buf.items);
                 }
                 break :peer_hash .from(hasher.final());

@@ -160,7 +160,7 @@ pub const PackageInstaller = struct {
 
         pub fn deinit(this: *TreeContext, allocator: std.mem.Allocator) void {
             this.pending_installs.deinit(allocator);
-            this.binaries.deinit();
+            this.binaries.deinit(allocator);
         }
     };
 
@@ -1115,7 +1115,7 @@ pub const PackageInstaller = struct {
             };
 
             defer {
-                if (std.Io.Dir.cwd().handle != destination_dir.fd) destination_dir.close();
+                if (std.Io.Dir.cwd().handle != destination_dir.handle) destination_dir.close(bun.blockingIo());
             }
 
             var lazy_package_dir: LazyPackageDestinationDir = .{ .dir = destination_dir };

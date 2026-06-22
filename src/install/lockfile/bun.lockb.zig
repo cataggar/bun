@@ -19,7 +19,7 @@ pub fn save(this: *Lockfile, options: *const PackageManager.Options, bytes: *std
     this.packages = try this.packages.clone(z_allocator);
     old_packages_list.deinit(this.allocator);
 
-    var writer = bytes.writer();
+    var writer = BinaryWriter{ .list = bytes };
     try writer.writeAll(header_bytes);
     try writer.writeInt(u32, @intFromEnum(this.format), .little);
 
@@ -610,6 +610,30 @@ pub fn load(
 }
 
 const string = []const u8;
+
+/// Binary writer adapter for the legacy bun.lockb serializer. Zig 0.17
+/// ("Writergate") removed `ArrayList.writer()` and `writeInt` from the new
+/// `std.Io.Writer`; this restores the small surface the serializer relies on
+/// (writeAll/writeByte/writeInt/print/flush) over a managed byte list.
+const BinaryWriter = struct {
+    list: *std.array_list.Managed(u8),
+
+    pub fn writeAll(self: BinaryWriter, data: []const u8) !void {
+        try self.list.appendSlice(data);
+    }
+    pub fn writeByte(self: BinaryWriter, byte: u8) !void {
+        try self.list.append(byte);
+    }
+    pub fn writeInt(self: BinaryWriter, comptime T: type, value: T, endian: std.builtin.Endian) !void {
+        var buf: [@sizeOf(T)]u8 = undefined;
+        std.mem.writeInt(T, &buf, value, endian);
+        try self.list.appendSlice(&buf);
+    }
+    pub fn print(self: BinaryWriter, comptime fmt: []const u8, args: anytype) !void {
+        try self.list.print(fmt, args);
+    }
+    pub fn flush(_: BinaryWriter) !void {}
+};
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;

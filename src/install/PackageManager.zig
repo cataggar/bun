@@ -483,7 +483,7 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             .windows => 0, // windows does not have an executable bit
         };
 
-        var node_gyp_file = node_gyp_tempdir.createFile(bun.blockingIo(), file_name, .{ .mode = mode }) catch |err| {
+        var node_gyp_file = node_gyp_tempdir.createFile(bun.blockingIo(), file_name, .{ .permissions = .fromMode(@intCast(mode)) }) catch |err| {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> creating node-gyp tempdir", .{@errorName(err)});
             Global.crash();
         };
