@@ -2367,7 +2367,7 @@ pub const BundleV2 = struct {
             // Create parent directories if needed (relative to outdir)
             if (std.fs.path.dirname(file_path)) |parent| {
                 if (parent.len > 0) {
-                    root_dir.makePath(parent) catch {};
+                    bun.makePath(root_dir, parent) catch {};
                 }
             }
 

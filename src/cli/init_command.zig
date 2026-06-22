@@ -267,8 +267,8 @@ pub const InitCommand = struct {
             /// Format arguments
             args: anytype,
         ) !void {
-            var file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
-            defer file.close();
+            var file = try std.Io.Dir.cwd().createFile(bun.blockingIo(), filename, .{ .truncate = true });
+            defer file.close(bun.blockingIo());
             var file_w = file.writerStreaming(bun.blockingIo(), &.{});
             const file_i = &file_w.interface;
 
@@ -298,8 +298,8 @@ pub const InitCommand = struct {
             /// Format arguments
             args: anytype,
         ) !void {
-            var file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
-            defer file.close();
+            var file = try std.Io.Dir.cwd().createFile(bun.blockingIo(), filename, .{ .truncate = true });
+            defer file.close(bun.blockingIo());
             var file_w = file.writerStreaming(bun.blockingIo(), &.{});
             var file_i = &file_w.interface;
 
@@ -758,7 +758,7 @@ pub const InitCommand = struct {
         }
 
         write_package_json: {
-            var fd = bun.FD.fromStdFile(package_json_file orelse try std.fs.cwd().createFileZ("package.json", .{}));
+            var fd = bun.FD.fromStdFile(package_json_file orelse try std.Io.Dir.cwd().createFile(bun.blockingIo(), "package.json", .{}));
             defer fd.close();
             var buffer_writer = JSPrinter.BufferWriter.init(bun.default_allocator);
             buffer_writer.append_newline = true;
@@ -806,10 +806,10 @@ pub const InitCommand = struct {
                 }
 
                 if (fields.entry_point.len > 0 and !exists(fields.entry_point)) {
-                    const cwd = std.fs.cwd();
+                    const cwd = std.Io.Dir.cwd();
                     if (std.fs.path.dirname(fields.entry_point)) |dirname| {
                         if (!strings.eqlComptime(dirname, ".")) {
-                            cwd.makePath(dirname) catch {};
+                            bun.makePath(cwd, dirname) catch {};
                         }
                     }
 
