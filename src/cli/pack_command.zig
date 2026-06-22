@@ -933,7 +933,7 @@ pub const PackCommand = struct {
                 },
                 .e_boolean => {
                     const b = bundled_deps.asBool() orelse return .empty;
-                    if (!b == true) return .{};
+                    if (!b == true) return .empty;
 
                     if (json.get("dependencies")) |dependencies_expr| {
                         switch (dependencies_expr.data) {
@@ -1445,7 +1445,7 @@ pub const PackCommand = struct {
             .empty;
 
         var pack_queue: PackQueue = .initContext({});
-        defer pack_queue.deinit();
+        defer pack_queue.deinit(ctx.allocator);
 
         const bins = try getPackageBins(ctx.allocator, json.root);
         defer for (bins) |bin| ctx.allocator.free(bin.path);
@@ -1524,7 +1524,7 @@ pub const PackCommand = struct {
         }
 
         var bundled_pack_queue = try iterateBundledDeps(ctx, root_dir, log_level);
-        defer bundled_pack_queue.deinit();
+        defer bundled_pack_queue.deinit(ctx.allocator);
 
         // +1 for package.json
         ctx.stats.total_files = pack_queue.count() + bundled_pack_queue.count() + 1;

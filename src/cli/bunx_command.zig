@@ -638,7 +638,7 @@ pub const BunxCommand = struct {
                             if (rc != 0) {
                                 break :is_stale true;
                             }
-                            break :is_stale std.time.timestamp() - stat.mtime().sec > seconds_cache_valid;
+                            break :is_stale @divTrunc(bun.SystemTimer.milliTimestamp(), 1000) - stat.mtime().sec > seconds_cache_valid;
                         }
                     };
 

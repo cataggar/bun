@@ -500,7 +500,7 @@ pub const PublishCommand = struct {
             auth_buf.print("Bearer {s}", .{registry.token}) catch return false;
             headers.count("authorization", auth_buf.items);
         } else if (registry.auth.len > 0) {
-            auth_buf.writer().print("Basic {s}", .{registry.auth}) catch return false;
+            auth_buf.print("Basic {s}", .{registry.auth}) catch return false;
             headers.count("authorization", auth_buf.items);
         }
 
@@ -946,10 +946,6 @@ pub const PublishCommand = struct {
         return prompt(ctx.allocator, "\nThis operation requires a one-time password.\nEnter OTP: ", "") catch |err| {
             switch (err) {
                 error.OutOfMemory => |oom| return oom,
-                else => {
-                    Output.err(err, "failed to read OTP input", .{});
-                    Global.crash();
-                },
             }
         };
     }
