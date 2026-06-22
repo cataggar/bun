@@ -660,8 +660,8 @@ pub fn migratePnpmLockfile(
 
     const string_buf = lockfile.buffers.string_bytes.items;
 
-    var res_buf: std.array_list.Managed(u8) = .init(allocator);
-    defer res_buf.deinit();
+    var res_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer res_buf.deinit(allocator);
 
     try lockfile.buffers.resolutions.ensureTotalCapacityPrecise(allocator, lockfile.buffers.dependencies.items.len);
     lockfile.buffers.resolutions.expandToCapacity();
@@ -717,7 +717,7 @@ pub fn migratePnpmLockfile(
             }
 
             res_buf.clearRetainingCapacity();
-            try res_buf.writer().print("{s}@{s}", .{
+            try printIntoArrayList(&res_buf, allocator, "{s}@{s}", .{
                 if (has_alias) |alias| alias else dep_name,
                 version_without_suffix,
             });
@@ -766,7 +766,7 @@ pub fn migratePnpmLockfile(
             }
 
             res_buf.clearRetainingCapacity();
-            try res_buf.writer().print("{s}@{s}", .{
+            try printIntoArrayList(&res_buf, allocator, "{s}@{s}", .{
                 if (has_alias) |alias| alias else dep_name,
                 version_without_suffix,
             });
@@ -808,7 +808,7 @@ pub fn migratePnpmLockfile(
             }
 
             res_buf.clearRetainingCapacity();
-            try res_buf.writer().print("{s}@{s}", .{
+            try printIntoArrayList(&res_buf, allocator, "{s}@{s}", .{
                 if (has_alias) |alias| alias else dep.name.slice(string_buf),
                 version_without_suffix,
             });
@@ -857,8 +857,8 @@ fn parseAppendPackageDependencies(
     string_buf: *String.Buf,
     log: *logger.Log,
 ) ParseAppendDependenciesError!struct { u32, u32 } {
-    var version_buf: std.array_list.Managed(u8) = .init(allocator);
-    defer version_buf.deinit();
+    var version_buf: std.ArrayListUnmanaged(u8) = .empty;
+    defer version_buf.deinit(allocator);
 
     const off = lockfile.buffers.dependencies.items.len;
 
@@ -949,7 +949,7 @@ fn parseAppendPackageDependencies(
                 if (has_alias) |alias_str| {
                     alias = try string_buf.appendExternal(alias_str);
                     version_buf.clearRetainingCapacity();
-                    try version_buf.writer().print("npm:{s}", .{version_without_suffix});
+                    try printIntoArrayList(&version_buf, allocator, "npm:{s}", .{version_without_suffix});
                     const version = try string_buf.append(version_buf.items);
                     const version_sliced = version.sliced(string_buf.bytes.items);
                     break :version version_sliced;
@@ -1551,6 +1551,17 @@ const Npm = @import("./npm.zig");
 const Bin = @import("./bin.zig").Bin;
 const Integrity = @import("./integrity.zig").Integrity;
 const Resolution = @import("./resolution.zig").Resolution;
+
+fn printIntoArrayList(
+    list: *std.ArrayListUnmanaged(u8),
+    allocator: Allocator,
+    comptime fmt: []const u8,
+    args: anytype,
+) !void {
+    var aw = std.Io.Writer.Allocating.fromArrayList(allocator, list);
+    defer list.* = aw.toArrayList();
+    try aw.writer.print(fmt, args);
+}
 
 const Lockfile = @import("./lockfile.zig");
 const LoadResult = Lockfile.LoadResult;

@@ -1017,7 +1017,7 @@ pub const PackageInstall = struct {
                                         return err;
                                     }
 
-                                    std.posix.unlinkat(destination_dir.handle, entry.path, 0) catch {};
+                                    bun.sys.unlinkat(.fromStdDir(destination_dir), entry.path).unwrap() catch {};
                                     try bun.sys.symlinkat(entry.basename, .fromStdDir(destination_dir), entry.path).unwrap();
                                 };
 

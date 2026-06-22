@@ -208,7 +208,7 @@ pub fn onMessage(s: *HmrSocket, ws: AnyWebSocket, msg: []const u8, opcode: uws.O
         .unref_source_map => {
             var r = std.Io.Reader.fixed(msg[1..]);
 
-            const source_map_id = SourceMapStore.Key.init(r.readInt(u64, .little) catch
+            const source_map_id = SourceMapStore.Key.init(r.takeInt(u64, .little) catch
                 return ws.close());
             const kv = s.referenced_source_maps.fetchRemove(source_map_id) orelse {
                 bun.Output.debugWarn("unref_source_map: no entry found: {x}\n", .{source_map_id.get()});

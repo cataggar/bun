@@ -108,13 +108,13 @@ pub const ManifestBindings = struct {
 
         // TODO: we can add more information. for now just versions is fine
 
-        try writer.print("{{\"name\":\"{s}\",\"versions\":[", .{package_manifest.name()});
+        writer.print("{{\"name\":\"{s}\",\"versions\":[", .{package_manifest.name()}) catch return global.throwOutOfMemory();
 
         for (package_manifest.versions, 0..) |version, i| {
             if (i == package_manifest.versions.len - 1)
-                try writer.print("\"{f}\"]}}", .{version.fmt(package_manifest.string_buf)})
+                writer.print("\"{f}\"]}}", .{version.fmt(package_manifest.string_buf)}) catch return global.throwOutOfMemory()
             else
-                try writer.print("\"{f}\",", .{version.fmt(package_manifest.string_buf)});
+                writer.print("\"{f}\",", .{version.fmt(package_manifest.string_buf)}) catch return global.throwOutOfMemory();
         }
 
         buf = allocating_writer.toArrayList();

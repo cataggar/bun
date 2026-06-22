@@ -290,10 +290,10 @@ fn extract(this: *const ExtractTarball, log: *logger.Log, tgz_bytes: []const u8)
                 // installed from GitHub. package.json version becomes sort of
                 // meaningless in cases like this.
                 if (resolved.len > 0) insert_tag: {
-                    const gh_tag = extract_destination.createFileZ(".bun-tag", .{ .truncate = true }) catch break :insert_tag;
-                    defer gh_tag.close();
-                    gh_tag.writeAll(resolved) catch {
-                        extract_destination.deleteFileZ(".bun-tag") catch {};
+                    const gh_tag = extract_destination.createFile(bun.blockingIo(), ".bun-tag", .{ .truncate = true }) catch break :insert_tag;
+                    defer gh_tag.close(bun.blockingIo());
+                    gh_tag.writeStreamingAll(bun.blockingIo(), resolved) catch {
+                        extract_destination.deleteFile(bun.blockingIo(), ".bun-tag") catch {};
                     };
                 }
             },

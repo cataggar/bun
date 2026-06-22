@@ -9194,7 +9194,7 @@ pub const PropertyId = union(PropertyIdTag) {
 
     pub fn eql(lhs: *const PropertyId, rhs: *const PropertyId) bool {
         if (@intFromEnum(lhs.*) != @intFromEnum(rhs.*)) return false;
-        inline for (bun.meta.EnumFields(PropertyId), bun.meta.fields(PropertyId)) |enum_field, union_field| {
+        inline for (comptime bun.meta.EnumFields(PropertyId), comptime bun.meta.fields(PropertyId)) |enum_field, union_field| {
             if (enum_field.value == @intFromEnum(lhs.*)) {
                 if (comptime union_field.type == css.VendorPrefix) {
                     return @field(lhs, union_field.name) == @field(rhs, union_field.name);

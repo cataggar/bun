@@ -379,7 +379,7 @@ pub fn loadConfig(allocator: std.mem.Allocator, user_config_path_: ?string, ctx:
             var secondbuf: bun.PathBuffer = undefined;
             const cwd = bun.getcwd(&secondbuf) catch return;
 
-            ctx.args.absolute_working_dir = try allocator.dupeZ(u8, cwd);
+            ctx.args.absolute_working_dir = try bun.dupeZ(allocator, u8, cwd);
         }
 
         var parts = [_]string{ ctx.args.absolute_working_dir.?, config_path_ };

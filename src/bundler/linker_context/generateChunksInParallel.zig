@@ -251,14 +251,14 @@ pub fn generateChunksInParallel(
         }
 
         if (duplicates_map.count() > 0) {
-            var msg = std.array_list.Managed(u8).init(bun.default_allocator);
-            errdefer msg.deinit();
+            var aw = std.Io.Writer.Allocating.init(bun.default_allocator);
+            errdefer aw.deinit();
 
             var entry_naming: ?[]const u8 = null;
             var chunk_naming: ?[]const u8 = null;
             var asset_naming: ?[]const u8 = null;
 
-            const writer = msg.writer();
+            const writer = &aw.writer;
             try writer.print("Multiple files share the same output path\n", .{});
 
             const kinds = c.graph.files.items(.entry_point_kind);
@@ -282,7 +282,7 @@ pub fn generateChunksInParallel(
                 }
             }
 
-            try c.log.addError(null, Logger.Loc.Empty, try msg.toOwnedSlice());
+            try c.log.addError(null, Logger.Loc.Empty, try aw.toOwnedSlice());
 
             inline for (.{
                 .{ .name = "entry", .template = entry_naming },

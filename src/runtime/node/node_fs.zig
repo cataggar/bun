@@ -6963,7 +6963,7 @@ pub fn zigDeleteTree(self: std.Io.Dir, sub_path: []const u8, kind_hint: std.Io.F
 
     process_stack: while (stack.items.len != 0) {
         var top = &stack.items[stack.items.len - 1];
-        while (try top.iter.next()) |entry| {
+        while (try top.iter.next(io)) |entry| {
             var treat_as_dir = entry.kind == .directory;
             handle_entry: while (true) {
                 if (treat_as_dir) {

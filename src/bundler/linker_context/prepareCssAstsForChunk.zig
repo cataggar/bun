@@ -134,9 +134,9 @@ fn prepareCssAstsForChunkImpl(c: *LinkerContext, chunk: *Chunk, allocator: std.m
                             }) catch |err| bun.handleOom(err);
                             break :rules rules;
                         },
-                        .sources = .{},
-                        .source_map_urls = .{},
-                        .license_comments = .{},
+                        .sources = .empty,
+                        .source_map_urls = .empty,
+                        .license_comments = .empty,
                         .options = bun.css.ParserOptions.default(allocator, null),
                         .composes = .{},
                     };

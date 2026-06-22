@@ -2480,15 +2480,15 @@ pub fn fixDeadCodeElimination() void {
     }
 
     inline for (comptime std.meta.declarations(uv_functions_to_export)) |decl| {
-        std.mem.doNotOptimizeAway(&@field(uv_functions_to_export, decl.name));
+        std.mem.doNotOptimizeAway(&@field(uv_functions_to_export, decl));
     }
 
     inline for (comptime std.meta.declarations(V8API)) |decl| {
-        std.mem.doNotOptimizeAway(&@field(V8API, decl.name));
+        std.mem.doNotOptimizeAway(&@field(V8API, decl));
     }
 
     inline for (comptime std.meta.declarations(posix_platform_specific_v8_apis)) |decl| {
-        std.mem.doNotOptimizeAway(&@field(posix_platform_specific_v8_apis, decl.name));
+        std.mem.doNotOptimizeAway(&@field(posix_platform_specific_v8_apis, decl));
     }
 
     std.mem.doNotOptimizeAway(&@import("../runtime/node/buffer.zig").BufferVectorized.fill);

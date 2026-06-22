@@ -57,11 +57,11 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
     defer temp_alloc.free(browser_url);
     var frames: ArrayListUnmanaged(jsc.ZigStackFrame) = .empty;
     defer frames.deinit(temp_alloc);
-    const stack_count = @min(try reader.readInt(u32, .little), 255); // does not support more than 255
+    const stack_count = @min(try reader.takeInt(u32, .little), 255); // does not support more than 255
     try frames.ensureTotalCapacity(temp_alloc, stack_count);
     for (0..stack_count) |_| {
-        const line = try reader.readInt(i32, .little);
-        const column = try reader.readInt(i32, .little);
+        const line = try reader.takeInt(i32, .little);
+        const column = try reader.takeInt(i32, .little);
         const function_name = try readString32(&reader, temp_alloc);
         const file_name = try readString32(&reader, temp_alloc);
         frames.appendAssumeCapacity(.{

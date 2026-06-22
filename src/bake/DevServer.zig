@@ -4257,8 +4257,8 @@ fn dumpStateDueToCrash(dev: *DevServer) !void {
         const i = (std.mem.lastIndexOf(u8, visualizer, "<script>") orelse unreachable) + "<script>".len;
         break :brk .{ visualizer[0..i], visualizer[i..] };
     };
-    try file.writeAll(start);
-    try file.writeAll("\nlet inlinedData = Uint8Array.from(atob(\"");
+    try file.writeStreamingAll(bun.blockingIo(), start);
+    try file.writeStreamingAll(bun.blockingIo(), "\nlet inlinedData = Uint8Array.from(atob(\"");
 
     var sfb = bun.stackFallback(4096, dev.allocator());
     var payload = try std.array_list.Managed(u8).initCapacity(sfb.get(), 4096);
@@ -4268,11 +4268,11 @@ fn dumpStateDueToCrash(dev: *DevServer) !void {
     var buf: [bun.base64.encodeLenFromSize(4096)]u8 = undefined;
     var it = std.mem.window(u8, payload.items, 4096, 4096);
     while (it.next()) |chunk| {
-        try file.writeAll(buf[0..bun.base64.encode(&buf, chunk)]);
+        try file.writeStreamingAll(bun.blockingIo(), buf[0..bun.base64.encode(&buf, chunk)]);
     }
 
-    try file.writeAll("\"), c => c.charCodeAt(0));\n");
-    try file.writeAll(end);
+    try file.writeStreamingAll(bun.blockingIo(), "\"), c => c.charCodeAt(0));\n");
+    try file.writeStreamingAll(bun.blockingIo(), end);
 
     Output.note("Dumped incremental bundler graph to {f}", .{bun.fmt.quote(filepath)});
 }

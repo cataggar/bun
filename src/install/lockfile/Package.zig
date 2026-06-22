@@ -2088,18 +2088,18 @@ pub fn Package(comptime SemverIntType: type) type {
                 const really_begin_at = try stream.getPos();
                 var sliced = list.slice();
 
-                inline for (FieldsEnum.fields) |field| {
-                    const value = sliced.items(@field(List.Field, field.name));
+                inline for (FieldsEnum.field_names) |field_name| {
+                    const value = sliced.items(@field(List.Field, field_name));
                     if (comptime Environment.allow_assert) {
-                        debug("save(\"{s}\") = {d} bytes", .{ field.name, std.mem.sliceAsBytes(value).len });
-                        if (comptime strings.eqlComptime(field.name, "meta")) {
+                        debug("save(\"{s}\") = {d} bytes", .{ field_name, std.mem.sliceAsBytes(value).len });
+                        if (comptime strings.eqlComptime(field_name, "meta")) {
                             for (value) |meta| {
                                 assert(meta.has_install_script != .old);
                             }
                         }
                     }
                     comptime assertNoUninitializedPadding(@TypeOf(value));
-                    if (comptime strings.eqlComptime(field.name, "resolution")) {
+                    if (comptime strings.eqlComptime(field_name, "resolution")) {
                         // copy each resolution to make sure the union is zero initialized
                         for (value) |val| {
                             const copy = val.copy();
@@ -2216,8 +2216,8 @@ pub fn Package(comptime SemverIntType: type) type {
             fn loadFields(stream: *Stream, end_at: u64, comptime ListType: type, list: *ListType, needs_update: *bool) !void {
                 var sliced = list.slice();
 
-                inline for (FieldsEnum.fields) |field| {
-                    const value = sliced.items(@field(List.Field, field.name));
+                inline for (FieldsEnum.field_names) |field_name| {
+                    const value = sliced.items(@field(List.Field, field_name));
 
                     comptime assertNoUninitializedPadding(@TypeOf(value));
                     const bytes = std.mem.sliceAsBytes(value);
@@ -2225,7 +2225,7 @@ pub fn Package(comptime SemverIntType: type) type {
                     if (end_pos <= end_at) {
                         @memcpy(bytes, stream.buffer[stream.pos..][0..bytes.len]);
                         stream.pos = end_pos;
-                        if (comptime strings.eqlComptime(field.name, "meta")) {
+                        if (comptime strings.eqlComptime(field_name, "meta")) {
                             // need to check if any values were created from an older version of bun
                             // (currently just `has_install_script`). If any are found, the values need
                             // to be updated before saving the lockfile.
@@ -2236,7 +2236,7 @@ pub fn Package(comptime SemverIntType: type) type {
                                 }
                             }
                         }
-                    } else if (comptime strings.eqlComptime(field.name, "scripts")) {
+                    } else if (comptime strings.eqlComptime(field_name, "scripts")) {
                         @memset(bytes, 0);
                     } else {
                         return error.@"Lockfile validation failed: invalid package list range";
