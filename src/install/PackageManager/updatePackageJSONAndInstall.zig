@@ -458,7 +458,7 @@ fn updatePackageJSONAndInstallWithManagerWithUpdates(
                 var iter: std.Io.Dir.Iterator = node_modules_bin.iterate();
                 iterator: while (iter.next(bun.blockingIo()) catch null) |entry| {
                     switch (entry.kind) {
-                        std.Io.Dir.Entry.Kind.sym_link => {
+                        std.Io.File.Kind.sym_link => {
 
                             // any symlinks which we are unable to open are assumed to be dangling
                             // note that using access won't work here, because access doesn't resolve symlinks

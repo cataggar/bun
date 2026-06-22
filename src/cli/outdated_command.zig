@@ -238,7 +238,7 @@ pub const OutdatedCommand = struct {
         const pkg_names = packages.items(.name);
         const dependencies = lockfile.buffers.dependencies.items;
 
-        var result = std.ArrayListUnmanaged(GroupedOutdatedInfo){};
+        var result: std.ArrayListUnmanaged(GroupedOutdatedInfo) = .empty;
 
         const CatalogKey = struct {
             name_hash: u64,
