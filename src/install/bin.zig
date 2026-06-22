@@ -424,7 +424,7 @@ pub const Bin = extern struct {
                 return entry.name;
             } else {
                 this.done = true;
-                this.dir_iterator.?.dir.close();
+                this.dir_iterator.?.reader.dir.close(bun.blockingIo());
                 this.dir_iterator = null;
                 return null;
             }
