@@ -787,7 +787,7 @@ pub const SecurityScanSubprocess = struct {
             .extra_fds = &extra_fds,
         };
 
-        var spawned = try (try bun.spawn.spawnProcess(&spawn_options, @ptrCast(argv), @ptrCast(std.os.environ.ptr))).unwrap();
+        var spawned = try (try bun.spawn.spawnProcess(&spawn_options, @ptrCast(argv), @ptrCast(std.c.environ))).unwrap();
         defer spawned.extra_pipes.deinit();
 
         ipc_output_fds[1].close();
@@ -846,7 +846,7 @@ pub const SecurityScanSubprocess = struct {
             },
         };
 
-        var spawned = try (try bun.spawn.spawnProcess(&spawn_options, @ptrCast(argv), @ptrCast(std.os.environ.ptr))).unwrap();
+        var spawned = try (try bun.spawn.spawnProcess(&spawn_options, @ptrCast(argv), @ptrCast(std.c.environ))).unwrap();
         defer spawned.extra_pipes.deinit();
 
         ipc_output_fds[1].close();
