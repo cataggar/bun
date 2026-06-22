@@ -1422,17 +1422,16 @@ pub const Installer = struct {
         var version_buf: std.ArrayListUnmanaged(u8) = .empty;
         defer version_buf.deinit(bun.default_allocator);
 
-        var writer = version_buf.writer(this.lockfile.allocator);
-        try writer.print("{s}@", .{pkg_name.slice(string_buf)});
+        try version_buf.print(this.lockfile.allocator, "{s}@", .{pkg_name.slice(string_buf)});
 
         switch (pkg_res.tag) {
             .workspace => {
                 if (this.lockfile.workspace_versions.get(pkg_name_hash)) |workspace_version| {
-                    try writer.print("{f}", .{workspace_version.fmt(string_buf)});
+                    try version_buf.print(this.lockfile.allocator, "{f}", .{workspace_version.fmt(string_buf)});
                 }
             },
             else => {
-                try writer.print("{f}", .{pkg_res.fmt(string_buf, .posix)});
+                try version_buf.print(this.lockfile.allocator, "{f}", .{pkg_res.fmt(string_buf, .posix)});
             },
         }
 

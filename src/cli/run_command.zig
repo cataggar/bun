@@ -669,7 +669,7 @@ pub const RunCommand = struct {
             }
 
             if (Environment.isDebug) {
-                std.fs.deleteTreeAbsolute(bun_node_dir) catch {};
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), bun_node_dir) catch {};
             }
             const paths = .{ bun_node_dir ++ "/node", bun_node_dir ++ "/bun" };
             inline for (paths) |path| {

@@ -695,7 +695,7 @@ pub fn writeYarnLock(this: *PackageManager) !void {
     var secret: [32]u8 = undefined;
     std.mem.writeInt(u64, secret[0..8], @as(u64, @intCast(bun.SystemTimer.milliTimestamp())), .little);
     var base64_bytes: [64]u8 = undefined;
-    std.crypto.random.bytes(&base64_bytes);
+    bun.csprng(&base64_bytes);
 
     const tmpname__ = std.fmt.bufPrint(tmpname_buf[8..], "{x}", .{&base64_bytes}) catch unreachable;
     tmpname_buf[tmpname__.len + 8] = 0;
