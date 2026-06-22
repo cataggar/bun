@@ -730,8 +730,8 @@ pub const SecurityScanSubprocess = struct {
     pub const StaticPipeWriter = jsc.Subprocess.NewStaticPipeWriter(@This());
 
     pub fn spawn(this: *SecurityScanSubprocess) !void {
-        this.ipc_data = .{};
-        this.stderr_data = .{};
+        this.ipc_data = .empty;
+        this.stderr_data = .empty;
         this.ipc_reader.setParent(this);
 
         // Two extra pipes for communicating with the scanner subprocess:
