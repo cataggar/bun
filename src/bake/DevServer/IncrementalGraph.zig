@@ -1799,7 +1799,8 @@ pub fn IncrementalGraph(comptime side: bake.Side) type {
                     w.writeAll(&std.fmt.bytesToHex(std.mem.asBytes(&options.script_id), .lower)) catch return error.OutOfMemory;
                     w.writeAll(".js.map\n") catch return error.OutOfMemory;
                 }
-                end_list = allocating_writer.toArrayList().toManaged(end_allocator);
+                var end_list_unmanaged = allocating_writer.toArrayList();
+                end_list = end_list_unmanaged.toManaged(end_allocator);
                 break :end end_list.items;
             };
 

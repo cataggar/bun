@@ -463,7 +463,7 @@ pub fn parse(allocator: std.mem.Allocator, ctx: Command.Context, comptime cmd: C
                 Output.err(err, "Could not change directory to \"{s}\"\n", .{cwd_arg});
                 Global.exit(1);
             };
-            break :brk try allocator.dupeZ(u8, out);
+            break :brk try bun.dupeZ(allocator, u8, out);
         };
     } else {
         cwd = try bun.getcwdAlloc(allocator);

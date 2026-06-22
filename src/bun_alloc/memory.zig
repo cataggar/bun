@@ -197,7 +197,8 @@ pub fn dropSentinel(ptr: anytype, allocator: std.mem.Allocator) blk: {
         else => @compileError("only slices and many-item pointers are supported"),
     };
 
-    if (allocator.remap(@constCast(slice), slice.len)) |new| return new;
+    const mut_slice: []Child = @constCast(slice)[0..slice.len];
+    if (allocator.remap(mut_slice, mut_slice.len)) |new| return new;
     defer allocator.free(slice);
     return allocator.dupe(Child, slice);
 }

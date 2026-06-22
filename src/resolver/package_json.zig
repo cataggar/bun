@@ -800,8 +800,8 @@ pub const PackageJSON = struct {
                 // Handle arrays, including empty arrays
                 if (side_effects_field.asArray()) |array_| {
                     var array = array_;
-                    var map = SideEffects.Map{};
-                    var glob_list = SideEffects.GlobList{};
+                    var map = SideEffects.Map.empty;
+                    var glob_list = SideEffects.GlobList.empty;
                     var has_globs = false;
                     var has_exact = false;
 

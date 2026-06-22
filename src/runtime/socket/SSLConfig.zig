@@ -132,7 +132,7 @@ pub fn forClientVerification(this: SSLConfig) SSLConfig {
 }
 
 pub fn isSame(this: *const SSLConfig, other: *const SSLConfig) bool {
-    inline for (comptime std.meta.fields(SSLConfig)) |field| {
+    inline for (comptime bun.meta.fields(SSLConfig)) |field| {
         if (comptime std.mem.eql(u8, field.name, "cached_hash")) continue;
         const first = @field(this, field.name);
         const second = @field(other, field.name);
@@ -259,7 +259,7 @@ pub fn clone(this: *const SSLConfig) SSLConfig {
 pub fn contentHash(this: *SSLConfig) u64 {
     if (this.cached_hash != 0) return this.cached_hash;
     var hasher = std.hash.Wyhash.init(0);
-    inline for (comptime std.meta.fields(SSLConfig)) |field| {
+    inline for (comptime bun.meta.fields(SSLConfig)) |field| {
         if (comptime std.mem.eql(u8, field.name, "cached_hash")) continue;
         const value = @field(this, field.name);
         switch (field.type) {

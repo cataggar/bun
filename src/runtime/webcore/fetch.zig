@@ -1164,7 +1164,7 @@ fn fetchImpl(
                 use_sendfile: {
                     const stat_maybe = bun.sys.fstat(opened_fd);
                     if (stat_maybe == .err) break :use_sendfile;
-                    const stat: bun.Stat = stat_maybe.result;
+                    const stat: bun.sys.Stat = stat_maybe.result;
 
                     if (Environment.isMac) {
                         // macOS only supports regular files for sendfile()

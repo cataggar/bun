@@ -107,7 +107,8 @@ pub fn writeEscapedJSON(index: u32, graph: *const Graph, linker_graph: *const Li
         error.WriteFailed => return error.OutOfMemory,
         else => |e| return e,
     };
-    bytes = allocating_writer.toArrayList().toManaged(allocator);
+    var result_list = allocating_writer.toArrayList();
+    bytes = result_list.toManaged(allocator);
     try bun.js_printer.writePreQuotedString(bytes.items, @TypeOf(writer), writer, '"', false, true, .utf8);
 }
 

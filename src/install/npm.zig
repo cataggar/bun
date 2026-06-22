@@ -906,7 +906,7 @@ pub const PackageManifest = struct {
                 @compileError("header bytes must be exactly 49 bytes long, length is not serialized");
 
             // skip name
-            const fields = std.meta.fields(Npm.PackageManifest);
+            const fields = bun.meta.fields(Npm.PackageManifest);
 
             const Data = struct {
                 size: usize,

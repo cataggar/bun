@@ -98,7 +98,7 @@ pub fn init(this: *INotifyWatcher, _: []const u8) !void {
 
     // TODO: convert to bun.sys.Error
     const rc = system.inotify_init1(IN.CLOEXEC);
-    this.fd = try (bun.sys.Maybe(bun.FD).errnoSys(rc, .watch) orelse .{ .result = bun.FD.fromNative(@intCast(rc)) }).unwrap();
+    this.fd = try (bun.sys.Maybe(bun.FD).errnoSys(rc, .watch) orelse bun.sys.Maybe(bun.FD){ .result = bun.FD.fromNative(@intCast(rc)) }).unwrap();
     this.eventlist_bytes = &(try bun.default_allocator.alignedAlloc(EventListBytes, .of(Event), 1))[0];
     log("{f} init", .{this.fd});
 }

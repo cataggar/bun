@@ -320,8 +320,8 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
             // var count: usize = 0;
             // var important_count: usize = 0;
             // var this: T = undefined;
-            // var set_fields = std.StaticBitSet(std.meta.fields(T).len).initEmpty();
-            // const all_fields_set = std.StaticBitSet(std.meta.fields(T).len).initFull();
+            // var set_fields = std.StaticBitSet(bun.meta.fields(T).len).initEmpty();
+            // const all_fields_set = std.StaticBitSet(bun.meta.fields(T).len).initFull();
 
             // // Loop through each property in `decls.declarations` and then `decls.important_declarations`
             // // The inline for loop is so we can share the code for both
@@ -337,7 +337,7 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
             //         // if it matches a field in `T` which maps to the same tag
             //         //
             //         // Basically, check that `@as(PropertyIdTag, property.*)` equals `T.PropertyFieldMap[field.name]`
-            //         inline for (std.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
+            //         inline for (bun.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
             //             const tag: PropertyIdTag = @as(?*const PropertyIdTag, field.default_value).?.*;
 
             //             if (@intFromEnum(@as(PropertyIdTag, property.*)) == tag) {
@@ -372,7 +372,7 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
             //         // If `property` matches none of the tags in `T.PropertyFieldMap` then let's try
             //         // if it matches the tag specified by `property_name`
             //         if (@as(PropertyIdTag, property.*) == property_name) {
-            //             inline for (std.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
+            //             inline for (bun.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
             //                 if (@hasField(T.VendorPrefixMap, field.name)) {
             //                     @field(this, field.name) = if (@hasDecl(@TypeOf(@field(property, field.name)[0]), "clone"))
             //                         @field(property, field.name)[0].deepClone(allocator)
@@ -395,7 +395,7 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
             //         }
 
             //         // Otherwise, try to convert to te fields using `.longhand()`
-            //         inline for (std.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
+            //         inline for (bun.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
             //             const property_id = @unionInit(
             //                 PropertyId,
             //                 field.name,
@@ -434,9 +434,9 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
         pub fn longhands(vendor_prefix: VendorPrefix) []const PropertyId {
             _ = vendor_prefix; // autofix
             // const out: []const PropertyId = comptime out: {
-            //     var out: [std.meta.fields(@TypeOf(T.PropertyFieldMap)).len]PropertyId = undefined;
+            //     var out: [bun.meta.fields(@TypeOf(T.PropertyFieldMap)).len]PropertyId = undefined;
 
-            //     for (std.meta.fields(@TypeOf(T.PropertyFieldMap)), 0..) |field, i| {
+            //     for (bun.meta.fields(@TypeOf(T.PropertyFieldMap)), 0..) |field, i| {
             //         out[i] = @unionInit(
             //             PropertyId,
             //             field.name,
@@ -456,7 +456,7 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
             _ = this; // autofix
             _ = allocator; // autofix
             _ = property_id; // autofix
-            // inline for (std.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
+            // inline for (bun.meta.fields(@TypeOf(T.PropertyFieldMap))) |field| {
             //     if (@as(PropertyIdTag, property_id.*) == @field(T.PropertyFieldMap, field.name)) {
             //         const val = if (@hasDecl(@TypeOf(@field(T, field.namee)), "clone"))
             //             @field(this, field.name).deepClone(allocator)
@@ -481,7 +481,7 @@ pub fn DefineShorthand(comptime T: type, comptime property_name: PropertyIdTag, 
             _ = this; // autofix
             _ = allocator; // autofix
             _ = property; // autofix
-            // inline for (std.meta.fields(T.PropertyFieldMap)) |field| {
+            // inline for (bun.meta.fields(T.PropertyFieldMap)) |field| {
             //     if (@as(PropertyIdTag, property.*) == @field(T.PropertyFieldMap, field.name)) {
             //         const val = if (@hasDecl(@TypeOf(@field(T, field.name)), "clone"))
             //             @field(this, field.name).deepClone(allocator)
@@ -907,7 +907,7 @@ pub const enum_property_util = struct {
 
         const Map = comptime bun.ComptimeEnumMap(T);
         if (Map.getASCIIICaseInsensitive(ident)) |x| return .{ .result = x };
-        // inline for (std.meta.fields(T)) |field| {
+        // inline for (bun.meta.fields(T)) |field| {
         //     if (bun.strings.eqlCaseInsensitiveASCIIICheckLength(ident, field.name)) return .{ .result = @enumFromInt(field.value) };
         // }
 

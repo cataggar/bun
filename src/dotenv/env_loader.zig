@@ -796,7 +796,7 @@ pub const Loader = struct {
             return;
         }
 
-        var file = dir.openFile(base, .{ .mode = .read_only }) catch |err| {
+        var file = dir.openFile(bun.blockingIo(), base, .{ .mode = .read_only }) catch |err| {
             switch (err) {
                 error.IsDir, error.FileNotFound => {
                     // prevent retrying

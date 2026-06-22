@@ -216,7 +216,8 @@ pub const Entry = struct {
         errdefer allocating_writer.deinit();
         const writer = &allocating_writer.writer;
         bun.js_printer.writePreQuotedString(utf8_input, @TypeOf(writer), writer, '"', false, true, .utf8) catch return error.OutOfMemory;
-        array_list.* = allocating_writer.toArrayList().toManaged(list_allocator);
+        var result_list = allocating_writer.toArrayList();
+        array_list.* = result_list.toManaged(list_allocator);
     }
 
     fn joinVLQ(map: *const Entry, kind: ChunkKind, j: *StringJoiner, arena: Allocator, side: bake.Side) !void {

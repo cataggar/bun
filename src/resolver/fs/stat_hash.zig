@@ -6,7 +6,7 @@ last_modified_buffer_len: u8 = 0,
 
 // TODO: add etag support here!
 
-pub fn hash(this: *@This(), stat: bun.Stat, path: []const u8) void {
+pub fn hash(this: *@This(), stat: bun.sys.Stat, path: []const u8) void {
     var stat_hasher = std.hash.XxHash64.init(42);
     stat_hasher.update(std.mem.asBytes(&stat.size));
     stat_hasher.update(std.mem.asBytes(&stat.mode));

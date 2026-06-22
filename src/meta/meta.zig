@@ -25,11 +25,11 @@ pub fn EnumFields(comptime T: type) [enumFieldCount(T)]EnumField {
         .@"enum" => |info| info,
         else => @compileError("Used `EnumFields(T)` on a type that is not an `enum` or a `union(enum)`"),
     };
-    var fields: [enum_info.field_names.len]EnumField = undefined;
+    var result: [enum_info.field_names.len]EnumField = undefined;
     inline for (enum_info.field_names, enum_info.field_values, 0..) |name, value, i| {
-        fields[i] = .{ .name = name, .value = value };
+        result[i] = .{ .name = name, .value = value };
     }
-    return fields;
+    return result;
 }
 
 pub fn ReturnOfMaybe(comptime function: anytype) type {
@@ -378,6 +378,56 @@ fn VoidFields(comptime T: type) type {
 
 pub fn voidFieldTypeDiscardHelper(data: anytype) void {
     _ = data;
+}
+
+/// Compatibility shim for the removed `std.builtin.Type.StructField`.
+/// `bun.meta.fields(T)` is now a `@compileError`, and the underlying
+/// `lang.Type.Struct`/`Union` expose parallel `field_names`/`field_types`/
+/// `field_attrs` slices instead of a single `[]StructField`. This reconstructs
+/// the old shape so existing call sites keep working.
+pub const StructField = struct {
+    name: [:0]const u8,
+    type: type,
+    default_value_ptr: ?*const anyopaque = null,
+    is_comptime: bool = false,
+    alignment: comptime_int = 0,
+};
+
+/// Compatibility replacement for `bun.meta.fields(T)` for struct and union
+/// types. For enum types, use `bun.meta.EnumFields(T)` instead (it exposes
+/// `.name`/`.value`).
+pub fn fields(comptime T: type) []const StructField {
+    return switch (@typeInfo(T)) {
+        .@"struct" => |info| comptime blk: {
+            var result: [info.field_names.len]StructField = undefined;
+            for (info.field_names, info.field_types, info.field_attrs, 0..) |name, FT, attrs, i| {
+                result[i] = .{
+                    .name = name,
+                    .type = FT,
+                    .default_value_ptr = attrs.default_value_ptr,
+                    .is_comptime = attrs.@"comptime",
+                    .alignment = attrs.@"align" orelse @alignOf(FT),
+                };
+            }
+            const final = result;
+            break :blk &final;
+        },
+        .@"union" => |info| comptime blk: {
+            var result: [info.field_names.len]StructField = undefined;
+            for (info.field_names, info.field_types, info.field_attrs, 0..) |name, FT, attrs, i| {
+                result[i] = .{
+                    .name = name,
+                    .type = FT,
+                    .default_value_ptr = null,
+                    .is_comptime = false,
+                    .alignment = attrs.@"align" orelse @alignOf(FT),
+                };
+            }
+            const final = result;
+            break :blk &final;
+        },
+        else => @compileError("bun.meta.fields only supports struct and union types; use bun.meta.EnumFields for enums"),
+    };
 }
 
 pub fn hasDecl(comptime T: type, comptime name: []const u8) bool {

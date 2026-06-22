@@ -1012,13 +1012,13 @@ pub const PackageInstall = struct {
                                 head2[entry.path.len + (head2.len - to_copy_into2.len)] = 0;
                                 const target: [:0]u8 = head2[0 .. entry.path.len + head2.len - to_copy_into2.len :0];
 
-                                std.posix.symlinkat(target, destination_dir.handle, entry.path) catch |err| {
-                                    if (err != error.PathAlreadyExists) {
+                                bun.sys.symlinkat(target, .fromStdDir(destination_dir), entry.path).unwrap() catch |err| {
+                                    if (err != error.EEXIST) {
                                         return err;
                                     }
 
                                     std.posix.unlinkat(destination_dir.handle, entry.path, 0) catch {};
-                                    try std.posix.symlinkat(entry.basename, destination_dir.handle, entry.path);
+                                    try bun.sys.symlinkat(entry.basename, .fromStdDir(destination_dir), entry.path).unwrap();
                                 };
 
                                 real_file_count += 1;

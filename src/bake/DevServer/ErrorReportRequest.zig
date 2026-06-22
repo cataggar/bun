@@ -49,11 +49,11 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
     defer source_map_arena.deinit();
 
     // Read payload, assemble ZigException
-    const name = try readString32(reader, temp_alloc);
+    const name = try readString32(&reader, temp_alloc);
     defer temp_alloc.free(name);
-    const message = try readString32(reader, temp_alloc);
+    const message = try readString32(&reader, temp_alloc);
     defer temp_alloc.free(message);
-    const browser_url = try readString32(reader, temp_alloc);
+    const browser_url = try readString32(&reader, temp_alloc);
     defer temp_alloc.free(browser_url);
     var frames: ArrayListUnmanaged(jsc.ZigStackFrame) = .empty;
     defer frames.deinit(temp_alloc);
@@ -62,8 +62,8 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
     for (0..stack_count) |_| {
         const line = try reader.readInt(i32, .little);
         const column = try reader.readInt(i32, .little);
-        const function_name = try readString32(reader, temp_alloc);
-        const file_name = try readString32(reader, temp_alloc);
+        const function_name = try readString32(&reader, temp_alloc);
+        const file_name = try readString32(&reader, temp_alloc);
         frames.appendAssumeCapacity(.{
             .function_name = .init(function_name),
             .source_url = .init(file_name),

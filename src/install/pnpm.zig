@@ -543,10 +543,9 @@ pub fn migratePnpmLockfile(
                     try found_patches.put(patch.value.dep_name, res_str);
 
                     patch_join_buf.clearRetainingCapacity();
-                    try patch_join_buf.writer().print("{s}@{s}", .{
-                        patch.value.dep_name,
-                        res_str,
-                    });
+                    try patch_join_buf.appendSlice(patch.value.dep_name);
+                    try patch_join_buf.append('@');
+                    try patch_join_buf.appendSlice(res_str);
 
                     const patch_hash = String.Builder.stringHash(patch_join_buf.items);
                     try lockfile.patched_dependencies.put(allocator, patch_hash, .{ .path = patch.value.path });

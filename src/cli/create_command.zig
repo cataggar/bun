@@ -343,7 +343,7 @@ pub const CreateCommand = struct {
 
                 var archive_context = Archiver.Context{
                     .pluckers = pluckers[0..@as(usize, @intCast(@intFromBool(!create_options.skip_package_json)))],
-                    .all_files = undefined,
+                    .all_files = .empty,
                     .overwrite_list = bun.StringArrayHashMap(void).init(ctx.allocator),
                 };
 

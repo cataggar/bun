@@ -1417,13 +1417,13 @@ pub fn Package(comptime SemverIntType: type) type {
             // `peerDependencies`. Track the original key string so the
             // post-build pass can emit a real `Dependency` for any meta-only
             // names that nothing in the build loop consumed.
-            var optional_peer_dependencies = std.ArrayHashMap(PackageNameHash, []const u8, ArrayIdentityContext.U64, false).init(allocator);
-            defer optional_peer_dependencies.deinit();
+            var optional_peer_dependencies: std.ArrayHashMapUnmanaged(PackageNameHash, []const u8, ArrayIdentityContext.U64, false) = .empty;
+            defer optional_peer_dependencies.deinit(allocator);
 
             if (features.peer_dependencies) if (json.asProperty("peerDependenciesMeta")) |peer_dependencies_meta| {
                 if (peer_dependencies_meta.expr.data == .e_object) {
                     const props = peer_dependencies_meta.expr.data.e_object.properties.slice();
-                    try optional_peer_dependencies.ensureUnusedCapacity(props.len);
+                    try optional_peer_dependencies.ensureUnusedCapacity(allocator, props.len);
                     for (props) |prop| {
                         if (prop.value.?.asProperty("optional")) |optional| {
                             if (optional.expr.data != .e_boolean or !optional.expr.data.e_boolean.value) {
@@ -2019,7 +2019,7 @@ pub fn Package(comptime SemverIntType: type) type {
 
         pub const Serializer = struct {
             pub const sizes = blk: {
-                const fields = std.meta.fields(PackageType);
+                const fields = bun.meta.fields(PackageType);
                 const Data = struct {
                     size: usize,
                     size_index: usize,

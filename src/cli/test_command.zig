@@ -414,13 +414,13 @@ pub const JunitReporter = struct {
         try this.contents.appendSlice(bun.default_allocator, " name=\"");
         {
             var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
-            try escapeXml(name, &writer.writer);
+            escapeXml(name, &writer.writer) catch return error.OutOfMemory;
             this.contents = writer.toArrayList();
         }
         try this.contents.appendSlice(bun.default_allocator, "\" classname=\"");
         {
             var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
-            try escapeXml(class_name, &writer.writer);
+            escapeXml(class_name, &writer.writer) catch return error.OutOfMemory;
             this.contents = writer.toArrayList();
         }
         try this.contents.appendSlice(bun.default_allocator, "\"");
@@ -431,7 +431,7 @@ pub const JunitReporter = struct {
         try this.contents.appendSlice(bun.default_allocator, " file=\"");
         {
             var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
-            try escapeXml(file, &writer.writer);
+            escapeXml(file, &writer.writer) catch return error.OutOfMemory;
             this.contents = writer.toArrayList();
         }
         try this.contents.appendSlice(bun.default_allocator, "\"");
