@@ -676,7 +676,7 @@ pub const RunCommand = struct {
                 var retried = false;
                 while (true) {
                     inner: {
-                        switch (bun.sys.symlink(argv0, path)) {
+                        switch (bun.sys.symlink(std.mem.span(argv0), path)) {
                             .result => {},
                             .err => |err| {
                                 if (err.getErrno() == .EXIST) break :inner;
