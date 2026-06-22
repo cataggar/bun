@@ -571,8 +571,15 @@ pub fn init(
         if (ctx.install) |opts| {
             explicit_global_dir = opts.global_dir orelse explicit_global_dir;
         }
-        var global_dir = try Options.openGlobalDir(explicit_global_dir);
-        try global_dir.setAsCwd();
+        const global_dir = try Options.openGlobalDir(explicit_global_dir);
+        // Zig 0.17 removed `std.Io.Dir.setAsCwd`; chdir to the directory instead.
+        if (comptime Environment.isWindows) {
+            var dir_path_buf: bun.PathBuffer = undefined;
+            const dir_path = try bun.getFdPath(.fromStdDir(global_dir), &dir_path_buf);
+            try bun.sys.chdir(dir_path, dir_path).unwrap();
+        } else {
+            if (std.c.fchdir(global_dir.handle) != 0) return error.SetGlobalDirFailed;
+        }
     }
 
     var fs = try Fs.FileSystem.init(null);
