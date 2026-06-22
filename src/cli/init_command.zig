@@ -1189,6 +1189,7 @@ const Template = enum {
     }
 
     pub fn @"write files and run `bun dev`"(comptime this: Template, allocator: std.mem.Allocator) !void {
+        _ = allocator;
         Template.createAgentRule();
 
         inline for (comptime this.files()) |file| {
@@ -1216,18 +1217,19 @@ const Template = enum {
         Output.pretty("\n", .{});
         Output.flush();
 
-        var install = std.process.Child.init(
-            &.{
+        _ = bun.spawnSync(&.{
+            .argv = &.{
                 try bun.selfExePath(),
                 "install",
             },
-            allocator,
-        );
-        install.stderr_behavior = .Inherit;
-        install.stdin_behavior = .Ignore;
-        install.stdout_behavior = .Inherit;
-
-        _ = try install.spawnAndWait();
+            .envp = null,
+            .stderr = .inherit,
+            .stdout = .inherit,
+            .stdin = .ignore,
+            .windows = if (bun.Environment.isWindows) .{
+                .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+            },
+        }) catch {};
 
         Output.prettyln(
             \\

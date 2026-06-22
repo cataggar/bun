@@ -2362,7 +2362,7 @@ pub const BundleV2 = struct {
                 bun.Output.warn("Failed to open output directory '{s}': {s}", .{ outdir, @errorName(err) });
                 return;
             };
-            defer root_dir.close();
+            defer root_dir.close(bun.blockingIo());
 
             // Create parent directories if needed (relative to outdir)
             if (std.fs.path.dirname(file_path)) |parent| {
