@@ -661,7 +661,7 @@ pub fn installIsolatedPackages(
 
             const dedupe_entry = try dedupe.getOrPut(lockfile.allocator, pkg_id);
             if (!dedupe_entry.found_existing) {
-                dedupe_entry.value_ptr.* = .{};
+                dedupe_entry.value_ptr.* = .empty;
             } else {
                 const curr_peers = node_peers[entry.node_id.get()];
                 const curr_dep_id = node_dep_ids[entry.node_id.get()];

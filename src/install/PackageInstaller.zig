@@ -35,7 +35,7 @@ pub const PackageInstaller = struct {
         list: Lockfile.Package.Scripts.List,
         tree_id: Lockfile.Tree.Id,
         optional: bool,
-    }) = .{},
+    }) = .empty,
 
     trusted_dependencies_from_update_requests: std.AutoArrayHashMapUnmanaged(TruncatedPackageNameHash, void),
 
@@ -267,7 +267,7 @@ pub const PackageInstaller = struct {
         const pkg_resolutions_buffer = lockfile.buffers.resolutions.items;
         const pkg_names = pkgs.items(.name);
 
-        while (tree.binaries.removeOrNull()) |dep_id| {
+        while (tree.binaries.pop()) |dep_id| {
             bun.assertWithLocation(dep_id < lockfile.buffers.dependencies.items.len, @src());
             const package_id = lockfile.buffers.resolutions.items[dep_id];
             bun.assertWithLocation(package_id != invalid_package_id, @src());
@@ -1157,7 +1157,7 @@ pub const PackageInstaller = struct {
                     }
 
                     if (this.bins[package_id].tag != .none) {
-                        bun.handleOom(this.trees[this.current_tree_id].binaries.add(dependency_id));
+                        bun.handleOom(this.trees[this.current_tree_id].binaries.push(this.manager.allocator, dependency_id));
                     }
 
                     const dep = this.lockfile.buffers.dependencies.items[dependency_id];
@@ -1333,7 +1333,7 @@ pub const PackageInstaller = struct {
             }
         } else {
             if (this.bins[package_id].tag != .none) {
-                bun.handleOom(this.trees[this.current_tree_id].binaries.add(dependency_id));
+                bun.handleOom(this.trees[this.current_tree_id].binaries.push(this.manager.allocator, dependency_id));
             }
 
             var destination_dir: LazyPackageDestinationDir = .{
