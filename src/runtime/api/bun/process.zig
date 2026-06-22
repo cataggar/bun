@@ -655,7 +655,7 @@ pub const Status = union(enum) {
                 // ified the WUNTRACED option or if the child process is being
                 // traced (see ptrace(2)).
                 else if (std.posix.W.IFSTOPPED(result.status)) {
-                    signal = @as(u8, @truncate(std.posix.W.STOPSIG(result.status)));
+                    signal = @as(u8, @truncate(@intFromEnum(std.posix.W.STOPSIG(result.status))));
                 }
             },
         }
@@ -987,7 +987,11 @@ const WaiterThreadPosix = struct {
 
         if (comptime Environment.isLinux) {
             const linux = std.os.linux;
-            instance.eventfd = .fromNative(try std.posix.eventfd(0, linux.EFD.NONBLOCK | linux.EFD.CLOEXEC | 0));
+            const eventfd = linux.eventfd(0, linux.EFD.NONBLOCK | linux.EFD.CLOEXEC | 0);
+            switch (std.posix.errno(eventfd)) {
+                .SUCCESS => instance.eventfd = .fromNative(@intCast(eventfd)),
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
         }
 
         var thread = try std.Thread.spawn(.{ .stack_size = stack_size }, loop, .{});

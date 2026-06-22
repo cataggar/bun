@@ -779,7 +779,7 @@ pub fn NewAsyncCpTask(comptime is_shell: bool) type {
                     },
                 };
 
-                if (!bun.S.ISDIR(stat_.mode)) {
+                if (!bun.S.ISDIR(@intCast(stat_.mode))) {
                     // This is the only file, there is no point in dispatching subtasks
                     const r = nodefs._copySingleFileSync(
                         src,
@@ -1055,7 +1055,7 @@ pub const AsyncReaddirRecursiveTask = struct {
         var task = Subtask.new(
             .{
                 .readdir_task = readdir_task,
-                .basename = bun.PathString.init(bun.handleOom(bun.default_allocator.dupeZ(u8, basename))),
+                .basename = bun.PathString.init(bun.handleOom(bun.dupeZ(bun.default_allocator, u8, basename))),
             },
         );
         bun.assert(readdir_task.subtask_count.fetchAdd(1, .monotonic) > 0);
@@ -1074,7 +1074,7 @@ pub const AsyncReaddirRecursiveTask = struct {
             .globalObject = globalObject,
             .tracker = jsc.Debugger.AsyncTaskTracker.init(vm),
             .subtask_count = .{ .raw = 1 },
-            .root_path = PathString.init(bun.handleOom(bun.default_allocator.dupeZ(u8, args.path.slice()))),
+            .root_path = PathString.init(bun.handleOom(bun.dupeZ(bun.default_allocator, u8, args.path.slice()))),
             .result_list = switch (args.tag()) {
                 .files => .{ .files = std.array_list.Managed(bun.String).init(bun.default_allocator) },
                 .with_file_types => .{ .with_file_types = .init(bun.default_allocator) },
@@ -3577,7 +3577,7 @@ pub const NodeFS = struct {
                     .err => |err| return Maybe(Return.CopyFile){ .err = err.withPath(src) },
                 };
 
-                if (!posix.S.ISREG(stat_.mode)) {
+                if (!posix.S.ISREG(@intCast(stat_.mode))) {
                     return Maybe(Return.CopyFile){ .err = .{
                         .errno = @intFromEnum(SystemErrno.ENOTSUP),
                         .syscall = .copyfile,
@@ -3593,7 +3593,7 @@ pub const NodeFS = struct {
                     }
 
                     if (ret.errnoSysP(c.clonefile(src, dest, 0), .copyfile, src) == null) {
-                        _ = Syscall.chmod(dest, stat_.mode);
+                        _ = Syscall.chmod(dest, @intCast(stat_.mode));
                         return ret.success;
                     }
                 } else {
@@ -3617,7 +3617,7 @@ pub const NodeFS = struct {
                     };
                     defer {
                         _ = Syscall.ftruncate(dest_fd, @as(std.c.off_t, @intCast(@as(u63, @truncate(wrote)))));
-                        _ = Syscall.fchmod(dest_fd, stat_.mode);
+                        _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                         dest_fd.close();
                     }
 
@@ -3656,7 +3656,7 @@ pub const NodeFS = struct {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err },
             };
-            if (!posix.S.ISREG(stat_.mode)) {
+            if (!posix.S.ISREG(@intCast(stat_.mode))) {
                 return Maybe(Return.CopyFile){ .err = .{ .errno = @intFromEnum(SystemErrno.EOPNOTSUPP), .syscall = .copyfile } };
             }
 
@@ -3687,7 +3687,7 @@ pub const NodeFS = struct {
                 const rc = std.c.copy_file_range(src_fd.native(), null, dest_fd.native(), null, std.math.maxInt(i32) - 1, 0);
                 switch (bun.sys.getErrno(rc)) {
                     .SUCCESS => if (rc == 0) {
-                        _ = Syscall.fchmod(dest_fd, stat_.mode);
+                        _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                         return ret.success;
                     },
                     .INTR => continue,
@@ -3704,7 +3704,7 @@ pub const NodeFS = struct {
                 _ = bun.sys.unlink(dest);
                 return Maybe(Return.CopyFile){ .err = err };
             }
-            _ = Syscall.fchmod(dest_fd, stat_.mode);
+            _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
             return ret.success;
         }
 
@@ -3722,12 +3722,12 @@ pub const NodeFS = struct {
                 src_fd.close();
             }
 
-            const stat_: linux.Stat = switch (Syscall.fstat(src_fd)) {
+            const stat_: Syscall.Stat = switch (Syscall.fstat(src_fd)) {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err },
             };
 
-            if (!posix.S.ISREG(stat_.mode)) {
+            if (!posix.S.ISREG(@intCast(stat_.mode))) {
                 return Maybe(Return.CopyFile){ .err = .{ .errno = @intFromEnum(SystemErrno.ENOTSUP), .syscall = .copyfile } };
             }
 
@@ -3752,16 +3752,16 @@ pub const NodeFS = struct {
                     _ = bun.sys.unlink(dest);
                     return err;
                 }
-                _ = Syscall.fchmod(dest_fd, stat_.mode);
+                _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                 dest_fd.close();
                 return ret.success;
             }
 
             // If we know it's a regular file and ioctl_ficlone is available, attempt to use it.
-            if (posix.S.ISREG(stat_.mode) and bun.can_use_ioctl_ficlone()) {
+            if (posix.S.ISREG(@intCast(stat_.mode)) and bun.can_use_ioctl_ficlone()) {
                 const rc = bun.linux.ioctl_ficlone(dest_fd, src_fd);
                 if (rc == 0) {
-                    _ = Syscall.fchmod(dest_fd, stat_.mode);
+                    _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                     dest_fd.close();
                     return ret.success;
                 }
@@ -3773,7 +3773,7 @@ pub const NodeFS = struct {
 
             defer {
                 _ = linux.ftruncate(dest_fd.cast(), @as(i64, @intCast(@as(u63, @truncate(wrote)))));
-                _ = linux.fchmod(dest_fd.cast(), stat_.mode);
+                _ = linux.fchmod(dest_fd.cast(), @intCast(stat_.mode));
                 dest_fd.close();
             }
 
@@ -3929,7 +3929,10 @@ pub const NodeFS = struct {
             };
         } else {
             return switch (Syscall.fstat(args.fd)) {
-                .result => |result| .{ .result = .init(&Syscall.PosixStat.init(&result), args.big_int) },
+                .result => |result| brk: {
+                    const stat_: Syscall.PosixStat = if (Environment.isLinux) result else Syscall.PosixStat.init(&result);
+                    break :brk .{ .result = .init(&stat_, args.big_int) };
+                },
                 .err => |err| .{ .err = err },
             };
         }
@@ -4023,7 +4026,10 @@ pub const NodeFS = struct {
             };
         } else {
             return switch (Syscall.lstat(args.path.sliceZ(&this.sync_error_buf))) {
-                .result => |result| Maybe(Return.Lstat){ .result = .{ .stats = .init(&Syscall.PosixStat.init(&result), args.big_int) } },
+                .result => |result| brk: {
+                    const stat_: Syscall.PosixStat = if (Environment.isLinux) result else Syscall.PosixStat.init(&result);
+                    break :brk Maybe(Return.Lstat){ .result = .{ .stats = .init(&stat_, args.big_int) } };
+                },
                 .err => |err| brk: {
                     if (!args.throw_if_no_entry and err.getErrno() == .NOENT) {
                         return Maybe(Return.Lstat){ .result = .{ .not_found = {} } };
@@ -4935,7 +4941,7 @@ pub const NodeFS = struct {
                         .directory,
                         => {
                             if (current.name.len + 1 + name_to_copy.len > bun.MAX_PATH_BYTES) break :enqueue;
-                            stack.writeItem(basename_allocator.dupeZ(u8, name_to_copy) catch break :enqueue) catch break :enqueue;
+                            stack.writeItem(bun.dupeZ(basename_allocator, u8, name_to_copy) catch break :enqueue) catch break :enqueue;
                         },
                         // Some filesystems (e.g., Docker bind mounts, FUSE, NFS) return
                         // DT_UNKNOWN for d_type. Use lstatat to determine the actual type.
@@ -4949,7 +4955,7 @@ pub const NodeFS = struct {
                                     const real_kind = bun.sys.kindFromMode(@intCast(st.mode));
                                     effective_kind = real_kind;
                                     if (real_kind == .directory or real_kind == .sym_link) {
-                                        stack.writeItem(basename_allocator.dupeZ(u8, name_to_copy) catch break :enqueue) catch break :enqueue;
+                                        stack.writeItem(bun.dupeZ(basename_allocator, u8, name_to_copy) catch break :enqueue) catch break :enqueue;
                                     }
                                 },
                                 .err => {}, // Skip entries we can't stat
@@ -5145,7 +5151,7 @@ pub const NodeFS = struct {
                         else
                             return .{
                                 .result = .{
-                                    .null_terminated = bun.handleOom(bun.default_allocator.dupeZ(u8, file.contents)),
+                                    .null_terminated = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, file.contents)),
                                 },
                             };
                     }
@@ -5268,7 +5274,7 @@ pub const NodeFS = struct {
                         } else {
                             return .{
                                 .result = .{
-                                    .null_terminated = bun.default_allocator.dupeZ(u8, temporary_read_buffer) catch return .{
+                                    .null_terminated = bun.dupeZ(bun.default_allocator, u8, temporary_read_buffer) catch return .{
                                         .err = Syscall.Error.fromCode(.NOMEM, .read).withPathLike(args.path),
                                     },
                                 },
@@ -5728,7 +5734,7 @@ pub const NodeFS = struct {
 
     pub fn rmdir(this: *NodeFS, args: Arguments.RmDir, _: Flavor) Maybe(Return.Rmdir) {
         if (args.recursive) {
-            zigDeleteTree(std.fs.cwd(), args.path.slice(), .directory) catch |err| {
+            zigDeleteTree(std.Io.Dir.cwd(), args.path.slice(), .directory) catch |err| {
                 var errno: bun.sys.E = switch (@as(anyerror, err)) {
                     error.AccessDenied => .PERM,
                     error.FileTooBig => .FBIG,
@@ -5784,7 +5790,7 @@ pub const NodeFS = struct {
 
         // We cannot use removefileat() on macOS because it does not handle write-protected files as expected.
         if (args.recursive) {
-            zigDeleteTree(std.fs.cwd(), args.path.slice(), .file) catch |err| {
+            zigDeleteTree(std.Io.Dir.cwd(), args.path.slice(), .file) catch |err| {
                 bun.handleErrorReturnTrace(err, @errorReturnTrace());
                 const errno: E = switch (@as(anyerror, err)) {
                     // error.InvalidHandle => .BADF,
@@ -5924,8 +5930,11 @@ pub const NodeFS = struct {
             };
         } else {
             return switch (Syscall.stat(path)) {
-                .result => |result| .{
-                    .result = .{ .stats = .init(&Syscall.PosixStat.init(&result), args.big_int) },
+                .result => |result| brk: {
+                    const stat_: Syscall.PosixStat = if (Environment.isLinux) result else Syscall.PosixStat.init(&result);
+                    break :brk .{
+                        .result = .{ .stats = .init(&stat_, args.big_int) },
+                    };
                 },
                 .err => |err| brk: {
                     if (!args.throw_if_no_entry and err.getErrno() == .NOENT) {
@@ -6232,7 +6241,7 @@ pub const NodeFS = struct {
                 },
             };
 
-            if (!posix.S.ISDIR(stat_.mode)) {
+            if (!posix.S.ISDIR(@intCast(stat_.mode))) {
                 const r = this._copySingleFileSync(
                     src,
                     dest,
@@ -6458,7 +6467,7 @@ pub const NodeFS = struct {
         dest: bun.OSPathSliceZ,
         mode: constants.Copyfile,
         /// Stat on posix, file attributes on windows
-        reuse_stat: ?if (Environment.isWindows) windows.DWORD else std.posix.Stat,
+        reuse_stat: ?if (Environment.isWindows) windows.DWORD else bun.sys.Stat,
         args: Arguments.Cp,
     ) Maybe(Return.CopyFile) {
         const ret = Maybe(Return.CopyFile);
@@ -6477,8 +6486,8 @@ pub const NodeFS = struct {
                     },
                 };
 
-                if (!posix.S.ISREG(stat_.mode)) {
-                    if (posix.S.ISLNK(stat_.mode)) {
+                if (!posix.S.ISREG(@intCast(stat_.mode))) {
+                    if (posix.S.ISLNK(@intCast(stat_.mode))) {
                         var mode_: u32 = c.COPYFILE_ACL | c.COPYFILE_DATA | c.COPYFILE_NOFOLLOW_SRC;
                         if (mode.shouldntOverwrite()) {
                             mode_ |= c.COPYFILE_EXCL;
@@ -6503,7 +6512,7 @@ pub const NodeFS = struct {
                     }
 
                     if (ret.errnoSysP(c.clonefile(src, dest, 0), .clonefile, src) == null) {
-                        _ = Syscall.chmod(dest, stat_.mode);
+                        _ = Syscall.chmod(dest, @intCast(stat_.mode));
                         return ret.success;
                     }
                 } else {
@@ -6555,7 +6564,7 @@ pub const NodeFS = struct {
                     };
                     defer {
                         _ = Syscall.ftruncate(dest_fd, @intCast(@as(u63, @truncate(wrote))));
-                        _ = Syscall.fchmod(dest_fd, stat_.mode);
+                        _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                         dest_fd.close();
                     }
 
@@ -6573,7 +6582,7 @@ pub const NodeFS = struct {
 
             const first_try = ret.errnoSysP(c.copyfile(src, dest, null, mode_), .copyfile, src) orelse return ret.success;
             if (first_try == .err and first_try.err.errno == @intFromEnum(Syscall.E.NOENT)) {
-                bun.makePath(std.fs.cwd(), bun.path.dirname(dest, .auto)) catch {};
+                bun.makePath(std.Io.Dir.cwd(), bun.path.dirname(dest, .auto)) catch {};
                 return ret.errnoSysP(c.copyfile(src, dest, null, mode_), .copyfile, src) orelse ret.success;
             }
             return first_try;
@@ -6601,12 +6610,12 @@ pub const NodeFS = struct {
                 src_fd.close();
             }
 
-            const stat_: linux.Stat = switch (Syscall.fstat(src_fd)) {
+            const stat_: Syscall.Stat = switch (Syscall.fstat(src_fd)) {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err.withFd(src_fd) },
             };
 
-            if (!posix.S.ISREG(stat_.mode)) {
+            if (!posix.S.ISREG(@intCast(stat_.mode))) {
                 return Maybe(Return.CopyFile){ .err = .{
                     .errno = @intFromEnum(SystemErrno.ENOTSUP),
                     .syscall = .copyfile,
@@ -6651,10 +6660,10 @@ pub const NodeFS = struct {
 
             var size: usize = @intCast(@max(stat_.size, 0));
 
-            if (posix.S.ISREG(stat_.mode) and bun.can_use_ioctl_ficlone()) {
+            if (posix.S.ISREG(@intCast(stat_.mode)) and bun.can_use_ioctl_ficlone()) {
                 const rc = bun.linux.ioctl_ficlone(dest_fd, src_fd);
                 if (rc == 0) {
-                    _ = Syscall.fchmod(dest_fd, stat_.mode);
+                    _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                     dest_fd.close();
                     return ret.success;
                 }
@@ -6664,7 +6673,7 @@ pub const NodeFS = struct {
 
             defer {
                 _ = Syscall.ftruncate(dest_fd, @as(i64, @intCast(@as(u63, @truncate(wrote)))));
-                _ = Syscall.fchmod(dest_fd, stat_.mode);
+                _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                 dest_fd.close();
             }
 
@@ -6753,7 +6762,7 @@ pub const NodeFS = struct {
                 .result => |result| result,
                 .err => |err| return Maybe(Return.CopyFile){ .err = err.withFd(src_fd) },
             };
-            if (!posix.S.ISREG(stat_.mode)) {
+            if (!posix.S.ISREG(@intCast(stat_.mode))) {
                 return Maybe(Return.CopyFile){ .err = .{ .errno = @intFromEnum(SystemErrno.EOPNOTSUPP), .syscall = .copyfile } };
             }
 
@@ -6802,7 +6811,7 @@ pub const NodeFS = struct {
 
             defer {
                 _ = Syscall.ftruncate(dest_fd, @as(i64, @intCast(@as(u63, @truncate(wrote)))));
-                _ = Syscall.fchmod(dest_fd, stat_.mode);
+                _ = Syscall.fchmod(dest_fd, @intCast(stat_.mode));
                 dest_fd.close();
             }
 
@@ -6847,7 +6856,7 @@ pub const NodeFS = struct {
                     switch (err) {
                         .FILE_EXISTS, .ALREADY_EXISTS => errpath = dest,
                         .PATH_NOT_FOUND => {
-                            bun.makePathW(std.fs.cwd(), bun.path.dirnameW(dest)) catch {};
+                            bun.makePathW(std.Io.Dir.cwd(), bun.path.dirnameW(dest)) catch {};
                             const second_try = windows.CopyFileW(src, dest, @intFromBool(mode.shouldntOverwrite()));
                             if (second_try > 0) return ret.success;
                             err = windows.GetLastError();

@@ -231,7 +231,7 @@ const LinuxImpl = struct {
             if (timeout != null) &ts else null,
         );
 
-        switch (linux.E.init(rc)) {
+        switch (linux.errno(rc)) {
             .SUCCESS => {}, // notified by `wake()`
             .INTR => {}, // spurious wakeup
             .AGAIN => {}, // ptr.* != expect
@@ -248,7 +248,7 @@ const LinuxImpl = struct {
     fn wake(ptr: *const atomic.Value(u32), max_waiters: u32) void {
         const rc = linux.futex_3arg(&ptr.raw, .{ .cmd = .WAKE, .private = true }, @bitCast(std.math.cast(i32, max_waiters) orelse std.math.maxInt(i32)));
 
-        switch (linux.E.init(rc)) {
+        switch (linux.errno(rc)) {
             .SUCCESS => {}, // successful wake up
             .INVAL => {}, // invalid futex_wait() on ptr done elsewhere
             .FAULT => @panic("futex_wake() returned EFAULT unexpectedly"), // pointer became invalid while doing the wake
@@ -369,7 +369,7 @@ const WasmImpl = struct {
 /// to Futex timedWait() can block for and report more accurate error.Timeouts.
 pub const Deadline = struct {
     timeout: ?u64,
-    started: std.time.Timer,
+    started: SystemTimer,
 
     /// Create the deadline to expire after the given amount of time in nanoseconds passes.
     /// Pass in `null` to have the deadline call `Futex.wait()` and never expire.
@@ -377,9 +377,9 @@ pub const Deadline = struct {
         var deadline: Deadline = undefined;
         deadline.timeout = expires_in_ns;
 
-        // std.time.Timer is required to be supported for somewhat accurate reportings of error.Timeout.
+        // SystemTimer is required to be supported for somewhat accurate reportings of error.Timeout.
         if (deadline.timeout != null) {
-            deadline.started = std.time.Timer.start() catch unreachable;
+            deadline.started = SystemTimer.start() catch unreachable;
         }
 
         return deadline;
@@ -419,3 +419,4 @@ const c = std.c;
 
 const linux = std.os.linux;
 const windows = std.os.windows;
+const SystemTimer = @import("../perf/system_timer.zig").Timer;

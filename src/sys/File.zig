@@ -165,7 +165,80 @@ fn stdIoRead(this: File, buf: []u8) ReadError!usize {
     return try this.read(buf).unwrap();
 }
 
-pub const Reader = std.Io.GenericReader(File, anyerror, stdIoRead);
+pub const Reader = struct {
+    context: File,
+
+    pub const Error = ReadError;
+
+    pub fn read(self: Reader, buf: []u8) ReadError!usize {
+        return stdIoRead(self.context, buf);
+    }
+
+    pub fn readAll(self: Reader, buf: []u8) ReadError!void {
+        var remain = buf;
+        while (remain.len > 0) {
+            const amt = try self.read(remain);
+            if (amt == 0) return error.EndOfStream;
+            remain = remain[amt..];
+        }
+    }
+
+    pub fn readByte(self: Reader) ReadError!u8 {
+        var byte: [1]u8 = undefined;
+        try self.readAll(&byte);
+        return byte[0];
+    }
+
+    pub fn readInt(self: Reader, comptime T: type, endian: std.builtin.Endian) ReadError!T {
+        var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+        try self.readAll(&bytes);
+        return std.mem.readInt(T, &bytes, endian);
+    }
+
+    pub const Adapter = struct {
+        context: File,
+        new_interface: std.Io.Reader,
+
+        pub fn init(context: File, buffer: []u8) Adapter {
+            return .{
+                .context = context,
+                .new_interface = .{
+                    .vtable = &.{
+                        .stream = stream,
+                    },
+                    .buffer = buffer,
+                    .seek = 0,
+                    .end = 0,
+                },
+            };
+        }
+
+        fn stream(r: *std.Io.Reader, w: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+            if (limit == .nothing) return 0;
+            const this: *Adapter = @fieldParentPtr("new_interface", r);
+            const dest = limit.slice(w.writableSliceGreedy(1) catch return error.WriteFailed);
+            const amt = this.context.read(dest).unwrap() catch return error.ReadFailed;
+            if (amt == 0) return error.EndOfStream;
+            w.advance(amt);
+            return amt;
+        }
+    };
+
+    fn bufferFrom(buffer: anytype) []u8 {
+        return switch (@typeInfo(@TypeOf(buffer))) {
+            .pointer => |ptr| switch (ptr.size) {
+                .one => @constCast(buffer)[0..],
+                .slice => @constCast(buffer),
+                else => @compileError("expected a buffer slice or pointer to an array"),
+            },
+            else => @compileError("expected a buffer slice or pointer to an array"),
+        };
+    }
+
+    pub fn adaptToNewApi(self: Reader, buffer: anytype) Adapter {
+        return Adapter.init(self.context, bufferFrom(buffer));
+    }
+};
 
 pub fn reader(self: File) Reader {
     return Reader{ .context = self };
@@ -186,8 +259,103 @@ fn stdIoWriteQuietDebug(this: File, bytes: []const u8) WriteError!usize {
     return bytes.len;
 }
 
-pub const Writer = std.Io.GenericWriter(File, anyerror, stdIoWrite);
-pub const QuietWriter = if (Environment.isDebug) std.Io.GenericWriter(File, anyerror, stdIoWriteQuietDebug) else Writer;
+fn FileWriter(comptime quiet: bool) type {
+    return struct {
+        context: File,
+
+        pub const Error = WriteError;
+
+        const Self = @This();
+
+        fn writeFn(file: File, bytes: []const u8) WriteError!usize {
+            if (comptime quiet and Environment.isDebug) {
+                return stdIoWriteQuietDebug(file, bytes);
+            }
+            return stdIoWrite(file, bytes);
+        }
+
+        pub fn write(self: Self, bytes: []const u8) WriteError!usize {
+            return writeFn(self.context, bytes);
+        }
+
+        pub fn writeAll(self: Self, bytes: []const u8) WriteError!void {
+            _ = try writeFn(self.context, bytes);
+        }
+
+        pub fn writeByte(self: Self, byte: u8) WriteError!void {
+            try self.writeAll(&.{byte});
+        }
+
+        pub fn writeInt(self: Self, comptime T: type, value: T, endian: std.builtin.Endian) WriteError!void {
+            var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+            std.mem.writeInt(std.math.ByteAlignedInt(@TypeOf(value)), &bytes, value, endian);
+            try self.writeAll(&bytes);
+        }
+
+        pub fn print(self: Self, comptime fmt: []const u8, args: anytype) std.Io.Writer.Error!void {
+            var adapter = self.adaptToNewApi(&.{});
+            try adapter.new_interface.print(fmt, args);
+            try adapter.new_interface.flush();
+        }
+
+        pub const Adapter = struct {
+            context: File,
+            new_interface: std.Io.Writer,
+
+            pub fn init(context: File, buffer: []u8) Adapter {
+                return .{
+                    .context = context,
+                    .new_interface = .{
+                        .vtable = &.{
+                            .drain = drain,
+                            .flush = std.Io.Writer.defaultFlush,
+                            .rebase = std.Io.Writer.failingRebase,
+                        },
+                        .buffer = buffer,
+                    },
+                };
+            }
+
+            fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+                const this: *Adapter = @fieldParentPtr("new_interface", w);
+                writeFn(this.context, w.buffered()) catch return error.WriteFailed;
+                w.end = 0;
+
+                var written: usize = 0;
+                for (data[0 .. data.len - 1]) |bytes| {
+                    writeFn(this.context, bytes) catch return error.WriteFailed;
+                    written += bytes.len;
+                }
+
+                const pattern = data[data.len - 1];
+                for (0..splat) |_| {
+                    writeFn(this.context, pattern) catch return error.WriteFailed;
+                    written += pattern.len;
+                }
+
+                return written;
+            }
+        };
+
+        fn bufferFrom(buffer: anytype) []u8 {
+            return switch (@typeInfo(@TypeOf(buffer))) {
+                .pointer => |ptr| switch (ptr.size) {
+                    .one => @constCast(buffer)[0..],
+                    .slice => @constCast(buffer),
+                    else => @compileError("expected a buffer slice or pointer to an array"),
+                },
+                else => @compileError("expected a buffer slice or pointer to an array"),
+            };
+        }
+
+        pub fn adaptToNewApi(self: Self, buffer: anytype) Adapter {
+            return Adapter.init(self.context, bufferFrom(buffer));
+        }
+    };
+}
+
+pub const Writer = FileWriter(false);
+pub const QuietWriter = if (Environment.isDebug) FileWriter(true) else Writer;
 
 pub fn writer(self: File) Writer {
     return Writer{ .context = self };

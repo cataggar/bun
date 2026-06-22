@@ -310,11 +310,73 @@ pub const TablePrinter = struct {
 
         pub const WriteError = error{};
 
-        pub const Writer = std.Io.GenericWriter(
-            VisibleCharacterCounter,
-            VisibleCharacterCounter.WriteError,
-            VisibleCharacterCounter.write,
-        );
+        pub const Writer = struct {
+            context: VisibleCharacterCounter,
+
+            pub const Error = VisibleCharacterCounter.WriteError;
+
+            pub fn write(this: Writer, bytes: []const u8) Error!usize {
+                return this.context.write(bytes);
+            }
+
+            pub fn writeAll(this: Writer, bytes: []const u8) Error!void {
+                return this.context.writeAll(bytes);
+            }
+
+            pub const Adapter = struct {
+                context: VisibleCharacterCounter,
+                new_interface: std.Io.Writer,
+
+                pub fn init(context: VisibleCharacterCounter, buffer: []u8) Adapter {
+                    return .{
+                        .context = context,
+                        .new_interface = .{
+                            .vtable = &.{
+                                .drain = drain,
+                                .flush = std.Io.Writer.defaultFlush,
+                                .rebase = std.Io.Writer.failingRebase,
+                            },
+                            .buffer = buffer,
+                        },
+                    };
+                }
+
+                fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+                    const this: *Adapter = @fieldParentPtr("new_interface", w);
+                    _ = this.context.write(w.buffered()) catch unreachable;
+                    w.end = 0;
+
+                    var written: usize = 0;
+                    for (data[0 .. data.len - 1]) |bytes| {
+                        _ = this.context.write(bytes) catch unreachable;
+                        written += bytes.len;
+                    }
+
+                    const pattern = data[data.len - 1];
+                    for (0..splat) |_| {
+                        _ = this.context.write(pattern) catch unreachable;
+                        written += pattern.len;
+                    }
+
+                    return written;
+                }
+            };
+
+            fn bufferFrom(buffer: anytype) []u8 {
+                return switch (@typeInfo(@TypeOf(buffer))) {
+                    .pointer => |ptr| switch (ptr.size) {
+                        .one => @constCast(buffer)[0..],
+                        .slice => @constCast(buffer),
+                        else => @compileError("expected a buffer slice or pointer to an array"),
+                    },
+                    else => @compileError("expected a buffer slice or pointer to an array"),
+                };
+            }
+
+            pub fn adaptToNewApi(this: Writer, buffer: anytype) Adapter {
+                return Adapter.init(this.context, bufferFrom(buffer));
+            }
+        };
 
         pub fn write(this: VisibleCharacterCounter, bytes: []const u8) WriteError!usize {
             this.width.* += strings.visible.width.exclude_ansi_colors.utf8(bytes);

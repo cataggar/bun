@@ -130,7 +130,7 @@ pub fn NewSocket(comptime ssl: bool) type {
                     // getaddrinfo doesn't accept bracketed IPv6.
                     const raw = host.host;
                     const clean = if (raw.len > 1 and raw[0] == '[' and raw[raw.len - 1] == ']') raw[1 .. raw.len - 1] else raw;
-                    const hostz = bun.handleOom(alloc.dupeZ(u8, clean));
+                    const hostz = bun.handleOom(bun.dupeZ(alloc, u8, clean));
                     defer alloc.free(hostz);
 
                     this.socket = switch (group.connect(kind, ssl_ctx, hostz, host.port, flags, @sizeOf(*anyopaque))) {
@@ -148,7 +148,7 @@ pub fn NewSocket(comptime ssl: bool) type {
                 .unix => |u| {
                     var sf = bun.stackFallback(1024, bun.default_allocator);
                     const alloc = sf.get();
-                    const pathz = bun.handleOom(alloc.dupeZ(u8, u));
+                    const pathz = bun.handleOom(bun.dupeZ(alloc, u8, u));
                     defer alloc.free(pathz);
 
                     const s = group.connectUnix(kind, ssl_ctx, pathz.ptr, pathz.len, flags, @sizeOf(*anyopaque)) orelse
@@ -495,7 +495,7 @@ pub fn NewSocket(comptime ssl: bool) type {
                         if (this.server_name) |server_name| {
                             const host = server_name;
                             if (host.len > 0) {
-                                const host__ = bun.handleOom(default_allocator.dupeZ(u8, host));
+                                const host__ = bun.handleOom(bun.dupeZ(default_allocator, u8, host));
                                 defer default_allocator.free(host__);
                                 ssl_ptr.setHostname(host__);
                             }
@@ -503,7 +503,7 @@ pub fn NewSocket(comptime ssl: bool) type {
                             if (connection == .host) {
                                 const host = connection.host.host;
                                 if (host.len > 0) {
-                                    const host__ = bun.handleOom(default_allocator.dupeZ(u8, host));
+                                    const host__ = bun.handleOom(bun.dupeZ(default_allocator, u8, host));
                                     defer default_allocator.free(host__);
                                     ssl_ptr.setHostname(host__);
                                 }
@@ -899,13 +899,7 @@ pub fn NewSocket(comptime ssl: bool) type {
             var text_buf: [512]u8 = undefined;
 
             const address_bytes: []const u8 = this.socket.localAddress(&buf) orelse return .js_undefined;
-            const address: std.net.Address = switch (address_bytes.len) {
-                4 => std.net.Address.initIp4(address_bytes[0..4].*, 0),
-                16 => std.net.Address.initIp6(address_bytes[0..16].*, 0, 0, 0),
-                else => return .js_undefined,
-            };
-
-            const text = bun.fmt.formatIp(address, &text_buf) catch unreachable;
+            const text = formatAddressBytes(address_bytes, &text_buf) orelse return .js_undefined;
             return ZigString.init(text).toJS(globalThis);
         }
 
@@ -940,13 +934,7 @@ pub fn NewSocket(comptime ssl: bool) type {
             var text_buf: [512]u8 = undefined;
 
             const address_bytes: []const u8 = this.socket.remoteAddress(&buf) orelse return .js_undefined;
-            const address: std.net.Address = switch (address_bytes.len) {
-                4 => std.net.Address.initIp4(address_bytes[0..4].*, 0),
-                16 => std.net.Address.initIp6(address_bytes[0..16].*, 0, 0, 0),
-                else => return .js_undefined,
-            };
-
-            const text = bun.fmt.formatIp(address, &text_buf) catch unreachable;
+            const text = formatAddressBytes(address_bytes, &text_buf) orelse return .js_undefined;
             return bun.String.createUTF8ForJS(globalThis, text);
         }
 
@@ -2263,6 +2251,27 @@ pub fn jsSetSocketOptions(global: *jsc.JSGlobalObject, callframe: *jsc.CallFrame
     }
 
     return .js_undefined;
+}
+
+fn formatAddressBytes(address_bytes: []const u8, text_buf: []u8) ?[]const u8 {
+    return switch (address_bytes.len) {
+        4 => std.fmt.bufPrint(text_buf, "{d}.{d}.{d}.{d}", .{
+            address_bytes[0],
+            address_bytes[1],
+            address_bytes[2],
+            address_bytes[3],
+        }) catch unreachable,
+        16 => brk: {
+            var writer = std.Io.Writer.fixed(text_buf);
+            const address = std.Io.net.Ip6Address{ .bytes = address_bytes[0..16].*, .port = 0 };
+            address.format(&writer) catch unreachable;
+            var text = writer.buffered();
+            if (std.mem.lastIndexOfScalar(u8, text, ':')) |colon| text = text[0..colon];
+            if (text.len >= 2 and text[0] == '[' and text[text.len - 1] == ']') text = text[1 .. text.len - 1];
+            break :brk text;
+        },
+        else => null,
+    };
 }
 
 const string = []const u8;

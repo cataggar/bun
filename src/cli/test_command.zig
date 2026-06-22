@@ -878,8 +878,8 @@ pub const CommandLineReporter = struct {
         defer output_buf.deinit(buntest.gpa);
 
         const initial_length = output_buf.items.len;
-        const base_writer = output_buf.writer(buntest.gpa);
-        var writer = base_writer;
+        var output_writer = std.Io.Writer.Allocating.fromArrayList(buntest.gpa, &output_buf);
+        const writer = &output_writer.writer;
 
         switch (sequence.result) {
             inline else => |result| {
@@ -903,14 +903,14 @@ pub const CommandLineReporter = struct {
                     } else {
                         buntest.bun_test_root.onBeforePrint();
 
-                        writeTestStatusLine(result, &writer);
+                        writeTestStatusLine(result, writer);
                         const dim = switch (comptime result.basicResult()) {
                             .todo => if (bun.jsc.Jest.Jest.runner) |runner| !runner.run_todo else true,
                             .skip, .pending => true,
                             .pass, .fail => false,
                         };
                         switch (dim) {
-                            inline else => |dim_comptime| printTestLine(result, sequence, test_entry, elapsed_ns, &writer, dim_comptime),
+                            inline else => |dim_comptime| printTestLine(result, sequence, test_entry, elapsed_ns, writer, dim_comptime),
                         }
                     }
                 }
@@ -919,6 +919,7 @@ pub const CommandLineReporter = struct {
             },
         }
 
+        output_buf = output_writer.toArrayList();
         const formatted_line = output_buf.items[initial_length..];
         if (buntest.reporter != null and buntest.reporter.?.worker_ipc_file_idx != null) {
             ParallelRunner.workerEmitTestDone(buntest.reporter.?.worker_ipc_file_idx.?, formatted_line);
@@ -1409,7 +1410,7 @@ pub const TestCommand = struct {
         var snapshot_file_buf = std.array_list.Managed(u8).init(ctx.allocator);
         var snapshot_values = Snapshots.ValuesHashMap.init(ctx.allocator);
         var snapshot_counts = bun.StringHashMap(usize).init(ctx.allocator);
-        var inline_snapshots_to_write = std.AutoArrayHashMap(TestRunner.File.ID, std.array_list.Managed(Snapshots.InlineSnapshotToWrite)).init(ctx.allocator);
+        var inline_snapshots_to_write: std.AutoArrayHashMapUnmanaged(TestRunner.File.ID, std.array_list.Managed(Snapshots.InlineSnapshotToWrite)) = .empty;
         jsc.VirtualMachine.isBunTest = true;
 
         var reporter = try ctx.allocator.create(CommandLineReporter);

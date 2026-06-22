@@ -58,15 +58,15 @@ pub const PatchFile = struct {
             defer _ = arena.reset(.retain_capacity);
             switch (part.*) {
                 .file_deletion => {
-                    const pathz = bun.handleOom(arena.allocator().dupeZ(u8, part.file_deletion.path));
+                    const pathz = bun.handleOom(bun.dupeZ(arena.allocator(), u8, part.file_deletion.path));
 
                     if (bun.sys.unlinkat(patch_dir, pathz).asErr()) |e| {
                         return e.withoutPath();
                     }
                 },
                 .file_rename => {
-                    const from_path = bun.handleOom(arena.allocator().dupeZ(u8, part.file_rename.from_path));
-                    const to_path = bun.handleOom(arena.allocator().dupeZ(u8, part.file_rename.to_path));
+                    const from_path = bun.handleOom(bun.dupeZ(arena.allocator(), u8, part.file_rename.from_path));
+                    const to_path = bun.handleOom(bun.dupeZ(arena.allocator(), u8, part.file_rename.to_path));
 
                     if (std.fs.path.dirname(to_path)) |todir| {
                         const abs_patch_dir = switch (state.patchDirAbsPath(patch_dir)) {
@@ -90,7 +90,7 @@ pub const PatchFile = struct {
                     }
                 },
                 .file_creation => {
-                    const filepath = bun.PathString.init(bun.handleOom(arena.allocator().dupeZ(u8, part.file_creation.path)));
+                    const filepath = bun.PathString.init(bun.handleOom(bun.dupeZ(arena.allocator(), u8, part.file_creation.path)));
                     const filedir = bun.path.dirname(filepath.slice(), .auto);
                     const mode = part.file_creation.mode;
 
@@ -166,7 +166,7 @@ pub const PatchFile = struct {
                 },
                 .file_mode_change => {
                     const newmode = part.file_mode_change.new_mode;
-                    const filepath = bun.handleOom(arena.allocator().dupeZ(u8, part.file_mode_change.path));
+                    const filepath = bun.handleOom(bun.dupeZ(arena.allocator(), u8, part.file_mode_change.path));
                     if (comptime bun.Environment.isPosix) {
                         if (bun.sys.fchmodat(patch_dir, filepath, newmode.toBunMode(), 0).asErr()) |e| {
                             return e.withoutPath();
@@ -210,7 +210,7 @@ pub const PatchFile = struct {
         patch_dir: bun.FD,
         state: *ApplyState,
     ) bun.sys.Maybe(void) {
-        const file_path: [:0]const u8 = bun.handleOom(arena.allocator().dupeZ(u8, patch.path));
+        const file_path: [:0]const u8 = bun.handleOom(bun.dupeZ(arena.allocator(), u8, patch.path));
 
         // Need to get the mode of the original file
         // And also get the size to read file into memory
@@ -384,13 +384,11 @@ const FileDeets = struct {
     }
 
     fn nullifyEmptyStrings(this: *FileDeets) void {
-        const fields: []const std.builtin.Type.StructField = std.meta.fields(FileDeets);
-
-        inline for (fields) |field| {
-            if (field.type == ?[]const u8) {
-                const value = @field(this, field.name);
+        inline for (@typeInfo(FileDeets).@"struct".field_names, @typeInfo(FileDeets).@"struct".field_types) |field_name, FieldType| {
+            if (FieldType == ?[]const u8) {
+                const value = @field(this, field_name);
                 if (value != null and value.?.len == 0) {
-                    @field(this, field.name) = null;
+                    @field(this, field_name) = null;
                 }
             }
         }
@@ -1211,8 +1209,8 @@ pub fn gitDiffPreprocessPaths(
 
     if (bun.Environment.isPosix and sentinel) {
         return .{
-            bun.handleOom(allocator.dupeZ(u8, old_folder)),
-            bun.handleOom(allocator.dupeZ(u8, new_folder)),
+            bun.handleOom(bun.dupeZ(allocator, u8, old_folder)),
+            bun.handleOom(bun.dupeZ(allocator, u8, new_folder)),
         };
     }
 
@@ -1233,8 +1231,16 @@ pub fn gitDiffInternal(
         allocator.free(new_folder);
     };
 
-    var child_proc = std.process.Child.init(
-        &[_][]const u8{
+    var map = std.process.Environ.Map.init(allocator);
+    defer map.deinit();
+    if (bun.env_var.PATH.get()) |v| try map.put("PATH", v);
+    try map.put("GIT_CONFIG_NOSYSTEM", "1");
+    try map.put("HOME", "");
+    try map.put("XDG_CONFIG_HOME", "");
+    try map.put("USERPROFILE", "");
+
+    const run_result = try std.process.run(allocator, bun.blockingIo(), .{
+        .argv = &[_][]const u8{
             "git",
             "-c",
             "core.safecrlf=false",
@@ -1248,39 +1254,23 @@ pub fn gitDiffInternal(
             old_folder,
             new_folder,
         },
-        allocator,
-    );
-    // unfortunately, git diff returns non-zero exit codes even when it succeeds.
-    // we have to check that stderr was not empty to know if it failed
-    child_proc.stdout_behavior = .Pipe;
-    child_proc.stderr_behavior = .Pipe;
-    var map = std.process.EnvMap.init(allocator);
-    defer map.deinit();
-    if (bun.env_var.PATH.get()) |v| try map.put("PATH", v);
-    try map.put("GIT_CONFIG_NOSYSTEM", "1");
-    try map.put("HOME", "");
-    try map.put("XDG_CONFIG_HOME", "");
-    try map.put("USERPROFILE", "");
-
-    child_proc.env_map = &map;
-    var stdout: std.ArrayListUnmanaged(u8) = .empty;
-    var stderr: std.ArrayListUnmanaged(u8) = .empty;
+        .environ_map = &map,
+        .stdout_limit = .limited(1024 * 1024 * 4),
+        .stderr_limit = .limited(1024 * 1024 * 4),
+    });
     var deinit_stdout = true;
     var deinit_stderr = true;
     defer {
-        if (deinit_stdout) stdout.deinit(allocator);
-        if (deinit_stderr) stderr.deinit(allocator);
+        if (deinit_stdout) allocator.free(run_result.stdout);
+        if (deinit_stderr) allocator.free(run_result.stderr);
     }
-    try child_proc.spawn();
-    try child_proc.collectOutput(allocator, &stdout, &stderr, 1024 * 1024 * 4);
-    _ = try child_proc.wait();
-    if (stderr.items.len > 0) {
+    if (run_result.stderr.len > 0) {
         deinit_stderr = false;
-        return .{ .err = stderr.toManaged(allocator) };
+        return .{ .err = std.array_list.Managed(u8).fromOwnedSlice(allocator, run_result.stderr) };
     }
 
-    debug("Before postprocess: {s}\n", .{stdout.items});
-    var stdout_managed = stdout.toManaged(allocator);
+    debug("Before postprocess: {s}\n", .{run_result.stdout});
+    var stdout_managed = std.array_list.Managed(u8).fromOwnedSlice(allocator, run_result.stdout);
     try gitDiffPostprocess(&stdout_managed, old_folder, new_folder);
     deinit_stdout = false;
     return .{ .result = stdout_managed };

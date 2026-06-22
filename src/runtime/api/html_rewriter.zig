@@ -28,7 +28,7 @@ pub const LOLHTMLContext = struct {
             bun.default_allocator.destroy(handler);
         }
         this.document_handlers.deinit(bun.default_allocator);
-        this.document_handlers = .{};
+        this.document_handlers = .empty;
 
         bun.destroy(this);
     }

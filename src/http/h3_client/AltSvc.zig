@@ -121,7 +121,7 @@ pub fn record(origin_host: []const u8, origin_port: u16, field_value: []const u8
         return;
     } orelse return;
 
-    const now = std.time.timestamp();
+    const now = SystemTimer.timestamp();
     if (cache.count() >= max_entries and !cache.contains(k)) {
         sweepExpired(now);
         if (cache.count() >= max_entries) return;
@@ -145,7 +145,7 @@ pub fn lookup(origin_host: []const u8, origin_port: u16) ?u16 {
     if (origin_host.len > 256) return null;
     const k = key(&buf, origin_host, origin_port);
     const rec = cache.get(k) orelse return null;
-    if (std.time.timestamp() >= rec.expires_at) {
+    if (SystemTimer.timestamp() >= rec.expires_at) {
         if (cache.fetchRemove(k)) |kv| bun.default_allocator.free(kv.key);
         return null;
     }
@@ -154,6 +154,7 @@ pub fn lookup(origin_host: []const u8, origin_port: u16) ?u16 {
 
 const log = bun.Output.scoped(.h3_client, .hidden);
 
+const SystemTimer = @import("../../perf/system_timer.zig");
 const std = @import("std");
 
 const bun = @import("bun");

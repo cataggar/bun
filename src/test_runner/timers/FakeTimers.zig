@@ -9,11 +9,12 @@ pub var current_time: struct {
     const min_timespec = bun.timespec{ .sec = std.math.minInt(i64), .nsec = std.math.minInt(i64) };
     /// starts at 0. offset in milliseconds.
     offset_raw: bun.timespec = min_timespec,
-    offset_lock: std.Thread.RwLock = .{},
+    offset_lock: std.Io.RwLock = .init,
     date_now_offset: f64 = 0,
     pub fn getTimespecNow(this: *@This()) ?bun.timespec {
-        this.offset_lock.lockShared();
-        defer this.offset_lock.unlockShared();
+        const io = bun.blockingIo();
+        this.offset_lock.lockSharedUncancelable(io);
+        defer this.offset_lock.unlockShared(io);
         const value = this.offset_raw;
         if (value.eql(&min_timespec)) return null;
         return value;
@@ -24,8 +25,9 @@ pub var current_time: struct {
     }) void {
         const vm = globalObject.bunVM();
         {
-            this.offset_lock.lock();
-            defer this.offset_lock.unlock();
+            const io = bun.blockingIo();
+            this.offset_lock.lockUncancelable(io);
+            defer this.offset_lock.unlock(io);
             this.offset_raw = v.offset.*;
         }
         const timespec_ms: f64 = @floatFromInt(v.offset.ms());
@@ -39,8 +41,9 @@ pub var current_time: struct {
     pub fn clear(this: *@This(), globalObject: *jsc.JSGlobalObject) void {
         const vm = globalObject.bunVM();
         {
-            this.offset_lock.lock();
-            defer this.offset_lock.unlock();
+            const io = bun.blockingIo();
+            this.offset_lock.lockUncancelable(io);
+            defer this.offset_lock.unlock(io);
             this.offset_raw = min_timespec;
         }
         bun.cpp.JSMock__setOverridenDateNow(globalObject, -1);

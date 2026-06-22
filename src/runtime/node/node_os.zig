@@ -62,10 +62,11 @@ fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
     var stack_fallback = bun.stackFallback(1024 * 8, bun.default_allocator);
     var file_buf = std.array_list.Managed(u8).init(stack_fallback.get());
     defer file_buf.deinit();
+    const io = bun.blockingIo();
 
     // Read /proc/stat to get number of CPUs and times
     {
-        const file = std.fs.cwd().openFile("/proc/stat", .{}) catch {
+        const file = std.Io.Dir.cwd().openFile(io, "/proc/stat", .{}) catch {
             // hidepid mounts (common on Android) deny /proc/stat. lazyCpus in os.ts
             // pre-creates hostCpuCount lazy proxies, so return that many stub
             // entries (zeroed times / unknown model / speed 0) — matches Node.
@@ -81,7 +82,7 @@ fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
             }
             return stubs;
         };
-        defer file.close();
+        defer file.close(io);
 
         const read = try bun.sys.File.from(file).readToEndWithArrayList(&file_buf, .probably_small).unwrap();
         defer file_buf.clearRetainingCapacity();
@@ -120,8 +121,8 @@ fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
     }
 
     // Read /proc/cpuinfo to get model information (optional)
-    if (std.fs.cwd().openFile("/proc/cpuinfo", .{})) |file| {
-        defer file.close();
+    if (std.Io.Dir.cwd().openFile(io, "/proc/cpuinfo", .{})) |file| {
+        defer file.close(io);
 
         const read = try bun.sys.File.from(file).readToEndWithArrayList(&file_buf, .probably_small).unwrap();
         defer file_buf.clearRetainingCapacity();
@@ -171,8 +172,8 @@ fn cpusImplLinux(globalThis: *jsc.JSGlobalObject) !jsc.JSValue {
 
         var path_buf: [128]u8 = undefined;
         const path = try std.fmt.bufPrint(&path_buf, "/sys/devices/system/cpu/cpu{}/cpufreq/scaling_cur_freq", .{cpu_index});
-        if (std.fs.cwd().openFile(path, .{})) |file| {
-            defer file.close();
+        if (std.Io.Dir.cwd().openFile(io, path, .{})) |file| {
+            defer file.close(io);
 
             const read = try bun.sys.File.from(file).readToEndWithArrayList(&file_buf, .probably_small).unwrap();
             defer file_buf.clearRetainingCapacity();
@@ -602,8 +603,8 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
         if (helpers.skip(iface) or helpers.isLinkLayer(iface)) continue;
 
         const interface_name = std.mem.sliceTo(iface.ifa_name, 0);
-        const addr = std.net.Address.initPosix(@alignCast(@as(*std.posix.sockaddr, @ptrCast(iface.ifa_addr))));
-        const netmask = std.net.Address.initPosix(@alignCast(@as(*std.posix.sockaddr, @ptrCast(iface.ifa_netmask))));
+        const addr: *const std.posix.sockaddr = @ptrCast(@alignCast(iface.ifa_addr));
+        const netmask: *const std.posix.sockaddr = @ptrCast(@alignCast(iface.ifa_netmask));
 
         var interface = jsc.JSValue.createEmptyObject(globalThis, 0);
 
@@ -612,9 +613,9 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
         {
             // Compute the CIDR suffix; returns null if the netmask cannot
             //  be converted to a CIDR suffix
-            const maybe_suffix: ?u8 = switch (addr.any.family) {
-                std.posix.AF.INET => netmaskToCIDRSuffix(netmask.in.sa.addr),
-                std.posix.AF.INET6 => netmaskToCIDRSuffix(@as(u128, @bitCast(netmask.in6.sa.addr))),
+            const maybe_suffix: ?u8 = switch (addr.family) {
+                std.posix.AF.INET => netmaskToCIDRSuffix(sockaddrIn(netmask).addr),
+                std.posix.AF.INET6 => netmaskToCIDRSuffix(@as(u128, @bitCast(sockaddrIn6(netmask).addr))),
                 else => null,
             };
 
@@ -622,7 +623,7 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
             //  the address and cidr values can be slices into this same buffer
             // e.g. addr_str = "192.168.88.254", cidr_str = "192.168.88.254/24"
             var buf: [64]u8 = undefined;
-            const addr_str = bun.fmt.formatIp(addr, &buf) catch unreachable;
+            const addr_str = formatSockaddr(addr, &buf);
             var cidr = jsc.JSValue.null;
             if (maybe_suffix) |suffix| {
                 //NOTE addr_str might not start at buf[0] due to slicing in formatIp
@@ -641,12 +642,12 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
         // netmask <string> The IPv4 or IPv6 network mask
         {
             var buf: [64]u8 = undefined;
-            const str = bun.fmt.formatIp(netmask, &buf) catch unreachable;
+            const str = formatSockaddr(netmask, &buf);
             interface.put(globalThis, jsc.ZigString.static("netmask"), jsc.ZigString.init(str).withEncoding().toJS(globalThis));
         }
 
         // family <string> Either IPv4 or IPv6
-        interface.put(globalThis, jsc.ZigString.static("family"), switch (addr.any.family) {
+        interface.put(globalThis, jsc.ZigString.static("family"), switch (addr.family) {
             std.posix.AF.INET => globalThis.commonStrings().IPv4(),
             std.posix.AF.INET6 => globalThis.commonStrings().IPv6(),
             else => jsc.ZigString.static("unknown").toJS(globalThis),
@@ -699,8 +700,8 @@ fn networkInterfacesPosix(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSVal
         interface.put(globalThis, jsc.ZigString.static("internal"), jsc.JSValue.jsBoolean(helpers.isLoopback(iface)));
 
         // scopeid <number> The numeric IPv6 scope ID (only specified when family is IPv6)
-        if (addr.any.family == std.posix.AF.INET6) {
-            interface.put(globalThis, jsc.ZigString.static("scopeid"), jsc.JSValue.jsNumber(addr.in6.sa.scope_id));
+        if (addr.family == std.posix.AF.INET6) {
+            interface.put(globalThis, jsc.ZigString.static("scopeid"), jsc.JSValue.jsNumber(sockaddrIn6(addr).scope_id));
         }
 
         // Does this entry already exist?
@@ -760,11 +761,7 @@ fn networkInterfacesWindows(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSV
             // Format the address and then, if valid, the CIDR suffix; both
             //  the address and cidr values can be slices into this same buffer
             // e.g. addr_str = "192.168.88.254", cidr_str = "192.168.88.254/24"
-            const addr_str = bun.fmt.formatIp(
-                // std.net.Address will do ptrCast depending on the family so this is ok
-                std.net.Address.initPosix(@ptrCast(&iface.address.address4)),
-                &ip_buf,
-            ) catch unreachable;
+            const addr_str = formatLinuxSockaddr(@ptrCast(&iface.address.address4), &ip_buf);
             if (maybe_suffix) |suffix| {
                 //NOTE addr_str might not start at buf[0] due to slicing in formatIp
                 const start = @intFromPtr(addr_str.ptr) - @intFromPtr(&ip_buf[0]);
@@ -780,11 +777,7 @@ fn networkInterfacesWindows(globalThis: *jsc.JSGlobalObject) bun.JSError!jsc.JSV
 
         // netmask
         {
-            const str = bun.fmt.formatIp(
-                // std.net.Address will do ptrCast depending on the family so this is ok
-                std.net.Address.initPosix(@ptrCast(&iface.netmask.netmask4)),
-                &ip_buf,
-            ) catch unreachable;
+            const str = formatLinuxSockaddr(@ptrCast(&iface.netmask.netmask4), &ip_buf);
             interface.put(globalThis, jsc.ZigString.static("netmask"), jsc.ZigString.init(str).withEncoding().toJS(globalThis));
         }
         // family
@@ -1099,6 +1092,50 @@ fn netmaskToCIDRSuffix(mask: anytype) ?u8 {
     if (first_zero < @bitSizeOf(T) and first_zero < last_one) return null;
     return first_zero;
 }
+
+fn sockaddrIn(addr: *const std.posix.sockaddr) *const std.posix.sockaddr.in {
+    return @ptrCast(@alignCast(addr));
+}
+
+fn sockaddrIn6(addr: *const std.posix.sockaddr) *const std.posix.sockaddr.in6 {
+    return @ptrCast(@alignCast(addr));
+}
+
+fn formatSockaddr(addr: *const std.posix.sockaddr, buf: []u8) []const u8 {
+    return switch (addr.family) {
+        std.posix.AF.INET => formatIpRaw(std.posix.AF.INET, &sockaddrIn(addr).addr, buf),
+        std.posix.AF.INET6 => formatIpRaw(std.posix.AF.INET6, &sockaddrIn6(addr).addr, buf),
+        else => "",
+    };
+}
+
+fn linuxSockaddrIn(addr: *const std.os.linux.sockaddr) *const std.os.linux.sockaddr.in {
+    return @ptrCast(@alignCast(addr));
+}
+
+fn linuxSockaddrIn6(addr: *const std.os.linux.sockaddr) *const std.os.linux.sockaddr.in6 {
+    return @ptrCast(@alignCast(addr));
+}
+
+fn formatLinuxSockaddr(addr: *const std.os.linux.sockaddr, buf: []u8) []const u8 {
+    return switch (addr.family) {
+        std.posix.AF.INET => formatIpRaw(std.posix.AF.INET, &linuxSockaddrIn(addr).addr, buf),
+        std.posix.AF.INET6 => formatIpRaw(std.posix.AF.INET6, &linuxSockaddrIn6(addr).addr, buf),
+        else => "",
+    };
+}
+
+fn formatIpRaw(af: c_int, src: ?*const anyopaque, buf: []u8) []const u8 {
+    if (Environment.isWindows) {
+        if (libuv.uv_inet_ntop(af, src, buf.ptr, buf.len) != 0) return "";
+        return bun.sliceTo(buf.ptr, 0);
+    }
+
+    const out = inet_ntop(af, src, buf.ptr, @intCast(buf.len)) orelse return "";
+    return bun.sliceTo(out, 0);
+}
+
+extern fn inet_ntop(af: c_int, src: ?*const anyopaque, dst: [*]u8, size: c_int) ?[*:0]const u8;
 
 const string = []const u8;
 

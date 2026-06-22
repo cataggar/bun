@@ -225,7 +225,7 @@ fn sourceFromJS(global: *jsc.JSGlobalObject, value: jsc.JSValue, this_value: jsc
             }
             return .{ .owned = out[0..r.count] };
         }
-        return .{ .path = try bun.default_allocator.dupeZ(u8, s) };
+        return .{ .path = try bun.dupeZ(bun.default_allocator, u8, s) };
     }
     if (value.asArrayBuffer(global)) |ab| {
         // A resizable/growable buffer can shrink or reallocate underneath any
@@ -686,7 +686,7 @@ pub fn encodeForBody(this: *Image, global: *jsc.JSGlobalObject, this_value: jsc.
         // unreachable, but this path should throw, not abort, when it isn't.)
         if (blob.store) |store| {
             if (store.data == .file and store.data.file.pathlike == .path) {
-                const p = try bun.default_allocator.dupeZ(u8, store.data.file.pathlike.path.slice());
+                const p = try bun.dupeZ(bun.default_allocator, u8, store.data.file.pathlike.path.slice());
                 this.source.deinit();
                 this.source = .{ .path = p };
             } else return global.throw(refuse, .{});
@@ -922,7 +922,7 @@ pub const PipelineTask = struct {
                 },
             };
             defer file.close();
-            const st = switch (file.stat()) {
+            const st = switch (bun.sys.fstat(file.handle)) {
                 .result => |s| s,
                 .err => |e| {
                     this.result = .{ .io_err = e.withPath(p) };

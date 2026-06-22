@@ -919,7 +919,10 @@ pub fn openDirAbsoluteNotForDeletingOrRenaming(path_: []const u8) !std.Io.Dir {
 /// This wrapper exists to avoid the call to sliceTo(0)
 /// Zig's sliceTo(0) is scalar
 pub fn getenvZAnyCase(key: [:0]const u8) ?[]const u8 {
-    for (std.os.environ) |lineZ| {
+    // Zig 0.17 removed `std.os.environ`; use `std.c.environ` which is
+    // `[*:null]?[*:0]u8` (a null-terminated array of optional C strings).
+    var i: usize = 0;
+    while (std.c.environ[i]) |lineZ| : (i += 1) {
         const line = sliceTo(lineZ, 0);
         const key_end = strings.indexOfCharUsize(line, '=') orelse line.len;
         if (strings.eqlCaseInsensitiveASCII(line[0..key_end], key, true)) {
@@ -1113,12 +1116,176 @@ pub const StringHashMapContext = struct {
     };
 };
 
+/// Managed `ArrayHashMap` shim.
+///
+/// Zig 0.17 ("Writergate") removed the managed `std.ArrayHashMap` wrapper; only
+/// the unmanaged `std.ArrayHashMapUnmanaged` (`array_hash_map.Custom`) remains.
+/// Bun has 100+ call sites that rely on the managed API (a stored allocator +
+/// `.init(allocator)` + allocator-free `.put`/`.getOrPut`/`.deinit`). Rather than
+/// thread an allocator through every one of them, this thin wrapper restores the
+/// old managed surface on top of the unmanaged map.
+///
+/// `Context` is expected to be zero-sized (only `hash`/`eql` methods), as is the
+/// case for Bun's string contexts, so the allocator-and-context-free unmanaged
+/// methods are used directly.
+pub fn ArrayHashMapManaged(
+    comptime K: type,
+    comptime V: type,
+    comptime Context: type,
+    comptime store_hash: bool,
+) type {
+    return struct {
+        unmanaged: Unmanaged = .empty,
+        allocator: std.mem.Allocator,
+
+        const Self = @This();
+        pub const Unmanaged = std.ArrayHashMapUnmanaged(K, V, Context, store_hash);
+        pub const Entry = Unmanaged.Entry;
+        pub const KV = Unmanaged.KV;
+        pub const GetOrPutResult = Unmanaged.GetOrPutResult;
+        pub const Iterator = Unmanaged.Iterator;
+        pub const Index = Unmanaged.Index;
+
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return .{ .unmanaged = .empty, .allocator = allocator };
+        }
+
+        /// Compatibility shim for the removed managed `initContext`. `Context` is
+        /// zero-sized for Bun's string contexts, so `ctx` is unused.
+        pub fn initContext(allocator: std.mem.Allocator, ctx: Context) Self {
+            _ = ctx;
+            return .{ .unmanaged = .empty, .allocator = allocator };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.unmanaged.deinit(self.allocator);
+            self.* = undefined;
+        }
+
+        pub fn clearRetainingCapacity(self: *Self) void {
+            self.unmanaged.clearRetainingCapacity();
+        }
+        pub fn clearAndFree(self: *Self) void {
+            self.unmanaged.clearAndFree(self.allocator);
+        }
+        pub fn count(self: Self) usize {
+            return self.unmanaged.count();
+        }
+        pub fn capacity(self: Self) usize {
+            return self.unmanaged.capacity();
+        }
+        pub fn keys(self: Self) []K {
+            return self.unmanaged.keys();
+        }
+        pub fn values(self: Self) []V {
+            return self.unmanaged.values();
+        }
+        pub fn iterator(self: *const Self) Iterator {
+            return self.unmanaged.iterator();
+        }
+
+        pub fn put(self: *Self, key: K, value: V) !void {
+            return self.unmanaged.put(self.allocator, key, value);
+        }
+        pub fn putNoClobber(self: *Self, key: K, value: V) !void {
+            return self.unmanaged.putNoClobber(self.allocator, key, value);
+        }
+        pub fn fetchPut(self: *Self, key: K, value: V) !?KV {
+            return self.unmanaged.fetchPut(self.allocator, key, value);
+        }
+        pub fn getOrPut(self: *Self, key: K) !GetOrPutResult {
+            return self.unmanaged.getOrPut(self.allocator, key);
+        }
+        pub fn getOrPutValue(self: *Self, key: K, value: V) !GetOrPutResult {
+            return self.unmanaged.getOrPutValue(self.allocator, key, value);
+        }
+        pub fn ensureTotalCapacity(self: *Self, new_capacity: usize) !void {
+            return self.unmanaged.ensureTotalCapacity(self.allocator, new_capacity);
+        }
+        pub fn ensureUnusedCapacity(self: *Self, additional_capacity: usize) !void {
+            return self.unmanaged.ensureUnusedCapacity(self.allocator, additional_capacity);
+        }
+
+        pub fn putAssumeCapacity(self: *Self, key: K, value: V) void {
+            self.unmanaged.putAssumeCapacity(key, value);
+        }
+        pub fn putAssumeCapacityNoClobber(self: *Self, key: K, value: V) void {
+            self.unmanaged.putAssumeCapacityNoClobber(key, value);
+        }
+        pub fn getOrPutAssumeCapacity(self: *Self, key: K) GetOrPutResult {
+            return self.unmanaged.getOrPutAssumeCapacity(key);
+        }
+
+        pub fn get(self: Self, key: K) ?V {
+            return self.unmanaged.get(key);
+        }
+        pub fn getPtr(self: Self, key: K) ?*V {
+            return self.unmanaged.getPtr(key);
+        }
+        pub fn getEntry(self: Self, key: K) ?Entry {
+            return self.unmanaged.getEntry(key);
+        }
+        pub fn getKey(self: Self, key: K) ?K {
+            return self.unmanaged.getKey(key);
+        }
+        pub fn getKeyPtr(self: Self, key: K) ?*K {
+            return self.unmanaged.getKeyPtr(key);
+        }
+        pub fn getIndex(self: Self, key: K) ?usize {
+            return self.unmanaged.getIndex(key);
+        }
+        pub fn contains(self: Self, key: K) bool {
+            return self.unmanaged.contains(key);
+        }
+
+        pub fn swapRemove(self: *Self, key: K) bool {
+            return self.unmanaged.swapRemove(key);
+        }
+        pub fn fetchSwapRemove(self: *Self, key: K) ?KV {
+            return self.unmanaged.fetchSwapRemove(key);
+        }
+        pub fn orderedRemove(self: *Self, key: K) bool {
+            return self.unmanaged.orderedRemove(key);
+        }
+        pub fn fetchOrderedRemove(self: *Self, key: K) ?KV {
+            return self.unmanaged.fetchOrderedRemove(key);
+        }
+        pub fn swapRemoveAt(self: *Self, index: usize) void {
+            self.unmanaged.swapRemoveAt(index);
+        }
+        pub fn orderedRemoveAt(self: *Self, index: usize) void {
+            self.unmanaged.orderedRemoveAt(index);
+        }
+        pub fn shrinkRetainingCapacity(self: *Self, new_len: usize) void {
+            self.unmanaged.shrinkRetainingCapacity(new_len);
+        }
+        pub fn shrinkAndFree(self: *Self, new_len: usize) void {
+            self.unmanaged.shrinkAndFree(self.allocator, new_len);
+        }
+        pub fn pop(self: *Self) ?KV {
+            return self.unmanaged.pop();
+        }
+        pub fn reIndex(self: *Self) !void {
+            return self.unmanaged.reIndex(self.allocator);
+        }
+
+        pub fn clone(self: Self) !Self {
+            return .{ .unmanaged = try self.unmanaged.clone(self.allocator), .allocator = self.allocator };
+        }
+        pub fn move(self: *Self) Self {
+            const result = self.*;
+            self.unmanaged = .empty;
+            return result;
+        }
+    };
+}
+
 pub fn StringArrayHashMap(comptime Type: type) type {
-    return std.ArrayHashMap([]const u8, Type, StringArrayHashMapContext, true);
+    return ArrayHashMapManaged([]const u8, Type, StringArrayHashMapContext, true);
 }
 
 pub fn CaseInsensitiveASCIIStringArrayHashMap(comptime Type: type) type {
-    return std.ArrayHashMap([]const u8, Type, CaseInsensitiveASCIIStringContext, true);
+    return ArrayHashMapManaged([]const u8, Type, CaseInsensitiveASCIIStringContext, true);
 }
 
 pub fn CaseInsensitiveASCIIStringArrayHashMapUnmanaged(comptime Type: type) type {
@@ -1131,6 +1298,16 @@ pub fn StringArrayHashMapUnmanaged(comptime Type: type) type {
 
 pub fn StringHashMap(comptime Type: type) type {
     return std.HashMap([]const u8, Type, StringHashMapContext, std.hash_map.default_max_load_percentage);
+}
+
+/// Duplicate `slice` into a newly allocated, null-terminated slice.
+///
+/// Zig 0.17 ("Writergate") removed `std.mem.Allocator.dupeZ`. This restores it as
+/// a free function: `allocator.dupeZ(u8, s)` becomes `bun.dupeZ(allocator, u8, s)`.
+pub fn dupeZ(allocator: std.mem.Allocator, comptime T: type, slice: []const T) std.mem.Allocator.Error![:0]T {
+    const new_buf = try allocator.allocSentinel(T, slice.len, 0);
+    @memcpy(new_buf, slice);
+    return new_buf;
 }
 
 pub fn StringHashMapUnmanaged(comptime Type: type) type {
@@ -1256,15 +1433,19 @@ fn getFdPathViaCWD(fd: std.posix.fd_t, buf: *bun.PathBuffer) ![]u8 {
     }
     try std.posix.fchdir(fd);
     needs_chdir = true;
-    return std.posix.getcwd(buf);
+    return getcwd(buf);
 }
 
-pub const getcwd = std.posix.getcwd;
+/// Zig 0.17 removed `std.posix.getcwd`; route through `bun.sys`.
+pub fn getcwd(buf: *bun.PathBuffer) ![]u8 {
+    const slice = try sys.getcwd(buf).unwrap();
+    return buf[0..slice.len];
+}
 
 pub fn getcwdAlloc(allocator: std.mem.Allocator) ![:0]u8 {
     var temp: PathBuffer = undefined;
     const temp_slice = try getcwd(&temp);
-    return allocator.dupeZ(u8, temp_slice);
+    return dupeZ(allocator, u8, temp_slice);
 }
 
 /// TODO: move to bun.sys and add a method onto FD
@@ -1556,13 +1737,16 @@ pub noinline fn maybeHandlePanicDuringProcessReload() void {
             std.atomic.spinLoopHint();
 
             if (comptime Environment.isPosix) {
-                std.posix.nanosleep(1, 0);
+                // Zig 0.17 removed `std.posix.nanosleep`; call libc directly.
+                var req: std.c.timespec = .{ .sec = 1, .nsec = 0 };
+                _ = nanosleep(&req, null);
             }
         }
     }
 }
 
 extern "c" fn on_before_reload_process_linux() void;
+extern "c" fn nanosleep(rqtp: *const std.c.timespec, rmtp: ?*std.c.timespec) c_int;
 
 /// Reload Bun's process. This clones envp, argv, and gets the current
 /// executable path.
@@ -2294,7 +2478,7 @@ pub inline fn serializableInto(comptime T: type, init: anytype) T {
 /// Like std.Io.Dir.makePath except instead of infinite looping on dangling
 /// symlink, it deletes the symlink and tries again.
 pub fn makePath(dir: std.Io.Dir, sub_path: []const u8) !void {
-    var it = try std.fs.path.componentIterator(sub_path);
+    var it = std.fs.path.componentIterator(sub_path);
     var component = it.last() orelse return;
     while (true) {
         dir.makeDir(component.path) catch |err| switch (err) {
@@ -3024,11 +3208,11 @@ pub fn runtimeEmbedFile(
         var once = bun.once(load);
 
         fn load() [:0]const u8 {
-            return std.fs.cwd().readFileAllocOptions(
-                default_allocator,
+            return std.Io.Dir.cwd().readFileAllocOptions(
+                blockingIo(),
                 abs_path,
-                std.math.maxInt(usize),
-                null,
+                default_allocator,
+                .unlimited,
                 .fromByteUnits(@alignOf(u8)),
                 '\x00',
             ) catch |e| {
@@ -3094,9 +3278,30 @@ pub fn selfExePath() ![:0]u8 {
         var lock: Mutex = .{};
 
         pub fn load() ![:0]u8 {
-            const init = try std.fs.selfExePath(&value);
-            @This().len = init.len;
-            value[@This().len] = 0;
+            // Zig 0.17 ("Writergate") removed `std.fs.selfExePath`. Reimplement
+            // per-platform into `value`.
+            const result: [:0]u8 = if (comptime Environment.isLinux) blk: {
+                break :blk switch (sys.readlink("/proc/self/exe", &value)) {
+                    .result => |p| p,
+                    .err => return error.SelfExePathFailed,
+                };
+            } else if (comptime Environment.isMac) blk: {
+                var size: u32 = @intCast(value.len);
+                if (std.c._NSGetExecutablePath(&value, &size) != 0) return error.SelfExePathFailed;
+                const exe_path = sliceTo(@as([*:0]u8, @ptrCast(&value)), 0);
+                break :blk value[0..exe_path.len :0];
+            } else blk: {
+                // Windows: GetModuleFileNameW(null) → WTF-16 → UTF-8.
+                var wide_buf: [(4096 + 1)]u16 = undefined;
+                const wide = windows.getModuleNameW(
+                    windows.GetModuleHandleW(null) orelse return error.SelfExePathFailed,
+                    &wide_buf,
+                ) orelse return error.SelfExePathFailed;
+                const written = strings.convertUTF16ToUTF8InBuffer(&value, wide) catch return error.SelfExePathFailed;
+                value[written.len] = 0;
+                break :blk value[0..written.len :0];
+            };
+            @This().len = result.len;
             set = true;
             return value[0..@This().len :0];
         }
@@ -3798,7 +4003,7 @@ pub inline fn writeAnyToHasher(hasher: anytype, thing: anytype) void {
 
 pub const perf = @import("./perf/perf.zig");
 pub inline fn isComptimeKnown(x: anytype) bool {
-    return comptime @typeInfo(@TypeOf(.{x})).@"struct".fields[0].is_comptime;
+    return comptime @typeInfo(@TypeOf(.{x})).@"struct".field_attrs[0].@"comptime";
 }
 
 pub inline fn itemOrNull(comptime T: type, slice: []const T, index: usize) ?T {

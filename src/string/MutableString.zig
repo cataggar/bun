@@ -11,11 +11,135 @@ pub fn clone(self: *MutableString) Allocator.Error!MutableString {
     return MutableString.initCopy(self.allocator, self.list.items);
 }
 
-pub const Writer = std.Io.GenericWriter(*@This(), Allocator.Error, MutableString.writeAll);
-pub fn writer(self: *MutableString) Writer {
-    return Writer{
-        .context = self,
+pub const Writer = struct {
+    context: *MutableString,
+    interface: std.Io.Writer,
+
+    pub const Error = Allocator.Error;
+
+    pub fn init(context: *MutableString, buffer: []u8) Writer {
+        return .{
+            .context = context,
+            .interface = .{
+                .vtable = &.{
+                    .drain = drain,
+                    .flush = std.Io.Writer.defaultFlush,
+                    .rebase = std.Io.Writer.failingRebase,
+                },
+                .buffer = buffer,
+            },
+        };
+    }
+
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const this: *Writer = @fieldParentPtr("interface", w);
+        const buffered = w.buffered();
+        this.context.append(buffered) catch return error.WriteFailed;
+        w.end = 0;
+
+        var written: usize = 0;
+        for (data[0 .. data.len - 1]) |bytes| {
+            this.context.append(bytes) catch return error.WriteFailed;
+            written += bytes.len;
+        }
+
+        const pattern = data[data.len - 1];
+        for (0..splat) |_| {
+            this.context.append(pattern) catch return error.WriteFailed;
+            written += pattern.len;
+        }
+
+        return written;
+    }
+
+    fn mapError(err: std.Io.Writer.Error) Error {
+        return switch (err) {
+            error.WriteFailed => error.OutOfMemory,
+        };
+    }
+
+    fn bufferFrom(buffer: anytype) []u8 {
+        return switch (@typeInfo(@TypeOf(buffer))) {
+            .pointer => |ptr| switch (ptr.size) {
+                .one => @constCast(buffer)[0..],
+                .slice => @constCast(buffer),
+                else => @compileError("expected a buffer slice or pointer to an array"),
+            },
+            else => @compileError("expected a buffer slice or pointer to an array"),
+        };
+    }
+
+    pub const Adapter = struct {
+        context: *MutableString,
+        new_interface: std.Io.Writer,
+
+        pub fn init(context: *MutableString, buffer: []u8) Adapter {
+            return .{
+                .context = context,
+                .new_interface = .{
+                    .vtable = &.{
+                        .drain = drainAdapter,
+                        .flush = std.Io.Writer.defaultFlush,
+                        .rebase = std.Io.Writer.failingRebase,
+                    },
+                    .buffer = buffer,
+                },
+            };
+        }
+
+        fn drainAdapter(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+            const this: *Adapter = @fieldParentPtr("new_interface", w);
+            const buffered = w.buffered();
+            this.context.append(buffered) catch return error.WriteFailed;
+            w.end = 0;
+
+            var written: usize = 0;
+            for (data[0 .. data.len - 1]) |bytes| {
+                this.context.append(bytes) catch return error.WriteFailed;
+                written += bytes.len;
+            }
+
+            const pattern = data[data.len - 1];
+            for (0..splat) |_| {
+                this.context.append(pattern) catch return error.WriteFailed;
+                written += pattern.len;
+            }
+
+            return written;
+        }
     };
+
+    pub fn adaptToNewApi(self: Writer, buffer: anytype) Adapter {
+        return Adapter.init(self.context, bufferFrom(buffer));
+    }
+
+    pub fn write(self: Writer, bytes: []const u8) Error!usize {
+        try self.context.append(bytes);
+        return bytes.len;
+    }
+
+    pub fn writeAll(self: Writer, bytes: []const u8) Error!void {
+        try self.context.append(bytes);
+    }
+
+    pub fn writeByte(self: Writer, byte: u8) Error!void {
+        try self.context.appendChar(byte);
+    }
+
+    pub fn print(self: Writer, comptime fmt: []const u8, args: anytype) Error!void {
+        var this = self;
+        this.interface.print(fmt, args) catch |err| return mapError(err);
+        this.interface.flush() catch |err| return mapError(err);
+    }
+
+    pub fn writeInt(self: Writer, comptime T: type, value: T, endian: std.builtin.Endian) Error!void {
+        var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+        std.mem.writeInt(std.math.ByteAlignedInt(@TypeOf(value)), &bytes, value, endian);
+        try self.writeAll(&bytes);
+    }
+};
+pub fn writer(self: *MutableString) Writer {
+    return Writer.init(self, &.{});
 }
 
 pub fn isEmpty(this: *const MutableString) bool {
@@ -319,7 +443,76 @@ pub const BufferedWriter = struct {
 
     const max = 2048;
 
-    pub const Writer = std.Io.GenericWriter(*BufferedWriter, Allocator.Error, BufferedWriter.writeAll);
+    pub const Writer = struct {
+        context: *BufferedWriter,
+        interface: std.Io.Writer,
+
+        pub const Error = Allocator.Error;
+
+        pub fn init(context: *BufferedWriter, buffer: []u8) @This() {
+            return .{
+                .context = context,
+                .interface = .{
+                    .vtable = &.{
+                        .drain = drain,
+                        .flush = std.Io.Writer.defaultFlush,
+                        .rebase = std.Io.Writer.failingRebase,
+                    },
+                    .buffer = buffer,
+                },
+            };
+        }
+
+        fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+            const this: *@This() = @fieldParentPtr("interface", w);
+            _ = this.context.writeAll(w.buffered()) catch return error.WriteFailed;
+            w.end = 0;
+
+            var written: usize = 0;
+            for (data[0 .. data.len - 1]) |bytes| {
+                _ = this.context.writeAll(bytes) catch return error.WriteFailed;
+                written += bytes.len;
+            }
+
+            const pattern = data[data.len - 1];
+            for (0..splat) |_| {
+                _ = this.context.writeAll(pattern) catch return error.WriteFailed;
+                written += pattern.len;
+            }
+
+            return written;
+        }
+
+        fn mapError(err: std.Io.Writer.Error) Error {
+            return switch (err) {
+                error.WriteFailed => error.OutOfMemory,
+            };
+        }
+
+        pub fn write(self: @This(), bytes: []const u8) Error!usize {
+            return self.context.writeAll(bytes);
+        }
+
+        pub fn writeAll(self: @This(), bytes: []const u8) Error!void {
+            _ = try self.context.writeAll(bytes);
+        }
+
+        pub fn writeByte(self: @This(), byte: u8) Error!void {
+            _ = try self.context.writeAll(&.{byte});
+        }
+
+        pub fn print(self: @This(), comptime fmt: []const u8, args: anytype) Error!void {
+            var this = self;
+            this.interface.print(fmt, args) catch |err| return mapError(err);
+            this.interface.flush() catch |err| return mapError(err);
+        }
+
+        pub fn writeInt(self: @This(), comptime T: type, value: T, endian: std.builtin.Endian) Error!void {
+            var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+            std.mem.writeInt(std.math.ByteAlignedInt(@TypeOf(value)), &bytes, value, endian);
+            try self.writeAll(&bytes);
+        }
+    };
 
     inline fn remain(this: *BufferedWriter) []u8 {
         return this.buffer[this.pos..];
@@ -451,7 +644,7 @@ pub const BufferedWriter = struct {
     }
 
     pub fn writer(this: *BufferedWriter) BufferedWriter.Writer {
-        return BufferedWriter.Writer{ .context = this };
+        return BufferedWriter.Writer.init(this, &.{});
     }
 };
 

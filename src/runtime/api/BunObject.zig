@@ -766,7 +766,7 @@ pub fn sleepSync(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) b
         return globalObject.throwInvalidArguments("argument to sleepSync must not be negative, got {d}", .{milliseconds});
     }
 
-    std.Thread.sleep(@as(u64, @intCast(milliseconds)) * std.time.ns_per_ms);
+    std.Io.sleep(bun.blockingIo(), .fromMilliseconds(@intCast(milliseconds)), .awake) catch {};
     return .js_undefined;
 }
 
@@ -852,14 +852,14 @@ fn doResolveWithArgs(ctx: *jsc.JSGlobalObject, specifier: bun.String, from: bun.
     if (!query_string.isEmpty()) {
         var stack = bun.stackFallback(1024, ctx.allocator());
         const allocator = stack.get();
-        var arraylist = std.array_list.Managed(u8).initCapacity(allocator, 1024) catch unreachable;
+        var arraylist = std.Io.Writer.Allocating.initCapacity(allocator, 1024) catch unreachable;
         defer arraylist.deinit();
-        try arraylist.writer().print("{f}{f}", .{
+        try arraylist.writer.print("{f}{f}", .{
             errorable.result.value,
             query_string,
         });
 
-        return ZigString.initUTF8(arraylist.items).toJS(ctx);
+        return ZigString.initUTF8(arraylist.written()).toJS(ctx);
     }
 
     return errorable.result.value.toJS(ctx);

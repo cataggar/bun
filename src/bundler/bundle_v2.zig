@@ -131,7 +131,7 @@ pub const BundleV2 = struct {
 
     /// See the comment in `Chunk.OutputPiece`
     unique_key: u64 = 0,
-    dynamic_import_entry_points: std.AutoArrayHashMap(Index.Int, void) = undefined,
+    dynamic_import_entry_points: std.AutoArrayHashMapUnmanaged(Index.Int, void) = undefined,
     has_on_parse_plugins: bool = false,
 
     finalizers: std.ArrayListUnmanaged(CacheEntry.ExternalFreeFunction) = .empty,
@@ -284,7 +284,8 @@ pub const BundleV2 = struct {
         all_urls_for_css: []const []const u8,
         redirects: []u32,
         redirect_map: PathToSourceIndexMap,
-        dynamic_import_entry_points: *std.AutoArrayHashMap(Index.Int, void),
+        dynamic_import_entry_points: *std.AutoArrayHashMapUnmanaged(Index.Int, void),
+        allocator: std.mem.Allocator,
         /// Files which are Server Component Boundaries
         scb_bitset: ?bun.bit_set.DynamicBitSetUnmanaged,
         scb_list: ServerComponentBoundary.List.Slice,
@@ -306,7 +307,7 @@ pub const BundleV2 = struct {
             if (v.visited.isSet(source_index.get())) {
                 if (comptime check_dynamic_imports) {
                     if (was_dynamic_import) {
-                        v.dynamic_import_entry_points.put(source_index.get(), {}) catch unreachable;
+                        v.dynamic_import_entry_points.put(v.allocator, source_index.get(), {}) catch unreachable;
                     }
                 }
                 return;
@@ -375,7 +376,7 @@ pub const BundleV2 = struct {
             v.reachable.append(source_index) catch unreachable;
             if (comptime check_dynamic_imports) {
                 if (was_dynamic_import) {
-                    v.dynamic_import_entry_points.put(source_index.get(), {}) catch unreachable;
+                    v.dynamic_import_entry_points.put(v.allocator, source_index.get(), {}) catch unreachable;
                 }
             }
         }
@@ -402,7 +403,7 @@ pub const BundleV2 = struct {
             additional_files_imported_by_css_and_inlined.deinit(stack_alloc);
         }
 
-        this.dynamic_import_entry_points = std.AutoArrayHashMap(Index.Int, void).init(this.allocator());
+        this.dynamic_import_entry_points = .empty;
 
         const all_urls_for_css = this.graph.ast.items(.url_for_css);
 
@@ -415,6 +416,7 @@ pub const BundleV2 = struct {
             .all_urls_for_css = all_urls_for_css,
             .redirect_map = this.pathToSourceIndexMap(this.transpiler.options.target).*,
             .dynamic_import_entry_points = &this.dynamic_import_entry_points,
+            .allocator = this.allocator(),
             .scb_bitset = scb_bitset,
             .scb_list = if (scb_bitset != null)
                 this.graph.server_component_boundaries.slice()
@@ -2240,7 +2242,7 @@ pub const BundleV2 = struct {
                 for (this.graph.pool.workers_assignments.values()) |worker| {
                     worker.deinitSoon();
                 }
-                this.graph.pool.workers_assignments.deinit();
+                this.graph.pool.workers_assignments.deinit(bun.default_allocator);
             }
 
             this.graph.pool.worker_pool.wakeForIdleEvents();
@@ -2447,7 +2449,7 @@ pub const BundleV2 = struct {
 
         this.graph.heap.helpCatchMemoryIssues();
 
-        this.dynamic_import_entry_points = .init(this.allocator());
+        this.dynamic_import_entry_points = .empty;
         var html_files: std.AutoArrayHashMapUnmanaged(Index, void) = .{};
 
         // Separate non-failing files into two lists: JS and CSS

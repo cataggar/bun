@@ -573,22 +573,28 @@ pub const AST = struct {
                 return false;
             }
 
-            const SINGLE_ARG_OPS: []const std.builtin.Type.EnumField = brk: {
-                const fields: []const std.builtin.Type.EnumField = std.meta.fields(AST.CondExpr.Op);
+            const OpField = struct {
+                name: [:0]const u8,
+                value: @typeInfo(AST.CondExpr.Op).@"enum".tag_type,
+            };
+
+            const SINGLE_ARG_OPS: []const OpField = brk: {
+                const field_names = std.meta.fieldNames(AST.CondExpr.Op);
+                const field_values = @typeInfo(AST.CondExpr.Op).@"enum".field_values;
                 const count = count: {
                     var count: usize = 0;
-                    for (fields) |f| {
-                        if (f.name[0] == '-' and f.name.len == 2) {
+                    for (field_names) |name| {
+                        if (name[0] == '-' and name.len == 2) {
                             count += 1;
                         }
                     }
                     break :count count;
                 };
-                var ret: [count]std.builtin.Type.EnumField = undefined;
+                var ret: [count]OpField = undefined;
                 var len: usize = 0;
-                for (fields) |f| {
-                    if (f.name[0] == '-' and f.name.len == 2) {
-                        ret[len] = f;
+                for (field_names, field_values) |name, value| {
+                    if (name[0] == '-' and name.len == 2) {
+                        ret[len] = .{ .name = name, .value = value };
                         len += 1;
                     }
                 }
@@ -596,22 +602,23 @@ pub const AST = struct {
                 break :brk &final;
             };
 
-            const BINARY_OPS: []const std.builtin.Type.EnumField = brk: {
-                const fields: []const std.builtin.Type.EnumField = std.meta.fields(AST.CondExpr.Op);
+            const BINARY_OPS: []const OpField = brk: {
+                const field_names = std.meta.fieldNames(AST.CondExpr.Op);
+                const field_values = @typeInfo(AST.CondExpr.Op).@"enum".field_values;
                 const count = count: {
                     var count: usize = 0;
-                    for (fields) |f| {
-                        if (!(f.name[0] == '-' and f.name.len == 2)) {
+                    for (field_names) |name| {
+                        if (!(name[0] == '-' and name.len == 2)) {
                             count += 1;
                         }
                     }
                     break :count count;
                 };
-                var ret: [count]std.builtin.Type.EnumField = undefined;
+                var ret: [count]OpField = undefined;
                 var len: usize = 0;
-                for (fields) |f| {
-                    if (!(f.name[0] == '-' and f.name.len == 2)) {
-                        ret[len] = f;
+                for (field_names, field_values) |name, value| {
+                    if (!(name[0] == '-' and name.len == 2)) {
+                        ret[len] = .{ .name = name, .value = value };
                         len += 1;
                     }
                 }

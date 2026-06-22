@@ -97,7 +97,7 @@ pub const FD = packed struct(backing_int) {
     }
 
     pub fn fromStdDir(dir: std.Io.Dir) FD {
-        return .fromNative(dir.fd);
+        return .fromNative(dir.handle);
     }
 
     pub fn stdFile(fd: FD) std.Io.File {
@@ -105,7 +105,7 @@ pub const FD = packed struct(backing_int) {
     }
 
     pub fn stdDir(fd: FD) std.Io.Dir {
-        return .{ .fd = fd.native() };
+        return .{ .handle = fd.native() };
     }
 
     /// Perform different logic for each kind of windows file descriptor

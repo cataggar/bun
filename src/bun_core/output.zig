@@ -704,7 +704,7 @@ pub fn printStartEndStdout(start: i128, end: i128) void {
     printElapsedStdout(@as(f64, @floatFromInt(elapsed)));
 }
 
-pub fn printTimer(timer: *SystemTimer) void {
+pub fn printTimer(timer: anytype) void {
     if (comptime Environment.isWasm) return;
     const elapsed = @divTrunc(timer.read(), @as(u64, std.time.ns_per_ms));
     printElapsed(@as(f64, @floatFromInt(elapsed)));
@@ -1153,12 +1153,12 @@ pub inline fn printError(comptime fmt: string, args: anytype) void {
 }
 
 pub const DebugTimer = struct {
-    timer: bun.DebugOnly(std.time.Timer) = undefined,
+    timer: bun.DebugOnly(Timer) = undefined,
 
     pub inline fn start() DebugTimer {
         if (comptime Environment.isDebug) {
             return DebugTimer{
-                .timer = std.time.Timer.start() catch unreachable,
+                .timer = Timer.start() catch unreachable,
             };
         } else {
             return .{};
@@ -1293,7 +1293,7 @@ pub fn initScopedDebugWriterAtStartup() void {
     if (bun.env_var.BUN_DEBUG.get()) |path| {
         if (path.len > 0 and !strings.eql(path, "0") and !strings.eql(path, "false")) {
             if (std.fs.path.dirname(path)) |dir| {
-                std.fs.cwd().makePath(dir) catch {};
+                bun.makePath(std.Io.Dir.cwd(), dir) catch {};
             }
 
             // do not use libuv through this code path, since it might not be initialized yet.
@@ -1303,8 +1303,8 @@ pub fn initScopedDebugWriterAtStartup() void {
             const path_fmt = std.mem.replaceOwned(u8, bun.default_allocator, path, "{pid}", pid) catch @panic("failed to allocate path");
             defer bun.default_allocator.free(path_fmt);
 
-            const fd: bun.FD = .fromStdFile(std.fs.cwd().createFile(path_fmt, .{
-                .mode = if (Environment.isPosix) 0o644 else 0,
+            const fd: bun.FD = .fromStdFile(std.Io.Dir.cwd().createFile(bun.blockingIo(), path_fmt, .{
+                .permissions = @enumFromInt(if (Environment.isPosix) 0o644 else 0),
             }) catch |open_err| {
                 panic("Failed to open file for debug output: {s} ({s})", .{ @errorName(open_err), path });
             });
@@ -1369,7 +1369,6 @@ pub const Synchronized = struct {
 const Environment = @import("./env.zig");
 const root = @import("root");
 const std = @import("std");
-const SystemTimer = @import("../perf/system_timer.zig").Timer;
 
 const bun = @import("bun");
 const ComptimeStringMap = bun.ComptimeStringMap;
@@ -1378,3 +1377,15 @@ const c = bun.c;
 const strings = bun.strings;
 const use_mimalloc = bun.use_mimalloc;
 const File = bun.sys.File;
+
+const Timer = struct {
+    start_time: u64,
+
+    pub fn start() !Timer {
+        return .{ .start_time = bun.hw_timer.nowNs() };
+    }
+
+    pub fn read(this: *const Timer) u64 {
+        return bun.hw_timer.nowNs() -| this.start_time;
+    }
+};

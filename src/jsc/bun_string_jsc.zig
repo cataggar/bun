@@ -81,7 +81,7 @@ pub fn createFormatForJS(globalObject: *jsc.JSGlobalObject, comptime fmt: [:0]co
     jsc.markBinding(@src());
     var builder = std.array_list.Managed(u8).init(bun.default_allocator);
     defer builder.deinit();
-    bun.handleOom(builder.writer().print(fmt, args));
+    bun.handleOom(builder.print(fmt, args));
     return bun.cpp.BunString__createUTF8ForJS(globalObject, builder.items.ptr, builder.items.len);
 }
 

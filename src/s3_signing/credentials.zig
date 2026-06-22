@@ -112,7 +112,8 @@ pub const S3Credentials = struct {
         // Date.now() ISO string via JS removed; uses libc gmtime_r
 
         // Create UTC timestamp
-        const secs: u64 = @intCast(@divFloor(std.time.milliTimestamp(), 1000));
+        const millis = std.Io.Clock.real.now(bun.blockingIo()).toMilliseconds();
+        const secs: u64 = @intCast(@divFloor(@max(millis, @as(i64, 0)), 1000));
         const utc_seconds = std.time.epoch.EpochSeconds{ .secs = secs };
         const utc_day = utc_seconds.getEpochDay();
         const year_and_day = utc_day.calculateYearDay();

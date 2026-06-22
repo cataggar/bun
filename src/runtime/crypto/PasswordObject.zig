@@ -235,7 +235,7 @@ pub const PasswordObject = struct {
                     .allocator = allocator,
                     .encoding = .crypt,
                 };
-                const out_bytes = try pwhash.bcrypt.strHash(password_to_use, hash_options, outbuf_slice);
+                const out_bytes = try pwhash.bcrypt.strHash(password_to_use, hash_options, outbuf_slice, bun.blockingIo());
                 return try allocator.dupe(u8, out_bytes);
             },
         }

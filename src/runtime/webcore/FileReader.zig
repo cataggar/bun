@@ -97,10 +97,10 @@ pub const Lazy = union(enum) {
 
         if (comptime Environment.isPosix) {
             if ((file.is_atty orelse false) or
-                (fd.stdioTag() != null and std.posix.isatty(fd.cast())) or
+                (fd.stdioTag() != null and isTty(fd, is_nonblocking)) or
                 (file.pathlike == .fd and
                     file.pathlike.fd.stdioTag() != null and
-                    std.posix.isatty(file.pathlike.fd.cast())))
+                    isTty(file.pathlike.fd, false)))
             {
                 // var termios = std.mem.zeroes(std.posix.termios);
                 // _ = std.c.tcgetattr(fd.cast(), &termios);
@@ -654,6 +654,14 @@ pub fn setFlowing(this: *FileReader, flag: bool) void {
 pub fn memoryCost(this: *const FileReader) usize {
     // ReadableStreamSource covers @sizeOf(FileReader)
     return this.reader.memoryCost() + this.buffered.capacity;
+}
+
+fn isTty(fd: bun.FD, nonblocking: bool) bool {
+    const file = std.Io.File{
+        .handle = fd.cast(),
+        .flags = .{ .nonblocking = nonblocking },
+    };
+    return file.isTty(bun.blockingIo()) catch false;
 }
 
 pub const Source = ReadableStream.NewSource(

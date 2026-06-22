@@ -191,7 +191,7 @@ pub fn onStructuredCloneSerialize(this: *@This(), globalThis: *jsc.JSGlobalObjec
     this.mutex.lock();
     defer this.mutex.unlock();
     this.ref();
-    const writer = StructuredCloneWriter.Writer{ .context = .{ .ctx = ctx, .impl = writeBytes } };
+    const writer = StructuredCloneWriter{ .ctx = ctx, .impl = writeBytes };
     try writer.writeInt(usize, @intFromPtr(this), .little);
 }
 
@@ -199,12 +199,16 @@ const StructuredCloneWriter = struct {
     ctx: *anyopaque,
     impl: *const fn (*anyopaque, ptr: [*]const u8, len: u32) callconv(jsc.conv) void,
 
-    pub const Writer = std.Io.GenericWriter(@This(), Error, write);
     pub const Error = error{};
 
-    fn write(this: StructuredCloneWriter, bytes: []const u8) Error!usize {
+    fn writeAll(this: StructuredCloneWriter, bytes: []const u8) Error!void {
         this.impl(this.ctx, bytes.ptr, @as(u32, @truncate(bytes.len)));
-        return bytes.len;
+    }
+
+    fn writeInt(this: StructuredCloneWriter, comptime T: type, value: T, endian: std.builtin.Endian) Error!void {
+        var bytes: [@sizeOf(T)]u8 = undefined;
+        std.mem.writeInt(T, &bytes, value, endian);
+        try this.writeAll(&bytes);
     }
 };
 
@@ -212,10 +216,10 @@ pub fn onStructuredCloneDeserialize(globalThis: *jsc.JSGlobalObject, ptr: *[*]u8
     const total_length: usize = @intFromPtr(end) - @intFromPtr(ptr.*);
     var reader = std.Io.Reader.fixed(ptr.*[0..total_length]);
 
-    const int = reader.readInt(usize, .little) catch return globalThis.throw("BlockList.onStructuredCloneDeserialize failed", .{});
+    const int = reader.takeInt(usize, .little) catch return globalThis.throw("BlockList.onStructuredCloneDeserialize failed", .{});
 
     // Advance the pointer by the number of bytes consumed
-    ptr.* = ptr.* + reader.end;
+    ptr.* = ptr.* + reader.seek;
 
     const this: *@This() = @ptrFromInt(int);
     // A single SerializedScriptValue can be deserialized multiple times

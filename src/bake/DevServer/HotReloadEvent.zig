@@ -17,7 +17,7 @@ dirs: bun.StringArrayHashMapUnmanaged(void),
 /// Same purpose as `files` but keys do not have an owner.
 extra_files: std.ArrayListUnmanaged(u8),
 /// Initialized by the WatcherAtomics.watcherAcquireEvent
-timer: std.time.Timer,
+timer: Timer,
 /// This event may be referenced by either DevServer or Watcher thread.
 /// 1 if referenced, 0 if unreferenced; see WatcherAtomics
 contention_indicator: std.atomic.Value(u32),
@@ -251,3 +251,14 @@ const debug = DevServer.debug;
 const std = @import("std");
 const ArrayListUnmanaged = std.ArrayListUnmanaged;
 const Allocator = std.mem.Allocator;
+const Timer = struct {
+    started_at: std.Io.Clock.Timestamp,
+
+    pub fn start() !Timer {
+        return .{ .started_at = std.Io.Clock.Timestamp.now(bun.blockingIo(), .awake) };
+    }
+
+    pub fn read(this: *Timer) u64 {
+        return @intCast(@max(@as(i96, 0), this.started_at.untilNow(bun.blockingIo()).raw.nanoseconds));
+    }
+};

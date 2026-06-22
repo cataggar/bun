@@ -166,6 +166,7 @@ pub const ValkeyClient = struct {
     // Buffer management
     write_buffer: bun.OffsetByteList = .{},
     read_buffer: bun.OffsetByteList = .{},
+    socket_writer: ValkeySocketWriter = .{},
 
     /// In-flight commands, after the data has been written to the network socket
     in_flight: Command.PromisePair.Queue,
@@ -1158,8 +1159,10 @@ pub const ValkeyClient = struct {
     }
 
     /// Get a writer for the connected socket
-    pub fn writer(this: *ValkeyClient) std.Io.GenericWriter(*ValkeyClient, protocol.RedisError, write) {
-        return .{ .context = this };
+    pub fn writer(this: *ValkeyClient) *std.Io.Writer {
+        this.socket_writer.client = this;
+        this.socket_writer.writer.end = 0;
+        return &this.socket_writer.writer;
     }
 
     /// Write data to the socket buffer
@@ -1167,6 +1170,34 @@ pub const ValkeyClient = struct {
         try this.write_buffer.write(this.allocator, data);
         return data.len;
     }
+
+    const ValkeySocketWriter = struct {
+        client: *ValkeyClient = undefined,
+        writer: std.Io.Writer = .{
+            .buffer = &.{},
+            .vtable = &vtable,
+        },
+
+        const vtable: std.Io.Writer.VTable = .{
+            .drain = drainSocketWriter,
+            .flush = std.Io.Writer.noopFlush,
+        };
+
+        fn drainSocketWriter(io_writer: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+            const this: *ValkeySocketWriter = @fieldParentPtr("writer", io_writer);
+            var written: usize = 0;
+            for (data[0 .. data.len - 1]) |bytes| {
+                _ = this.client.write(bytes) catch return error.WriteFailed;
+                written += bytes.len;
+            }
+            const pattern = data[data.len - 1];
+            for (0..splat) |_| {
+                _ = this.client.write(pattern) catch return error.WriteFailed;
+                written += pattern.len;
+            }
+            return written;
+        }
+    };
 
     /// Increment reference count
     pub fn ref(this: *ValkeyClient) void {

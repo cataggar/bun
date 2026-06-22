@@ -91,10 +91,10 @@ fn findChrome(alloc: std.mem.Allocator, explicitPath: ?[*:0]const u8) !?[:0]cons
     // backend.path is per-Bun.WebView call (first wins — later views reuse
     // the already-spawned Chrome); env var is per-process.
     if (explicitPath) |p| {
-        return try alloc.dupeZ(u8, std.mem.span(p));
+        return try bun.dupeZ(alloc, u8, std.mem.span(p));
     }
     if (std.process.getEnvVarOwned(alloc, "BUN_CHROME_PATH")) |p| {
-        return try alloc.dupeZ(u8, p);
+        return try bun.dupeZ(alloc, u8, p);
     } else |_| {}
 
     const buf = bun.path_buffer_pool.get();
@@ -114,7 +114,7 @@ fn findChrome(alloc: std.mem.Allocator, explicitPath: ?[*:0]const u8) !?[:0]cons
     };
     for (names) |n| {
         if (bun.which(buf, path, "", n)) |found| {
-            return try alloc.dupeZ(u8, found);
+            return try bun.dupeZ(alloc, u8, found);
         }
     }
 
@@ -138,11 +138,11 @@ fn findChrome(alloc: std.mem.Allocator, explicitPath: ?[*:0]const u8) !?[:0]cons
         for (bundles) |b| {
             const sys_parts = [_][]const u8{ "/Applications", b };
             const sys = bun.path.joinStringBufZ(buf, &sys_parts, .auto);
-            if (bun.sys.isExecutableFilePath(sys)) return try alloc.dupeZ(u8, sys);
+            if (bun.sys.isExecutableFilePath(sys)) return try bun.dupeZ(alloc, u8, sys);
             if (home.len > 0) {
                 const user_parts = [_][]const u8{ home, "Applications", b };
                 const user = bun.path.joinStringBufZ(buf, &user_parts, .auto);
-                if (bun.sys.isExecutableFilePath(user)) return try alloc.dupeZ(u8, user);
+                if (bun.sys.isExecutableFilePath(user)) return try bun.dupeZ(alloc, u8, user);
             }
         }
     } else if (comptime bun.Environment.isLinux) {
@@ -157,7 +157,7 @@ fn findChrome(alloc: std.mem.Allocator, explicitPath: ?[*:0]const u8) !?[:0]cons
             "/usr/bin/microsoft-edge",
         };
         for (absolute) |c| {
-            if (bun.sys.isExecutableFilePath(c)) return try alloc.dupeZ(u8, c);
+            if (bun.sys.isExecutableFilePath(c)) return try bun.dupeZ(alloc, u8, c);
         }
     }
 
@@ -223,13 +223,13 @@ fn findPlaywrightShell(alloc: std.mem.Allocator) ?[:0]const u8 {
     defer bun.path_buffer_pool.put(bin_buf);
     const bin_parts = [_][]const u8{ cache_dir, best_name[0..best_len], subdir_cft };
     const bin = bun.path.joinStringBufZ(bin_buf, &bin_parts, .auto);
-    if (bun.sys.isExecutableFilePath(bin)) return alloc.dupeZ(u8, bin) catch return null;
+    if (bun.sys.isExecutableFilePath(bin)) return bun.dupeZ(alloc, u8, bin) catch return null;
 
     // Fall back to the non-cft linux arm64 layout.
     if (comptime bun.Environment.isLinux and bun.Environment.isAarch64) {
         const bin_parts2 = [_][]const u8{ cache_dir, best_name[0..best_len], "chrome-linux/headless_shell" };
         const bin2 = bun.path.joinStringBufZ(bin_buf, &bin_parts2, .auto);
-        if (bun.sys.isExecutableFilePath(bin2)) return alloc.dupeZ(u8, bin2) catch return null;
+        if (bun.sys.isExecutableFilePath(bin2)) return bun.dupeZ(alloc, u8, bin2) catch return null;
     }
     return null;
 }
@@ -438,7 +438,7 @@ fn readDevToolsActivePort(out_buf: *std.ArrayListUnmanaged(u8)) ?void {
         if (port == 0 or ws_path.len == 0 or ws_path[0] != '/') continue;
 
         out_buf.clearRetainingCapacity();
-        out_buf.writer(bun.default_allocator).print("ws://127.0.0.1:{d}{s}", .{ port, ws_path }) catch return null;
+        out_buf.print(bun.default_allocator, "ws://127.0.0.1:{d}{s}", .{ port, ws_path }) catch return null;
         return;
     }
     return null;

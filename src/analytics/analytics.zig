@@ -178,9 +178,9 @@ pub const packed_features_list = brk: {
     var names: [decls.len][:0]const u8 = undefined;
     var i = 0;
     for (decls) |decl| {
-        if (@TypeOf(@field(Features, decl.name)) == usize) {
-            validateFeatureName(decl.name);
-            names[i] = decl.name;
+        if (@TypeOf(@field(Features, decl)) == usize) {
+            validateFeatureName(decl);
+            names[i] = decl;
             i += 1;
         }
     }
