@@ -80,7 +80,7 @@ pub fn doPatchCommit(
             Global.crash();
         },
     };
-    defer root_node_modules.close();
+    defer root_node_modules.close(bun.blockingIo());
 
     var iterator = Lockfile.Tree.Iterator(.node_modules).init(lockfile);
     var resolution_buf: [1024]u8 = undefined;
