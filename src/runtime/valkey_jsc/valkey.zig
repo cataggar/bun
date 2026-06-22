@@ -946,8 +946,8 @@ pub const ValkeyClient = struct {
             .args = .{ .raw = hello_args },
         };
 
-        hello_cmd.write(this.writer()) catch |err| {
-            try this.fail("Failed to write HELLO command", err);
+        hello_cmd.write(this.writer()) catch {
+            try this.fail("Failed to write HELLO command", protocol.RedisError.ConnectionClosed);
             return;
         };
 
@@ -959,8 +959,8 @@ pub const ValkeyClient = struct {
                 .command = "SELECT",
                 .args = .{ .raw = &[_][]const u8{db_str} },
             };
-            select_cmd.write(this.writer()) catch |err| {
-                try this.fail("Failed to write SELECT command", err);
+            select_cmd.write(this.writer()) catch {
+                try this.fail("Failed to write SELECT command", protocol.RedisError.ConnectionClosed);
                 return;
             };
             this.flags.is_selecting_db_internal = true;

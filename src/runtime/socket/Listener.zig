@@ -242,14 +242,14 @@ pub fn listen(globalObject: *jsc.JSGlobalObject, opts: JSValue) bun.JSError!JSVa
     const listen_socket: *uws.ListenSocket = brk: {
         switch (connection) {
             .host => |host| {
-                const hostz = bun.handleOom(bun.default_allocator.dupeZ(u8, host.host));
+                const hostz = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, host.host));
                 defer bun.default_allocator.free(hostz);
                 const ls = this.group.listen(kind, this.secure_ctx, hostz.ptr, host.port, socket_flags, @sizeOf(?*anyopaque), &errno);
                 if (ls) |s| connection.host.port = @intCast(s.getLocalPort());
                 break :brk ls;
             },
             .unix => |u| {
-                const pathz = bun.handleOom(bun.default_allocator.dupeZ(u8, u));
+                const pathz = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, u));
                 defer bun.default_allocator.free(pathz);
                 break :brk this.group.listenUnix(kind, this.secure_ctx, pathz.ptr, pathz.len, socket_flags, @sizeOf(?*anyopaque), &errno);
             },
@@ -374,7 +374,7 @@ pub fn addServerName(this: *Listener, global: *jsc.JSGlobalObject, hostname: JSV
         bun.default_allocator,
     );
     defer host_str.deinit();
-    const server_name = bun.handleOom(bun.default_allocator.dupeZ(u8, host_str.slice()));
+    const server_name = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, host_str.slice()));
     defer bun.default_allocator.free(server_name);
     if (server_name.len == 0) {
         return global.throwInvalidArguments("hostname pattern cannot be empty", .{});
@@ -895,11 +895,10 @@ pub fn getsockname(this: *Listener, globalThis: *jsc.JSGlobalObject, callFrame: 
     const socket = this.listener.uws;
 
     var buf: [64]u8 = @splat(0);
-    var text_buf: [512]u8 = undefined;
     const address_bytes: []const u8 = socket.getLocalAddress(&buf) catch return .js_undefined;
-    const address_zig: std.net.Address = switch (address_bytes.len) {
-        4 => std.net.Address.initIp4(address_bytes[0..4].*, 0),
-        16 => std.net.Address.initIp6(address_bytes[0..16].*, 0, 0, 0),
+    var socket_address: SocketAddress = switch (address_bytes.len) {
+        4 => SocketAddress.initIPv4(address_bytes[0..4].*, 0),
+        16 => SocketAddress.initIPv6(address_bytes[0..16].*, 0, 0, 0),
         else => return .js_undefined,
     };
     const family_js = switch (address_bytes.len) {
@@ -907,7 +906,9 @@ pub fn getsockname(this: *Listener, globalThis: *jsc.JSGlobalObject, callFrame: 
         16 => globalThis.commonStrings().IPv6(),
         else => return .js_undefined,
     };
-    const address_js = ZigString.init(bun.fmt.formatIp(address_zig, &text_buf) catch unreachable).toJS(globalThis);
+    const address_string = socket_address.address();
+    defer address_string.deref();
+    const address_js = try address_string.toJS(globalThis);
     const port_js: JSValue = .jsNumber(socket.getLocalPort());
 
     out.put(globalThis, bun.String.static("family"), family_js);
@@ -1111,6 +1112,7 @@ const SSLConfig = bun.api.ServerConfig.SSLConfig;
 
 const NewSocket = api.socket.NewSocket;
 const SocketConfig = api.socket.SocketConfig;
+const SocketAddress = @import("./SocketAddress.zig");
 const WindowsNamedPipeContext = api.socket.WindowsNamedPipeContext;
 
 const jsc = bun.jsc;

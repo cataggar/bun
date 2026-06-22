@@ -444,7 +444,7 @@ pub const StatWatcher = struct {
         else brk: {
             const result = bun.sys.stat(this.path);
             break :brk switch (result) {
-                .result => |r| .{ .result = .init(&r) },
+                .result => |r| .{ .result = r },
                 .err => |e| .{ .err = e },
             };
         };

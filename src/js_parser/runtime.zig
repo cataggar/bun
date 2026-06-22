@@ -238,7 +238,7 @@ pub const Runtime = struct {
             for (feature_flags) |flag| {
                 bun.handleOom(set.insert(flag));
             }
-            set.map.sort(struct {
+            set.map.unmanaged.sort(struct {
                 keys: []const []const u8,
                 pub fn lessThan(ctx: @This(), a: usize, b: usize) bool {
                     return std.mem.lessThan(u8, ctx.keys[a], ctx.keys[b]);

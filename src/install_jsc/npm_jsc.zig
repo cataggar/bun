@@ -72,8 +72,12 @@ pub const ManifestBindings = struct {
         const registry = registry_str.toUTF8(bun.default_allocator);
         defer registry.deinit();
 
-        const manifest_file = std.fs.cwd().openFile(manifest_filename.slice(), .{}) catch |err| {
-            return global.throw("failed to open manifest file \"{s}\": {s}", .{ manifest_filename.slice(), @errorName(err) });
+        const manifest_path = try bun.dupeZ(bun.default_allocator, u8, manifest_filename.slice());
+        defer bun.default_allocator.free(manifest_path);
+
+        const manifest_file = switch (bun.sys.File.open(manifest_path, bun.O.RDONLY, 0)) {
+            .result => |file| file,
+            .err => |err| return global.throw("failed to open manifest file \"{s}\": {s}", .{ manifest_filename.slice(), err.name() }),
         };
         defer manifest_file.close();
 
@@ -88,7 +92,7 @@ pub const ManifestBindings = struct {
             },
         };
 
-        const maybe_package_manifest = npm.PackageManifest.Serializer.loadByFile(bun.default_allocator, &scope, bun.sys.File.from(manifest_file)) catch |err| {
+        const maybe_package_manifest = npm.PackageManifest.Serializer.loadByFile(bun.default_allocator, &scope, manifest_file) catch |err| {
             return global.throw("failed to load manifest file: {s}", .{@errorName(err)});
         };
 
@@ -97,7 +101,10 @@ pub const ManifestBindings = struct {
         };
 
         var buf: std.ArrayListUnmanaged(u8) = .empty;
-        const writer = buf.writer(bun.default_allocator);
+        defer buf.deinit(bun.default_allocator);
+        var allocating_writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &buf);
+        defer allocating_writer.deinit();
+        const writer = &allocating_writer.writer;
 
         // TODO: we can add more information. for now just versions is fine
 
@@ -110,6 +117,7 @@ pub const ManifestBindings = struct {
                 try writer.print("\"{f}\",", .{version.fmt(package_manifest.string_buf)});
         }
 
+        buf = allocating_writer.toArrayList();
         var result = bun.String.borrowUTF8(buf.items);
         defer result.deref();
 

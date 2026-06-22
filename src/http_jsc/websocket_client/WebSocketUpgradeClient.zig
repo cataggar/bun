@@ -327,7 +327,7 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
                         // in the URL (wss+unix://name/path) to verify against
                         // a specific certificate name.
                         if (host_slice.slice().len > 0 and !strings.isIPAddress(host_slice.slice())) {
-                            client.hostname = bun.default_allocator.dupeZ(u8, host_slice.slice()) catch "";
+                            client.hostname = bun.dupeZ(bun.default_allocator, u8, host_slice.slice()) catch "";
                         }
                     }
 
@@ -365,7 +365,7 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
                     // dialed. For HTTPS proxy connections, that's the proxy host,
                     // not the wss:// target.
                     if (!strings.isIPAddress(display_host_)) {
-                        out.hostname = bun.default_allocator.dupeZ(u8, display_host_) catch "";
+                        out.hostname = bun.dupeZ(bun.default_allocator, u8, display_host_) catch "";
                     }
                 }
 
@@ -1289,20 +1289,19 @@ fn buildConnectRequest(
     // Calculate size for the CONNECT request
     var buf = std.array_list.Managed(u8).init(allocator);
     errdefer buf.deinit();
-    const writer = buf.writer();
 
     // CONNECT host:port HTTP/1.1\r\n
-    try writer.print("CONNECT {s}:{d} HTTP/1.1\r\n", .{ target_host, target_port });
+    try buf.print("CONNECT {s}:{d} HTTP/1.1\r\n", .{ target_host, target_port });
 
     // Host: host:port\r\n
-    try writer.print("Host: {s}:{d}\r\n", .{ target_host, target_port });
+    try buf.print("Host: {s}:{d}\r\n", .{ target_host, target_port });
 
     // Proxy-Connection: Keep-Alive\r\n
-    try writer.writeAll("Proxy-Connection: Keep-Alive\r\n");
+    try buf.appendSlice("Proxy-Connection: Keep-Alive\r\n");
 
     // Proxy-Authorization if provided
     if (proxy_authorization) |auth| {
-        try writer.print("Proxy-Authorization: {s}\r\n", .{auth});
+        try buf.print("Proxy-Authorization: {s}\r\n", .{auth});
     }
 
     // Custom proxy headers
@@ -1316,12 +1315,12 @@ fn buildConnectRequest(
             if (proxy_authorization != null and strings.eqlCaseInsensitiveASCII(name, "proxy-authorization", true)) {
                 continue;
             }
-            try writer.print("{s}: {s}\r\n", .{ name, hdrs.asStr(values[idx]) });
+            try buf.print("{s}: {s}\r\n", .{ name, hdrs.asStr(values[idx]) });
         }
     }
 
     // End of headers
-    try writer.writeAll("\r\n");
+    try buf.appendSlice("\r\n");
 
     return buf.toOwnedSlice();
 }
@@ -1413,12 +1412,11 @@ fn buildRequestBody(
     // Build extra headers string, skipping the ones we handle
     var extra_headers_buf = std.array_list.Managed(u8).init(allocator);
     defer extra_headers_buf.deinit();
-    const writer = extra_headers_buf.writer();
 
     // Add Authorization header from URL credentials if user didn't provide one
     if (!user_authorization) {
         if (target_authorization) |auth| {
-            try writer.print("Authorization: {s}\r\n", .{auth});
+            try extra_headers_buf.print("Authorization: {s}\r\n", .{auth});
         }
     }
 
@@ -1433,7 +1431,7 @@ fn buildRequestBody(
         {
             continue;
         }
-        try writer.print("{s}: {s}\r\n", .{ name_slice, value });
+        try extra_headers_buf.print("{s}: {s}\r\n", .{ name_slice, value });
     }
 
     const extensions_line: []const u8 = if (offer_permessage_deflate)

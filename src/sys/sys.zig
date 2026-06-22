@@ -408,7 +408,10 @@ pub fn fchmodat(fd: bun.FD, path: [:0]const u8, mode: bun.Mode, flags: if (Envir
     if (comptime Environment.isWindows) @compileError("Use fchmod instead");
 
     while (true) {
-        const rc = syscall_or_c.fchmodat(fd.cast(), path.ptr, mode, flags);
+        const rc = if (comptime Environment.isLinux)
+            syscall_or_c.fchmodat2(fd.cast(), path.ptr, mode, flags)
+        else
+            syscall_or_c.fchmodat(fd.cast(), path.ptr, mode, @intCast(flags));
         if (Maybe(void).errnoSysFd(rc, .fchmodat, fd)) |err| {
             if (err.getErrno() == .INTR) continue;
             return err;
@@ -2597,7 +2600,7 @@ pub fn renameatConcurrentlyWithoutFallback(
         //  sad path: let's try to delete the folder and then rename it
         if (to_dir_fd.isValid()) {
             var to_dir = to_dir_fd.stdDir();
-            to_dir.deleteTree(to) catch {};
+            to_dir.deleteTree(bun.blockingIo(), to) catch {};
         } else {
             std.fs.deleteTreeAbsolute(to) catch {};
         }
@@ -2628,7 +2631,10 @@ pub fn renameat2(from_dir: bun.FD, from: [:0]const u8, to_dir: bun.FD, to: [:0]c
 
     while (true) {
         const rc = switch (comptime Environment.os) {
-            .linux => std.os.linux.renameat2(@intCast(from_dir.cast()), from.ptr, @intCast(to_dir.cast()), to.ptr, flags.int()),
+            .linux => std.os.linux.renameat2(@intCast(from_dir.cast()), from.ptr, @intCast(to_dir.cast()), to.ptr, .{
+                .EXCHANGE = flags.exchange,
+                .NOREPLACE = flags.exclude,
+            }),
             .mac => bun.c.renameatx_np(@intCast(from_dir.cast()), from.ptr, @intCast(to_dir.cast()), to.ptr, flags.int()),
             .freebsd => unreachable, // returned above
             .windows, .wasm => @compileError("renameat2() is not implemented on this platform"),
@@ -3089,7 +3095,7 @@ pub fn mmap(
     offset: u64,
 ) Maybe([]align(page_size_min) u8) {
     const ioffset = @as(i64, @bitCast(offset)); // the OS treats this as unsigned
-    const rc = std.c.mmap(ptr, length, prot, flags, fd.cast(), ioffset);
+    const rc = std.c.mmap(ptr, length, @bitCast(prot), flags, fd.cast(), ioffset);
     const fail = std.c.MAP_FAILED;
     if (rc == fail) {
         return .initErr(.{
@@ -3117,7 +3123,7 @@ pub fn mmapFile(path: [:0]const u8, flags: std.c.MAP, wanted_size: ?usize, offse
 
     if (wanted_size) |size_| size = @min(size, size_);
 
-    const map = switch (mmap(null, size, posix.PROT.READ | posix.PROT.WRITE, flags, fd, offset)) {
+    const map = switch (mmap(null, size, @bitCast(posix.PROT{ .READ = true, .WRITE = true }), flags, fd, offset)) {
         .result => |map| map,
 
         .err => |err| {
@@ -3219,8 +3225,13 @@ pub fn socketpairImpl(domain: socketpair_t, socktype: socketpair_t, protocol: so
 
     if (comptime Environment.isLinux) {
         while (true) {
-            const nonblock_flag: i32 = if (nonblocking_status == .nonblocking) linux.SOCK.NONBLOCK else 0;
-            const rc = std.os.linux.socketpair(domain, @intCast(socktype | linux.SOCK.CLOEXEC | nonblock_flag), protocol, &fds_i);
+            const nonblock_flag: u32 = if (nonblocking_status == .nonblocking) linux.SOCK.NONBLOCK else 0;
+            const rc = std.os.linux.socketpair(
+                @intCast(domain),
+                @as(u32, @intCast(socktype)) | linux.SOCK.CLOEXEC | nonblock_flag,
+                @intCast(protocol),
+                &fds_i,
+            );
             if (Maybe([2]bun.FD).errnoSys(rc, .socketpair)) |err| {
                 if (err.getErrno() == .INTR) continue;
 
@@ -4435,7 +4446,7 @@ pub fn copyFileZSlowWithHandle(in_handle: bun.FD, to_dir: bun.FD, destination: [
         }
 
         if (comptime Environment.isPosix) {
-            _ = bun.c.fchmod(out_handle.cast(), stat_.mode);
+            _ = bun.c.fchmod(out_handle.cast(), @intCast(stat_.mode));
             _ = bun.c.fchown(out_handle.cast(), stat_.uid, stat_.gid);
         }
 

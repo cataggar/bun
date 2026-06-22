@@ -209,7 +209,7 @@ pub const PasswordObject = struct {
                 // we don't expose this option
                 // but since it parses from phc format, it's possible that it will be set
                 // eventually we should do something that about that.
-                const out_bytes = try pwhash.argon2.strHash(password, hash_options, &outbuf);
+                const out_bytes = try pwhash.argon2.strHash(password, hash_options, &outbuf, bun.blockingIo());
                 return try allocator.dupe(u8, out_bytes);
             },
             .bcrypt => |cost| {
@@ -267,7 +267,7 @@ pub const PasswordObject = struct {
     ) HashError!bool {
         switch (algorithm) {
             .argon2id, .argon2d, .argon2i => {
-                pwhash.argon2.strVerify(previous_hash, password, .{ .allocator = allocator }) catch |err| {
+                pwhash.argon2.strVerify(previous_hash, password, .{ .allocator = allocator }, bun.blockingIo()) catch |err| {
                     if (err == error.PasswordVerificationFailed) {
                         return false;
                     }

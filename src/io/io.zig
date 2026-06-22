@@ -34,7 +34,11 @@ pub const Loop = struct {
             .waker = bun.Async.Waker.init() catch @panic("failed to initialize waker"),
         };
         if (comptime Environment.isLinux) {
-            loop.epoll_fd = .fromNative(std.posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC | 0) catch @panic("Failed to create epoll file descriptor"));
+            const epoll_fd = std.os.linux.epoll_create1(std.os.linux.EPOLL.CLOEXEC | 0);
+            switch (bun.sys.getErrno(epoll_fd)) {
+                .SUCCESS => loop.epoll_fd = .fromNative(@intCast(epoll_fd)),
+                else => @panic("Failed to create epoll file descriptor"),
+            }
 
             {
                 var epoll = std.mem.zeroes(std.os.linux.epoll_event);

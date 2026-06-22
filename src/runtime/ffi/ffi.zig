@@ -731,7 +731,7 @@ pub const FFI = struct {
 
         if (try object.getOwn(globalThis, "source")) |source_value| {
             if (source_value.isArray()) {
-                compile_c.source = .{ .files = .{} };
+                compile_c.source = .{ .files = .empty };
                 var iter = try source_value.arrayIterator(globalThis);
                 while (try iter.next()) |value| {
                     if (!value.isString()) {
@@ -1289,7 +1289,7 @@ pub const FFI = struct {
     pub fn generateSymbolForFunction(global: *JSGlobalObject, allocator: std.mem.Allocator, value: jsc.JSValue, function: *Function) bun.JSError!?JSValue {
         jsc.markBinding(@src());
 
-        var abi_types = std.ArrayListUnmanaged(ABIType){};
+        var abi_types = std.ArrayListUnmanaged(ABIType).empty;
 
         if (try value.getOwn(global, "args")) |args| {
             if (args.isEmptyOrUndefinedOrNull() or !args.jsType().isArray()) {
@@ -1565,7 +1565,8 @@ pub const FFI = struct {
 
             CompilerRT.define(state);
 
-            state.compileString(@ptrCast(source_code.written().ptr)) catch {
+            const source_code_z: [:0]const u8 = source_code.written()[0 .. source_code.written().len - 1 :0];
+            state.compileString(source_code_z) catch {
                 this.fail("Failed to compile source code");
                 return;
             };
@@ -1615,10 +1616,19 @@ pub const FFI = struct {
 
             if (comptime Environment.isDebug and Environment.isPosix) {
                 debug_write: {
-                    const fd = std.posix.open("/tmp/bun-ffi-callback-source.c", .{ .CREAT = true, .ACCMODE = .WRONLY }, 0o644) catch break :debug_write;
-                    _ = std.posix.write(fd, source_code.items) catch break :debug_write;
-                    std.posix.ftruncate(fd, source_code.items.len) catch break :debug_write;
-                    std.posix.close(fd);
+                    const fd = switch (bun.sys.openA("/tmp/bun-ffi-callback-source.c", bun.O.CREAT | bun.O.WRONLY, 0o644)) {
+                        .result => |fd| fd,
+                        .err => break :debug_write,
+                    };
+                    defer fd.close();
+                    _ = switch (bun.sys.write(fd, source_code.items)) {
+                        .result => |written| written,
+                        .err => break :debug_write,
+                    };
+                    switch (bun.sys.ftruncate(fd, @intCast(source_code.items.len))) {
+                        .result => {},
+                        .err => break :debug_write,
+                    }
                 }
             }
 
@@ -1653,7 +1663,8 @@ pub const FFI = struct {
 
             CompilerRT.define(state);
 
-            state.compileString(@ptrCast(source_code.items)) catch {
+            const source_code_z: [:0]const u8 = source_code.items[0 .. source_code.items.len - 1 :0];
+            state.compileString(source_code_z) catch {
                 this.fail("Failed to compile source code");
                 return;
             };
@@ -2341,12 +2352,13 @@ const CompilerRT = struct {
 
     fn createCompilerRTDir() void {
         const tmpdir = Fs.FileSystem.instance.tmpdir() catch return;
-        var bunCC = tmpdir.makeOpenPath("bun-cc", .{}) catch return;
-        defer bunCC.close();
+        const io = bun.blockingIo();
+        var bunCC = tmpdir.createDirPathOpen(io, "bun-cc", .{}) catch return;
+        defer bunCC.close(io);
 
         inline for (comptime std.meta.declarations(compiler_rt_sources)) |decl| {
             const source = @field(compiler_rt_sources, decl.name);
-            bunCC.writeFile(.{
+            bunCC.writeFile(io, .{
                 .sub_path = decl.name,
                 .data = source,
             }) catch {};

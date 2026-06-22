@@ -407,7 +407,7 @@ pub fn formatLabel(globalThis: *JSGlobalObject, label: string, function_args: []
                     } else {
                         var formatter = jsc.ConsoleObject.Formatter{ .globalThis = globalThis, .quote_strings = true };
                         defer formatter.deinit();
-                        bun.handleOom(list.writer().print("{f}", .{value.toFmt(&formatter)}));
+                        bun.handleOom(list.print("{f}", .{value.toFmt(&formatter)}));
                     }
                     idx = var_end;
                     continue;
@@ -452,7 +452,7 @@ pub fn formatLabel(globalThis: *JSGlobalObject, label: string, function_args: []
                     var formatter = jsc.ConsoleObject.Formatter{ .globalThis = globalThis, .quote_strings = true };
                     defer formatter.deinit();
                     const value_fmt = current_arg.toFmt(&formatter);
-                    bun.handleOom(list.writer().print("{f}", .{value_fmt}));
+                    bun.handleOom(list.print("{f}", .{value_fmt}));
                     idx += 1;
                     args_idx += 1;
                 },

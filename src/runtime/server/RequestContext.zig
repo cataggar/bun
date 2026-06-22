@@ -454,14 +454,17 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
 
             // Explicitly use `this.allocator` and *not* the arena
             var bb = std.array_list.Managed(u8).init(this.allocator);
-            const bb_writer = bb.writer();
+            var bb_unmanaged = bb.moveToUnmanaged();
+            var bb_writer = std.Io.Writer.Allocating.fromArrayList(this.allocator, &bb_unmanaged);
 
             Fallback.renderBackend(
                 arena_allocator,
                 fallback_container,
-                @TypeOf(bb_writer),
-                bb_writer,
+                @TypeOf(&bb_writer.writer),
+                &bb_writer.writer,
             ) catch unreachable;
+            bb_unmanaged = bb_writer.toArrayList();
+            bb = bb_unmanaged.toManaged(this.allocator);
             if (this.resp == null or this.resp.?.tryEnd(bb.items, bb.items.len, this.shouldCloseConnection())) {
                 bb.clearAndFree();
                 this.detachResponse();
@@ -875,7 +878,7 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
                 },
             };
 
-            const stat: bun.Stat = switch (bun.sys.fstat(fd)) {
+            const stat: bun.sys.Stat = switch (bun.sys.fstat(fd)) {
                 .result => |s| s,
                 .err => |err| {
                     if (auto_close) fd.close();
@@ -1740,14 +1743,17 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
 
                             var bb = std.array_list.Managed(u8).init(allocator);
                             defer bb.clearAndFree();
-                            const bb_writer = bb.writer();
+                            var bb_unmanaged = bb.moveToUnmanaged();
+                            var bb_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &bb_unmanaged);
 
                             Fallback.renderBackend(
                                 allocator,
                                 fallback_container,
-                                @TypeOf(bb_writer),
-                                bb_writer,
+                                @TypeOf(&bb_writer.writer),
+                                &bb_writer.writer,
                             ) catch unreachable;
+                            bb_unmanaged = bb_writer.toArrayList();
+                            bb = bb_unmanaged.toManaged(allocator);
 
                             if (req.resp) |resp| {
                                 _ = resp.write(bb.items);

@@ -2091,13 +2091,14 @@ pub const BundleOptions = struct {
 };
 
 pub fn openOutputDir(output_dir: string) !std.Io.Dir {
-    return std.fs.cwd().openDir(output_dir, .{}) catch brk: {
-        std.fs.cwd().makeDir(output_dir) catch |err| {
+    const io = bun.blockingIo();
+    return std.Io.Dir.cwd().openDir(io, output_dir, .{}) catch brk: {
+        std.Io.Dir.cwd().createDir(io, output_dir, .default_dir) catch |err| {
             Output.printErrorln("error: Unable to mkdir \"{s}\": \"{s}\"", .{ output_dir, @errorName(err) });
             Global.crash();
         };
 
-        const handle = std.fs.cwd().openDir(output_dir, .{}) catch |err2| {
+        const handle = std.Io.Dir.cwd().openDir(io, output_dir, .{}) catch |err2| {
             Output.printErrorln("error: Unable to open \"{s}\": \"{s}\"", .{ output_dir, @errorName(err2) });
             Global.crash();
         };

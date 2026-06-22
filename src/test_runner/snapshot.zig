@@ -197,10 +197,15 @@ pub const Snapshots = struct {
     pub fn writeSnapshotFile(this: *Snapshots) !void {
         if (this._current_file) |_file| {
             var file = _file;
-            file.file.writeAll(this.file_buf.items) catch {
+            var buf: [4096]u8 = undefined;
+            var writer = file.file.writer(bun.blockingIo(), &buf);
+            writer.interface.writeAll(this.file_buf.items) catch {
                 return error.FailedToWriteSnapshotFile;
             };
-            file.file.close();
+            writer.flush() catch {
+                return error.FailedToWriteSnapshotFile;
+            };
+            file.file.close(bun.blockingIo());
             this.file_buf.clearAndFree();
 
             var value_itr = this.values.valueIterator();
@@ -262,9 +267,11 @@ pub const Snapshots = struct {
                 .id = file_id,
                 .file = fd.stdFile(),
             };
-            errdefer file.file.close();
+            errdefer file.file.close(bun.blockingIo());
 
-            const file_text = try file.file.readToEndAlloc(arena, std.math.maxInt(usize));
+            const length = try file.file.length(bun.blockingIo());
+            const file_text = try arena.alloc(u8, length);
+            _ = try file.file.readPositionalAll(bun.blockingIo(), file_text, 0);
 
             const source = &bun.logger.Source.initPathString(test_filename, file_text);
 
@@ -470,17 +477,18 @@ pub const Snapshots = struct {
             }
 
             // 4. write out result_text to the file
-            file.file.seekTo(0) catch |e| {
-                try log.addErrorFmt(source, .{ .start = 0 }, arena, "Failed to update inline snapshot: Seek file error: {s}", .{@errorName(e)});
+            var write_buf: [4096]u8 = undefined;
+            var writer = file.file.writer(bun.blockingIo(), &write_buf);
+            writer.interface.writeAll(result_text.items) catch |e| {
+                try log.addErrorFmt(source, .{ .start = 0 }, arena, "Failed to update inline snapshot: Write file error: {s}", .{@errorName(e)});
                 continue;
             };
-
-            file.file.writeAll(result_text.items) catch |e| {
+            writer.flush() catch |e| {
                 try log.addErrorFmt(source, .{ .start = 0 }, arena, "Failed to update inline snapshot: Write file error: {s}", .{@errorName(e)});
                 continue;
             };
             if (result_text.items.len < file_text.len) {
-                file.file.setEndPos(result_text.items.len) catch {
+                file.file.setLength(bun.blockingIo(), result_text.items.len) catch {
                     @panic("Failed to update inline snapshot: File was left in an invalid state");
                 };
             }
@@ -535,20 +543,17 @@ pub const Snapshots = struct {
                 .id = file_id,
                 .file = fd.stdFile(),
             };
-            errdefer file.file.close();
+            errdefer file.file.close(bun.blockingIo());
 
             if (this.update_snapshots) {
                 try this.file_buf.appendSlice(file_header);
             } else {
-                const length = try file.file.getEndPos();
+                const length = try file.file.length(bun.blockingIo());
                 if (length == 0) {
                     try this.file_buf.appendSlice(file_header);
                 } else {
                     const buf = try this.allocator.alloc(u8, length);
-                    _ = try file.file.preadAll(buf, 0);
-                    if (comptime bun.Environment.isWindows) {
-                        try file.file.seekTo(0);
-                    }
+                    _ = try file.file.readPositionalAll(bun.blockingIo(), buf, 0);
                     try this.file_buf.appendSlice(buf);
                     this.allocator.free(buf);
                 }

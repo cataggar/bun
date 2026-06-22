@@ -121,7 +121,7 @@ remap_stack_frames_mutex: bun.Mutex = .{},
 ///          []
 argv: []const []const u8 = &[_][]const u8{},
 
-origin_timer: std.time.Timer = undefined,
+origin_timer: Timer = undefined,
 origin_timestamp: u64 = 0,
 /// For fake timers: override performance.now() with a specific value (in nanoseconds)
 /// When null, use the real timer. When set, return this value instead.
@@ -948,7 +948,7 @@ pub fn onExit(this: *VirtualMachine) void {
     while (rare_data.cleanup_hooks.items.len > 0) {
         var hooks = rare_data.cleanup_hooks;
         defer hooks.deinit(bun.default_allocator);
-        rare_data.cleanup_hooks = .{};
+        rare_data.cleanup_hooks = .empty;
         for (hooks.items) |hook| {
             hook.execute();
         }
@@ -1094,7 +1094,7 @@ fn getOriginTimestamp() u64 {
             u128,
             // handle if they set their system clock to be before epoch
             @intCast(@max(
-                std.time.nanoTimestamp(),
+                std.Io.Timestamp.now(bun.blockingIo(), .real).toNanoseconds(),
                 origin_relative_epoch,
             )),
         ) - origin_relative_epoch),
@@ -1135,7 +1135,7 @@ pub fn initWithModuleGraph(
         .source_mappings = undefined,
         .macros = .empty,
         .macro_entry_points = .empty,
-        .origin_timer = std.time.Timer.start() catch @panic("Timers are not supported on this system."),
+        .origin_timer = Timer.start() catch @panic("Timers are not supported on this system."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -1264,7 +1264,7 @@ pub fn init(opts: Options) !*VirtualMachine {
         .source_mappings = undefined,
         .macros = .empty,
         .macro_entry_points = .empty,
-        .origin_timer = std.time.Timer.start() catch @panic("Please don't mess with timers."),
+        .origin_timer = Timer.start() catch @panic("Please don't mess with timers."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -1432,7 +1432,7 @@ pub fn initWorker(
         .source_mappings = undefined,
         .macros = .empty,
         .macro_entry_points = .empty,
-        .origin_timer = std.time.Timer.start() catch @panic("Please don't mess with timers."),
+        .origin_timer = Timer.start() catch @panic("Please don't mess with timers."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -1528,7 +1528,7 @@ pub fn initBake(opts: Options) anyerror!*VirtualMachine {
         .source_mappings = undefined,
         .macros = .empty,
         .macro_entry_points = .empty,
-        .origin_timer = std.time.Timer.start() catch @panic("Please don't mess with timers."),
+        .origin_timer = Timer.start() catch @panic("Please don't mess with timers."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -4168,6 +4168,7 @@ const ImportWatcher = jsc.hot_reloader.ImportWatcher;
 
 const MacroEntryPoint = bun.transpiler.EntryPoints.MacroEntryPoint;
 const ServerEntryPoint = bun.transpiler.EntryPoints.ServerEntryPoint;
+const Timer = @import("../perf/system_timer.zig").Timer;
 
 const webcore = bun.webcore;
 const Body = webcore.Body;

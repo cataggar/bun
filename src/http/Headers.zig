@@ -7,7 +7,7 @@ pub const Entry = struct {
     pub const List = bun.MultiArrayList(Entry);
 };
 
-entries: Entry.List = .{},
+entries: Entry.List = .empty,
 buf: std.ArrayListUnmanaged(u8) = .empty,
 allocator: std.mem.Allocator,
 
@@ -87,8 +87,8 @@ pub const Options = struct {
 pub fn fromPicoHttpHeaders(headers: []const picohttp.Header, allocator: std.mem.Allocator) !Headers {
     const header_count = headers.len;
     var result = Headers{
-        .entries = .{},
-        .buf = .{},
+        .entries = .empty,
+        .buf = .empty,
         .allocator = allocator,
     };
 
@@ -129,8 +129,8 @@ pub fn from(fetch_headers_ref: ?*FetchHeaders, allocator: std.mem.Allocator, opt
     if (fetch_headers_ref) |headers_ref|
         headers_ref.count(&header_count, &buf_len);
     var headers = Headers{
-        .entries = .{},
-        .buf = .{},
+        .entries = .empty,
+        .buf = .empty,
         .allocator = allocator,
     };
     const buf_len_before_content_type = buf_len;

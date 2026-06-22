@@ -365,7 +365,10 @@ pub const TablePrinter = struct {
             fn bufferFrom(buffer: anytype) []u8 {
                 return switch (@typeInfo(@TypeOf(buffer))) {
                     .pointer => |ptr| switch (ptr.size) {
-                        .one => @constCast(buffer)[0..],
+                        .one => switch (@typeInfo(ptr.child)) {
+                            .array => |arr| @constCast(buffer[0..arr.len]),
+                            else => @compileError("expected a buffer slice or pointer to an array"),
+                        },
                         .slice => @constCast(buffer),
                         else => @compileError("expected a buffer slice or pointer to an array"),
                     },
@@ -3681,7 +3684,7 @@ pub fn countReset(
     entry.value_ptr.* = 0;
 }
 
-const PendingTimers = std.AutoHashMap(u64, ?std.time.Timer);
+const PendingTimers = std.AutoHashMap(u64, ?Timer);
 threadlocal var pending_time_logs: PendingTimers = undefined;
 threadlocal var pending_time_logs_loaded = false;
 
@@ -3702,7 +3705,7 @@ pub fn time(
     const result = pending_time_logs.getOrPut(id) catch unreachable;
 
     if (!result.found_existing or (result.found_existing and result.value_ptr.* == null)) {
-        result.value_ptr.* = std.time.Timer.start() catch unreachable;
+        result.value_ptr.* = Timer.start() catch unreachable;
     }
 }
 pub fn timeEnd(
@@ -3719,7 +3722,7 @@ pub fn timeEnd(
 
     const id = bun.hash(chars[0..len]);
     const result = (pending_time_logs.fetchPut(id, null) catch null) orelse return;
-    var value: std.time.Timer = result.value orelse return;
+    var value: Timer = result.value orelse return;
     // get the duration in microseconds
     // then display it in milliseconds
     Output.printElapsed(@as(f64, @floatFromInt(value.read() / std.time.ns_per_us)) / std.time.us_per_ms);
@@ -3749,7 +3752,7 @@ pub fn timeLog(
     }
 
     const id = bun.hash(chars[0..len]);
-    var value: std.time.Timer = (pending_time_logs.get(id) orelse return) orelse return;
+    var value: Timer = (pending_time_logs.get(id) orelse return) orelse return;
     // get the duration in microseconds
     // then display it in milliseconds
     Output.printElapsed(@as(f64, @floatFromInt(value.read() / std.time.ns_per_us)) / std.time.us_per_ms);
@@ -3884,6 +3887,7 @@ const Output = bun.Output;
 const String = bun.String;
 const default_allocator = bun.default_allocator;
 const strings = bun.strings;
+const Timer = @import("../perf/system_timer.zig").Timer;
 
 const jsc = bun.jsc;
 const EventType = jsc.EventType;

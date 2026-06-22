@@ -81,15 +81,15 @@ pub const CronExpression = struct {
     /// suitable for crontab. Returns the written slice of `buf`.
     pub fn formatNumeric(self: CronExpression, buf: *[512]u8) []const u8 {
         var w = std.Io.Writer.fixed(buf);
-        formatBitfield(w, u64, self.minutes, 0, 59);
+        formatBitfield(&w, u64, self.minutes, 0, 59);
         w.writeByte(' ') catch unreachable;
-        formatBitfield(w, u32, self.hours, 0, 23);
+        formatBitfield(&w, u32, self.hours, 0, 23);
         w.writeByte(' ') catch unreachable;
-        formatBitfield(w, u32, self.days, 1, 31);
+        formatBitfield(&w, u32, self.days, 1, 31);
         w.writeByte(' ') catch unreachable;
-        formatBitfield(w, u16, self.months, 1, 12);
+        formatBitfield(&w, u16, self.months, 1, 12);
         w.writeByte(' ') catch unreachable;
-        formatBitfield(w, u8, self.weekdays, 0, 6);
+        formatBitfield(&w, u8, self.weekdays, 0, 6);
         return w.buffered();
     }
 
@@ -276,7 +276,7 @@ inline fn bitSet(comptime T: type, set: T, pos: std.math.Log2Int(T)) bool {
 }
 
 /// Write a bitfield as a cron field string: "*" if all bits set, or comma-separated values.
-fn formatBitfield(w: anytype, comptime T: type, bits: T, min: u8, max: u8) void {
+fn formatBitfield(w: *std.Io.Writer, comptime T: type, bits: T, min: u8, max: u8) void {
     if (@popCount(bits) == @as(u32, max) - min + 1) {
         w.writeByte('*') catch unreachable;
         return;
@@ -285,7 +285,7 @@ fn formatBitfield(w: anytype, comptime T: type, bits: T, min: u8, max: u8) void 
     for (min..max + 1) |i| {
         if ((bits >> @intCast(i)) & 1 != 0) {
             if (!first) w.writeByte(',') catch unreachable;
-            std.fmt.format(w, "{d}", .{i}) catch unreachable;
+            w.print("{d}", .{i}) catch unreachable;
             first = false;
         }
     }

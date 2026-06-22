@@ -970,7 +970,7 @@ const WaiterThreadPosix = struct {
 
         if (comptime Environment.isLinux) {
             const one = @as([8]u8, @bitCast(@as(usize, 1)));
-            _ = std.posix.write(instance.eventfd.cast(), &one) catch @panic("Failed to write to eventfd");
+            _ = bun.sys.write(instance.eventfd, &one).unwrap() catch @panic("Failed to write to eventfd");
         }
     }
 
@@ -998,7 +998,7 @@ const WaiterThreadPosix = struct {
         thread.detach();
     }
 
-    fn wakeup(_: c_int) callconv(.c) void {
+    fn wakeup(_: std.posix.SIG) callconv(.c) void {
         const one = @as([8]u8, @bitCast(@as(usize, 1)));
         _ = bun.sys.write(instance.eventfd, &one).unwrap() catch 0;
     }
@@ -1010,13 +1010,14 @@ const WaiterThreadPosix = struct {
 
         if (comptime Environment.isLinux) {
             var current_mask = bun.sys.sigemptyset();
-            bun.sys.sigaddset(&current_mask, std.posix.SIG.CHLD);
+            const sigchld: u8 = @intFromEnum(std.posix.SIG.CHLD);
+            bun.sys.sigaddset(&current_mask, sigchld);
             const act = bun.sys.Sigaction{
                 .handler = .{ .handler = &wakeup },
                 .mask = current_mask,
                 .flags = std.posix.SA.NOCLDSTOP,
             };
-            bun.sys.sigaction(std.posix.SIG.CHLD, &act, null);
+            bun.sys.sigaction(sigchld, &act, null);
         }
     }
 
@@ -1405,7 +1406,7 @@ pub fn spawnProcessPosix(
         attr.linux_pdeathsig = if (options.linux_pdeathsig) |sig|
             @intCast(sig)
         else if (bun.ParentDeathWatchdog.shouldDefaultSpawnPdeathsig())
-            std.posix.SIG.KILL
+            @intFromEnum(std.posix.SIG.KILL)
         else
             0;
     }

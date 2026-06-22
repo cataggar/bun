@@ -603,8 +603,9 @@ pub const RuntimeTranspilerCache = struct {
 
         const cache_dir_fd = brk: {
             if (std.fs.path.dirname(cache_file_path)) |dirname| {
-                var dir = try std.fs.cwd().makeOpenPath(dirname, .{ .access_sub_paths = true });
-                errdefer dir.close();
+                const io = bun.blockingIo();
+                var dir = try std.Io.Dir.cwd().createDirPathOpen(io, dirname, .{ .open_options = .{ .access_sub_paths = true } });
+                errdefer dir.close(io);
                 break :brk try bun.FD.fromStdDir(dir).makeLibUVOwned();
             }
 

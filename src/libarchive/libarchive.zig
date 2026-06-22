@@ -258,13 +258,13 @@ pub const Archiver = struct {
         _ = stream.openRead();
         const archive = stream.archive;
         const dir: std.Io.Dir = brk: {
-            const cwd = std.fs.cwd();
+            const cwd = std.Io.Dir.cwd();
 
             // if the destination doesn't exist, we skip the whole thing since nothing can overwrite it.
             if (std.fs.path.isAbsolute(root)) {
-                break :brk std.fs.openDirAbsolute(root, .{}) catch return;
+                break :brk std.Io.Dir.openDirAbsolute(bun.blockingIo(), root, .{}) catch return;
             } else {
-                break :brk cwd.openDir(root, .{}) catch return;
+                break :brk cwd.openDir(bun.blockingIo(), root, .{}) catch return;
             }
         };
 
@@ -657,19 +657,11 @@ pub const Archiver = struct {
         comptime options: ExtractOptions,
     ) !u32 {
         var dir: std.Io.Dir = brk: {
-            const cwd = std.fs.cwd();
-            cwd.makePath(
-                root,
-            ) catch {};
-
-            if (std.fs.path.isAbsolute(root)) {
-                break :brk try std.fs.openDirAbsolute(root, .{});
-            } else {
-                break :brk try cwd.openDir(root, .{});
-            }
+            const cwd = std.Io.Dir.cwd();
+            break :brk try cwd.createDirPathOpen(bun.blockingIo(), root, .{});
         };
 
-        defer if (comptime options.close_handles) dir.close();
+        defer if (comptime options.close_handles) dir.close(bun.blockingIo());
         return try extractToDir(file_buffer, dir, ctx, FilePathAppender, appender, options);
     }
 };

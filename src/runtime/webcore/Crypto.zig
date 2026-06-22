@@ -145,7 +145,7 @@ pub fn Bun__randomUUIDv7_(globalThis: *jsc.JSGlobalObject, callframe: *jsc.CallF
             break :brk @intCast(try globalThis.validateIntegerRange(timestamp_value, i64, 0, .{ .min = 0, .field_name = "timestamp" }));
         }
 
-        break :brk @intCast(@max(0, std.time.milliTimestamp()));
+        break :brk @intCast(@max(0, SystemTimer.milliTimestamp()));
     };
 
     const entropy = globalThis.bunVM().rareData().entropySlice(8);
@@ -284,5 +284,6 @@ const UUID5 = @import("../../jsc/uuid.zig").UUID5;
 const UUID7 = @import("../../jsc/uuid.zig").UUID7;
 
 const bun = @import("bun");
+const SystemTimer = @import("../../perf/system_timer.zig");
 const jsc = bun.jsc;
 const BoringSSL = bun.BoringSSL.c;

@@ -124,7 +124,7 @@ pub const AnyRoute = union(enum) {
             return route;
         }
 
-        var methods = HTTP.Method.Optional{ .method = .initEmpty() };
+        var methods = HTTP.Method.Optional{ .method = .empty };
         methods.insert(.GET);
         methods.insert(.HEAD);
 
@@ -2787,7 +2787,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             }
 
             // --- 3. Register compiled user routes (this.user_routes) & Track "/*" Coverage ---
-            var star_methods_covered_by_user = bun.http.Method.Set.initEmpty();
+            var star_methods_covered_by_user = bun.http.Method.Set.empty;
             var has_any_user_route_for_star_path = false; // True if "/*" path appears in user_routes at all
             var has_any_ws_route_for_star_path = false;
 

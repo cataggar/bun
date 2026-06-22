@@ -1204,8 +1204,8 @@ pub const JSFrameworkRouter = struct {
 
         const jsfr = bun.new(JSFrameworkRouter, .{
             .router = try FrameworkRouter.initEmpty(abs_root, types, bun.default_allocator),
-            .files = .{},
-            .stored_parse_errors = .{},
+            .files = .empty,
+            .stored_parse_errors = .empty,
         });
 
         try jsfr.router.scan(
@@ -1268,7 +1268,7 @@ pub const JSFrameworkRouter = struct {
         return jsfr.routeToJson(global, Route.Index.init(0), alloc);
     }
 
-    fn routeToJson(jsfr: *JSFrameworkRouter, global: *JSGlobalObject, route_index: Route.Index, allocator: Allocator) !JSValue {
+    fn routeToJson(jsfr: *JSFrameworkRouter, global: *JSGlobalObject, route_index: Route.Index, allocator: Allocator) bun.JSError!JSValue {
         const route = jsfr.router.routePtr(route_index);
         return (try jsc.JSObject.create(.{
             .part = try partToJS(global, route.part, allocator),
@@ -1292,7 +1292,7 @@ pub const JSFrameworkRouter = struct {
         }, global)).toJS();
     }
 
-    fn routeToJsonInverse(jsfr: *JSFrameworkRouter, global: *JSGlobalObject, route_index: Route.Index, allocator: Allocator) !JSValue {
+    fn routeToJsonInverse(jsfr: *JSFrameworkRouter, global: *JSGlobalObject, route_index: Route.Index, allocator: Allocator) bun.JSError!JSValue {
         const route = jsfr.router.routePtr(route_index);
         return (try jsc.JSObject.create(.{
             .part = try partToJS(global, route.part, allocator),
@@ -1342,7 +1342,7 @@ pub const JSFrameworkRouter = struct {
             var unmanaged = rendered.moveToUnmanaged();
             var writer = std.Io.Writer.Allocating.fromArrayList(alloc, &unmanaged);
             errdefer writer.deinit();
-            for (parsed.parts) |part| try part.toStringForInternalUse(&writer.writer);
+            for (parsed.parts) |part| part.toStringForInternalUse(&writer.writer) catch return error.OutOfMemory;
             var owned = writer.toArrayList();
             rendered = owned.toManaged(alloc);
         }
@@ -1362,7 +1362,7 @@ pub const JSFrameworkRouter = struct {
             var unmanaged = rendered.moveToUnmanaged();
             var writer = std.Io.Writer.Allocating.fromArrayList(temp_allocator, &unmanaged);
             errdefer writer.deinit();
-            while (it.next()) |part| try part.toStringForInternalUse(&writer.writer);
+            while (it.next()) |part| part.toStringForInternalUse(&writer.writer) catch return error.OutOfMemory;
             var owned = writer.toArrayList();
             rendered = owned.toManaged(temp_allocator);
         }
@@ -1370,14 +1370,14 @@ pub const JSFrameworkRouter = struct {
         return try str.transferToJS(global);
     }
 
-    fn partToJS(global: *JSGlobalObject, part: Part, temp_allocator: Allocator) !JSValue {
+    fn partToJS(global: *JSGlobalObject, part: Part, temp_allocator: Allocator) bun.JSError!JSValue {
         var rendered = std.array_list.Managed(u8).init(temp_allocator);
         defer rendered.deinit();
         {
             var unmanaged = rendered.moveToUnmanaged();
             var writer = std.Io.Writer.Allocating.fromArrayList(temp_allocator, &unmanaged);
             errdefer writer.deinit();
-            try part.toStringForInternalUse(&writer.writer);
+            part.toStringForInternalUse(&writer.writer) catch return error.OutOfMemory;
             var owned = writer.toArrayList();
             rendered = owned.toManaged(temp_allocator);
         }

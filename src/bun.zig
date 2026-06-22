@@ -836,7 +836,7 @@ pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.Io.Dir.OpenFileOptions) !s
     }
 
     const res = try sys.open(pathZ, flags, 0).unwrap();
-    return std.Io.File{ .handle = res.cast() };
+    return std.Io.File{ .handle = res.cast(), .flags = .{ .nonblocking = false } };
 }
 
 pub fn openFile(path_: []const u8, open_flags: std.Io.Dir.OpenFileOptions) !std.Io.File {
@@ -1428,10 +1428,10 @@ fn getFdPathViaCWD(fd: std.posix.fd_t, buf: *bun.PathBuffer) ![]u8 {
     const prev_fd = try std.posix.openatZ(std.Io.Dir.cwd().handle, ".", .{ .DIRECTORY = true }, 0);
     var needs_chdir = false;
     defer {
-        if (needs_chdir) std.posix.fchdir(prev_fd) catch unreachable;
-        std.posix.close(prev_fd);
+        if (needs_chdir) _ = std.c.fchdir(prev_fd);
+        _ = std.c.close(prev_fd);
     }
-    try std.posix.fchdir(fd);
+    if (std.c.fchdir(fd) != 0) return error.Fchdir;
     needs_chdir = true;
     return getcwd(buf);
 }
@@ -1471,21 +1471,26 @@ pub fn getFdPath(fd: FD, buf: *bun.PathBuffer) ![]u8 {
             needs_proc_self_workaround = bun.env_var.BUN_NEEDS_PROC_SELF_WORKAROUND.get();
         }
     } else if (comptime !Environment.isLinux) {
-        return try std.os.getFdPath(fd.native(), buf);
+        return switch (sys.getFdPath(fd, buf)) {
+            .result => |p| p,
+            .err => |err| err.toZigErr(),
+        };
     }
 
     if (needs_proc_self_workaround) {
         return getFdPathViaCWD(fd.native(), buf);
     }
 
-    return std.os.getFdPath(fd.native(), buf) catch |err| {
-        if (err == error.FileNotFound and !needs_proc_self_workaround) {
-            needs_proc_self_workaround = true;
-            return getFdPathViaCWD(fd.native(), buf);
-        }
-
-        return err;
-    };
+    switch (sys.getFdPath(fd, buf)) {
+        .result => |p| return p,
+        .err => |err| {
+            if (err.getErrno() == .NOENT and !needs_proc_self_workaround) {
+                needs_proc_self_workaround = true;
+                return getFdPathViaCWD(fd.native(), buf);
+            }
+            return err.toZigErr();
+        },
+    }
 }
 
 /// TODO: move to bun.sys and add a method onto FD
@@ -1747,6 +1752,8 @@ pub noinline fn maybeHandlePanicDuringProcessReload() void {
 
 extern "c" fn on_before_reload_process_linux() void;
 extern "c" fn nanosleep(rqtp: *const std.c.timespec, rmtp: ?*std.c.timespec) c_int;
+extern "c" fn _NSGetArgc() *c_int;
+extern "c" fn _NSGetArgv() *[*][*:0]u8;
 
 /// Reload Bun's process. This clones envp, argv, and gets the current
 /// executable path.
@@ -1801,7 +1808,7 @@ pub fn reloadProcess(
 
     const dupe_argv = allocator.allocSentinel(?[*:0]const u8, bun.argv.len, null) catch unreachable;
     for (bun.argv, dupe_argv) |src, *dest| {
-        dest.* = (allocator.dupeZ(u8, src) catch unreachable).ptr;
+        dest.* = (dupeZ(allocator, u8, src) catch unreachable).ptr;
     }
 
     const environ_slice = std.mem.span(std.c.environ);
@@ -2341,10 +2348,30 @@ pub fn appendOptionsEnv(env: []const u8, comptime ArgType: type, args: *std.arra
 }
 
 pub fn initArgv() !void {
-    if (comptime Environment.isPosix) {
-        argv = try bun.default_allocator.alloc([:0]const u8, std.os.argv.len);
-        for (0..argv.len) |i| {
-            argv[i] = std.mem.sliceTo(std.os.argv[i], 0);
+    if (comptime Environment.isLinux) {
+        // Zig 0.17 ("Writergate") removed the `std.os.argv` global. On Linux read
+        // the process arguments from /proc/self/cmdline (NUL-separated, with a
+        // trailing NUL).
+        const data = switch (sys.File.readFrom(FD.cwd(), "/proc/self/cmdline", default_allocator)) {
+            .result => |d| d,
+            .err => |err| return err.toZigErr(),
+        };
+        var list: std.ArrayListUnmanaged([:0]const u8) = .empty;
+        var start: usize = 0;
+        for (data, 0..) |byte, i| {
+            if (byte == 0) {
+                try list.append(default_allocator, data[start..i :0]);
+                start = i + 1;
+            }
+        }
+        argv = try list.toOwnedSlice(default_allocator);
+    } else if (comptime Environment.isMac) {
+        // Darwin exposes argc/argv via crt_externs.
+        const argc: usize = @intCast(_NSGetArgc().*);
+        const raw = _NSGetArgv().*;
+        argv = try default_allocator.alloc([:0]const u8, argc);
+        for (0..argc) |i| {
+            argv[i] = std.mem.sliceTo(raw[i], 0);
         }
     } else if (comptime Environment.isWindows) {
         // Zig's implementation of `std.process.argsAlloc()`on Windows platforms
@@ -2481,7 +2508,7 @@ pub fn makePath(dir: std.Io.Dir, sub_path: []const u8) !void {
     var it = std.fs.path.componentIterator(sub_path);
     var component = it.last() orelse return;
     while (true) {
-        dir.makeDir(component.path) catch |err| switch (err) {
+        dir.createDir(blockingIo(), component.path, .default_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 var path_buf2: [MAX_PATH_BYTES * 2]u8 = undefined;
                 copy(u8, &path_buf2, component.path);
@@ -2492,7 +2519,7 @@ pub fn makePath(dir: std.Io.Dir, sub_path: []const u8) !void {
                 const is_dir = S.ISDIR(@intCast(result.mode));
                 // dangling symlink
                 if (!is_dir) {
-                    dir.deleteTree(component.path) catch {};
+                    dir.deleteTree(blockingIo(), component.path) catch {};
                     continue;
                 }
             },
@@ -4002,6 +4029,7 @@ pub inline fn writeAnyToHasher(hasher: anytype, thing: anytype) void {
 }
 
 pub const perf = @import("./perf/perf.zig");
+pub const SystemTimer = @import("./perf/system_timer.zig");
 pub inline fn isComptimeKnown(x: anytype) bool {
     return comptime @typeInfo(@TypeOf(.{x})).@"struct".field_attrs[0].@"comptime";
 }

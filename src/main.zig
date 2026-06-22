@@ -41,11 +41,11 @@ pub fn main() void {
             &_bun.mimalloc.mi_free,
         );
         _bun.handleOom(_bun.windows.env.convertEnvToWTF8());
-        environ = @ptrCast(std.os.environ.ptr);
-        _environ = @ptrCast(std.os.environ.ptr);
+        environ = @ptrCast(std.c.environ);
+        _environ = @ptrCast(std.c.environ);
     }
 
-    _bun.start_time = std.time.nanoTimestamp();
+    _bun.start_time = _bun.SystemTimer.nanoTimestamp();
     _bun.initArgv() catch |err| {
         Output.panic("Failed to initialize argv: {s}\n", .{@errorName(err)});
     };

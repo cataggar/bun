@@ -150,7 +150,7 @@ pub const PathWatcher = struct {
     /// Called from the platform reader thread with `manager.mutex` held.
     /// `rel_path` is borrowed — `onPathUpdatePosix` dupes it before enqueuing.
     fn emit(this: *PathWatcher, event_type: EventType, rel_path: []const u8, is_file: bool) void {
-        const timestamp = std.time.milliTimestamp();
+        const timestamp = SystemTimer.milliTimestamp();
         const hash = bun.hash(rel_path);
         for (this.handlers.keys(), this.handlers.values()) |ctx, *last| {
             if (last.shouldEmit(hash, timestamp, event_type)) {
@@ -494,7 +494,7 @@ const Linux = struct {
         }
         const wd: i32 = @intCast(rc);
         const gop = bun.handleOom(plat.wd_map.getOrPut(bun.default_allocator, wd));
-        if (!gop.found_existing) gop.value_ptr.* = .{};
+        if (!gop.found_existing) gop.value_ptr.* = .empty;
         // This wd may already have this watcher as an owner:
         //   - IN_CREATE raced the initial walk (same subpath → the reassign is a no-op)
         //   - a subdirectory was *renamed* within the tree: IN_MOVED_TO re-adds it,
@@ -945,6 +945,7 @@ const FSEvents = if (Environment.isMac) @import("./fs_events.zig") else struct {
 const std = @import("std");
 
 const bun = @import("bun");
+const SystemTimer = @import("../../perf/system_timer.zig");
 const Environment = bun.Environment;
 const Mutex = bun.Mutex;
 const Output = bun.Output;

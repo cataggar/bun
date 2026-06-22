@@ -33,16 +33,17 @@ pub const Flags = switch (@import("builtin").cpu.arch) {
 
 pub fn format(features: @This(), writer: *std.Io.Writer) !void {
     var is_first = true;
-    inline for (@typeInfo(Flags).@"struct".fields) |field| brk: {
-        if (comptime (bun.strings.eql(field.name, "padding") or
-            bun.strings.eql(field.name, "none")))
+    const info = @typeInfo(Flags).@"struct";
+    inline for (info.field_names) |field_name| brk: {
+        if (comptime (bun.strings.eql(field_name, "padding") or
+            bun.strings.eql(field_name, "none")))
             break :brk;
 
-        if (@field(features.flags, field.name)) {
+        if (@field(features.flags, field_name)) {
             if (!is_first)
                 try writer.writeAll(" ");
             is_first = false;
-            try writer.writeAll(field.name);
+            try writer.writeAll(field_name);
         }
     }
 }

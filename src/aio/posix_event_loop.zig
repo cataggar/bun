@@ -1280,7 +1280,19 @@ pub const LinuxWaker = struct {
     fd: bun.FD,
 
     pub fn init() !Waker {
-        return initWithFileDescriptor(.fromNative(try std.posix.eventfd(0, 0)));
+        if (comptime Environment.isLinux) {
+            const fd = std.os.linux.eventfd(0, 0);
+            return initWithFileDescriptor(.fromNative(switch (std.posix.errno(fd)) {
+                .SUCCESS => @intCast(fd),
+                else => |err| return std.posix.unexpectedErrno(err),
+            }));
+        }
+
+        const fd = std.c.eventfd(0, 0);
+        return initWithFileDescriptor(.fromNative(switch (std.c.errno(fd)) {
+            .SUCCESS => fd,
+            else => |err| return std.posix.unexpectedErrno(err),
+        }));
     }
 
     pub fn getFd(this: *const Waker) bun.FD {
@@ -1298,10 +1310,10 @@ pub const LinuxWaker = struct {
 
     pub fn wake(this: *const Waker) void {
         var bytes: usize = 1;
-        _ = std.posix.write(
-            this.fd.cast(),
-            @as(*[8]u8, @ptrCast(&bytes)),
-        ) catch 0;
+        _ = bun.sys.write(
+            this.fd,
+            std.mem.asBytes(&bytes),
+        );
     }
 };
 

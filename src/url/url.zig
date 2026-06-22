@@ -651,12 +651,15 @@ pub const QueryStringMap = struct {
 
             name.length = @as(u32, @truncate(name_slice.len));
             name.offset = buf_writer_pos;
-            try writer.writeAll(name_slice);
+            writer.writeAll(name_slice) catch return error.OutOfMemory;
             buf_writer_pos += @as(u32, @truncate(name_slice.len));
 
             const name_hash: u64 = bun.hash(name_slice);
 
-            value.length = PercentEncoding.decode(Writer, &writer, result.rawValue(scanner.pathname.pathname)) catch continue;
+            value.length = PercentEncoding.decode(Writer, &writer, result.rawValue(scanner.pathname.pathname)) catch |err| switch (err) {
+                error.WriteFailed => return error.OutOfMemory,
+                else => continue,
+            };
             value.offset = buf_writer_pos;
             buf_writer_pos += value.length;
 

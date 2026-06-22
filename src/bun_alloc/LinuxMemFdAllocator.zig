@@ -88,7 +88,7 @@ pub fn alloc(self: *Self, len: usize, offset: usize, flags: std.posix.MAP) bun.s
     switch (bun.sys.mmap(
         null,
         @min(size, self.size),
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        @bitCast(std.posix.PROT{ .READ = true, .WRITE = true }),
         flags_mut,
         self.fd,
         offset,

@@ -311,7 +311,7 @@ pub const FontFamily = union(enum) {
         var string: ?ArrayList(u8) = null;
         while (input.tryParse(css.Parser.expectIdent, .{}).asValue()) |ident| {
             if (string == null) {
-                string = ArrayList(u8){};
+                string = ArrayList(u8).empty;
                 bun.handleOom(string.?.appendSlice(stralloc, value));
             }
 
@@ -803,12 +803,13 @@ pub const FontProperty = packed struct(u8) {
     };
 
     pub fn tryFromPropertyId(property_id: css.PropertyIdTag) ?FontProperty {
-        inline for (std.meta.fields(FontProperty)) |field| {
-            if (comptime std.mem.eql(u8, field.name, "__unused")) continue;
-            const desired = comptime @field(css.PropertyIdTag, field.name);
+        const info = @typeInfo(FontProperty).@"struct";
+        inline for (info.field_names, info.field_types, info.field_attrs) |field_name, _, _| {
+            if (comptime bun.strings.eqlComptime(field_name, "__unused")) continue;
+            const desired = comptime @field(css.PropertyIdTag, field_name);
             if (desired == property_id) {
                 var result: FontProperty = .{};
-                @field(result, field.name) = true;
+                @field(result, field_name) = true;
                 return result;
             }
         }

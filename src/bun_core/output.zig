@@ -1232,13 +1232,13 @@ pub inline fn err(error_name: anytype, comptime fmt: []const u8, args: anytype) 
 
         // error unions
         if (info == .error_set) {
-            if (info.error_set) |errors| {
+            if (info.error_set.error_names) |errors| {
                 if (errors.len == 0) {
                     @compileError("Output.err was given an empty error set");
                 }
 
                 // TODO: convert zig errors to errno for better searchability?
-                if (errors.len == 1) break :display_name .{ errors[0].name, true };
+                if (errors.len == 1) break :display_name .{ errors[0], true };
             }
 
             break :display_name .{ @errorName(error_name), false };

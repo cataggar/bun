@@ -174,13 +174,15 @@ pub const ProxyEnvStorage = struct {
             bun.strings.eqlCaseInsensitiveASCIIICheckLength
         else
             bun.strings.eql;
-        inline for (@typeInfo(ProxyEnvStorage).@"struct".fields) |f| {
-            if (comptime f.type == ?*RefCountedEnvValue) {
+        const info = @typeInfo(ProxyEnvStorage).@"struct";
+        inline for (info.field_names, info.field_types, info.field_attrs) |field_name, FieldType, attrs| {
+            _ = attrs;
+            if (comptime FieldType == ?*RefCountedEnvValue) {
                 // Uppercase fields are declared first. On Windows the
                 // case-insensitive eql matches the uppercase field for
                 // either input case and returns before reaching lowercase.
-                if (eql(name, f.name)) {
-                    return .{ .key = f.name, .ptr = &@field(self, f.name) };
+                if (eql(name, field_name)) {
+                    return .{ .key = field_name, .ptr = &@field(self, field_name) };
                 }
             }
         }
@@ -191,11 +193,13 @@ pub const ProxyEnvStorage = struct {
     /// parent's strings. Caller must hold parent.lock — the pointer load
     /// and ref() are not atomic with respect to Bun__setEnvValue's deref().
     pub fn cloneFrom(self: *ProxyEnvStorage, parent: *const ProxyEnvStorage) void {
-        inline for (@typeInfo(ProxyEnvStorage).@"struct".fields) |f| {
-            if (comptime f.type == ?*RefCountedEnvValue) {
-                if (@field(parent, f.name)) |val| {
+        const info = @typeInfo(ProxyEnvStorage).@"struct";
+        inline for (info.field_names, info.field_types, info.field_attrs) |field_name, FieldType, attrs| {
+            _ = attrs;
+            if (comptime FieldType == ?*RefCountedEnvValue) {
+                if (@field(parent, field_name)) |val| {
                     val.ref();
-                    @field(self, f.name) = val;
+                    @field(self, field_name) = val;
                 }
             }
         }
@@ -207,21 +211,25 @@ pub const ProxyEnvStorage = struct {
     /// clone captured a snapshot the storage doesn't hold a ref on (e.g. an
     /// initial-environ value later overwritten by the setter).
     pub fn syncInto(self: *const ProxyEnvStorage, map: *bun.DotEnv.Map) void {
-        inline for (@typeInfo(ProxyEnvStorage).@"struct".fields) |f| {
-            if (comptime f.type == ?*RefCountedEnvValue) {
-                if (@field(self, f.name)) |val| {
-                    bun.handleOom(map.put(f.name, val.bytes));
+        const info = @typeInfo(ProxyEnvStorage).@"struct";
+        inline for (info.field_names, info.field_types, info.field_attrs) |field_name, FieldType, attrs| {
+            _ = attrs;
+            if (comptime FieldType == ?*RefCountedEnvValue) {
+                if (@field(self, field_name)) |val| {
+                    bun.handleOom(map.put(field_name, val.bytes));
                 }
             }
         }
     }
 
     pub fn deinit(self: *ProxyEnvStorage) void {
-        inline for (@typeInfo(ProxyEnvStorage).@"struct".fields) |f| {
-            if (comptime f.type == ?*RefCountedEnvValue) {
-                if (@field(self, f.name)) |val| {
+        const info = @typeInfo(ProxyEnvStorage).@"struct";
+        inline for (info.field_names, info.field_types, info.field_attrs) |field_name, FieldType, attrs| {
+            _ = attrs;
+            if (comptime FieldType == ?*RefCountedEnvValue) {
+                if (@field(self, field_name)) |val| {
                     val.deref();
-                    @field(self, f.name) = null;
+                    @field(self, field_name) = null;
                 }
             }
         }
@@ -329,7 +337,7 @@ pub fn closeAllListenSocketsForWatchMode(this: *RareData) void {
         Syscall.disableLinger(socket);
         socket.close();
     }
-    this.listening_sockets_for_watch_mode = .{};
+    this.listening_sockets_for_watch_mode = .empty;
 }
 
 pub fn addFSWatcherForIsolation(this: *RareData, watcher: *FSWatcher) void {
@@ -628,7 +636,7 @@ pub fn stdin(rare: *RareData) *Blob.Store {
             .data = .{
                 .file = .{
                     .pathlike = .{ .fd = fd },
-                    .is_atty = if (fd.unwrapValid()) |valid| std.posix.isatty(valid.native()) else false,
+                    .is_atty = (bun.sys.File{ .handle = fd }).isTty(),
                     .mode = mode,
                 },
             },
@@ -817,7 +825,7 @@ pub fn setTLSDefaultCiphers(this: *RareData, ciphers: []const u8) void {
     if (this.tls_default_ciphers) |old_ciphers| {
         bun.default_allocator.free(old_ciphers);
     }
-    this.tls_default_ciphers = bun.handleOom(bun.default_allocator.dupeZ(u8, ciphers));
+    this.tls_default_ciphers = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, ciphers));
 }
 
 pub fn defaultCSRFSecret(this: *RareData) []const u8 {

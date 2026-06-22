@@ -62,11 +62,11 @@ pub const JSObject = opaque {
         };
 
         const cell = toJS(obj);
-        inline for (info.fields) |field| {
-            const property = @field(pojo, field.name);
+        inline for (info.field_names) |field_name| {
+            const property = @field(pojo, field_name);
             cell.put(
                 global,
-                field.name,
+                field_name,
                 try .fromAny(global, @TypeOf(property), property),
             );
         }

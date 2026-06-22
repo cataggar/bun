@@ -255,8 +255,8 @@ pub const ModuleInfo = struct {
         return .{
             .gpa = allocator,
             .strings_map = .empty,
-            .strings_buf = .{},
-            .strings_lens = .{},
+            .strings_buf = .empty,
+            .strings_lens = .empty,
             .exported_names = .empty,
             .requested_modules = .empty,
             .buffer = .empty,

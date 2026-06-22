@@ -291,7 +291,7 @@ pub fn runTasks(
                         entry.value_ptr.* = .{ .manifest = manifest };
 
                         if (timestamp_this_tick == null) {
-                            timestamp_this_tick = @as(u32, @truncate(@as(u64, @intCast(@max(0, std.time.timestamp()))))) +| 300;
+                            timestamp_this_tick = @as(u32, @truncate(@as(u64, @intCast(@max(0, bun.SystemTimer.timestamp()))))) +| 300;
                         }
 
                         entry.value_ptr.manifest.pkg.public_max_age = timestamp_this_tick.?;

@@ -32,7 +32,12 @@ pub const PosixStat = extern struct {
     }
 
     /// Convert platform-specific bun.Stat to PosixStat
-    pub fn init(stat_: *const bun.Stat) PosixStat {
+    pub fn init(stat_: anytype) PosixStat {
+        const StatType = @typeInfo(@TypeOf(stat_)).pointer.child;
+        if (comptime StatType == PosixStat) {
+            return stat_.*;
+        }
+
         const atime_val = stat_.atime();
         const mtime_val = stat_.mtime();
         const ctime_val = stat_.ctime();

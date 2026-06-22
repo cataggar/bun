@@ -72,7 +72,7 @@ pub const StandaloneModuleGraph = struct {
         return this.findAssumeStandalonePath(name);
     }
 
-    pub fn stat(this: *const StandaloneModuleGraph, name: []const u8) ?bun.Stat {
+    pub fn stat(this: *const StandaloneModuleGraph, name: []const u8) ?bun.sys.Stat {
         const file = this.find(name) orelse return null;
         return file.stat();
     }
@@ -190,8 +190,8 @@ pub const StandaloneModuleGraph = struct {
             return this.side == .client or !this.loader.isJavaScriptLike();
         }
 
-        pub fn stat(this: *const File) bun.Stat {
-            var result = std.mem.zeroes(bun.Stat);
+        pub fn stat(this: *const File) bun.sys.Stat {
+            var result = std.mem.zeroes(bun.sys.Stat);
             result.size = @intCast(this.contents.len);
             result.mode = bun.S.IFREG | 0o644;
             return result;

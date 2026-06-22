@@ -407,7 +407,7 @@ pub const ShellCpTask = struct {
                 return .{ .err = e };
             },
         };
-        return .{ .result = bun.S.ISDIR(stat.mode) };
+        return .{ .result = bun.S.ISDIR(@intCast(stat.mode)) };
     }
 
     fn enqueueToEventLoop(this: *ShellCpTask) void {
@@ -536,8 +536,8 @@ pub const ShellCpTask = struct {
             copying_many = true;
         }
 
-        this.src_absolute = bun.handleOom(bun.default_allocator.dupeZ(u8, src[0..src.len]));
-        this.tgt_absolute = bun.handleOom(bun.default_allocator.dupeZ(u8, tgt[0..tgt.len]));
+        this.src_absolute = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, src[0..src.len]));
+        this.tgt_absolute = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, tgt[0..tgt.len]));
 
         const args = jsc.Node.fs.Arguments.Cp{
             .src = jsc.Node.PathLike{ .string = bun.PathString.init(this.src_absolute.?) },
@@ -587,8 +587,16 @@ pub const ShellCpTask = struct {
         this.verbose_output_lock.lock();
         log("onCopy: {s} -> {s}\n", .{ src, dest });
         defer this.verbose_output_lock.unlock();
-        var writer = this.verbose_output.writer();
-        bun.handleOom(writer.print("{s} -> {s}\n", .{ src, dest }));
+        const allocator = this.verbose_output.allocator;
+        var list = this.verbose_output.moveToUnmanaged();
+        var writer = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
+        writer.writer.print("{s} -> {s}\n", .{ src, dest }) catch bun.outOfMemory();
+        list = writer.toArrayList();
+        this.verbose_output = .{
+            .items = list.items,
+            .capacity = list.capacity,
+            .allocator = allocator,
+        };
     }
 
     pub fn cpOnCopy(this: *ShellCpTask, src_: anytype, dest_: anytype) void {

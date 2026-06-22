@@ -227,7 +227,10 @@ pub const Reader = struct {
     fn bufferFrom(buffer: anytype) []u8 {
         return switch (@typeInfo(@TypeOf(buffer))) {
             .pointer => |ptr| switch (ptr.size) {
-                .one => @constCast(buffer)[0..],
+                .one => switch (@typeInfo(ptr.child)) {
+                    .array => |array| @constCast(buffer[0..array.len]),
+                    else => @compileError("expected a buffer slice or pointer to an array"),
+                },
                 .slice => @constCast(buffer),
                 else => @compileError("expected a buffer slice or pointer to an array"),
             },
@@ -318,18 +321,18 @@ fn FileWriter(comptime quiet: bool) type {
 
             fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
                 const this: *Adapter = @fieldParentPtr("new_interface", w);
-                writeFn(this.context, w.buffered()) catch return error.WriteFailed;
+                _ = writeFn(this.context, w.buffered()) catch return error.WriteFailed;
                 w.end = 0;
 
                 var written: usize = 0;
                 for (data[0 .. data.len - 1]) |bytes| {
-                    writeFn(this.context, bytes) catch return error.WriteFailed;
+                    _ = writeFn(this.context, bytes) catch return error.WriteFailed;
                     written += bytes.len;
                 }
 
                 const pattern = data[data.len - 1];
                 for (0..splat) |_| {
-                    writeFn(this.context, pattern) catch return error.WriteFailed;
+                    _ = writeFn(this.context, pattern) catch return error.WriteFailed;
                     written += pattern.len;
                 }
 
@@ -340,7 +343,10 @@ fn FileWriter(comptime quiet: bool) type {
         fn bufferFrom(buffer: anytype) []u8 {
             return switch (@typeInfo(@TypeOf(buffer))) {
                 .pointer => |ptr| switch (ptr.size) {
-                    .one => @constCast(buffer)[0..],
+                    .one => switch (@typeInfo(ptr.child)) {
+                        .array => |array| @constCast(buffer[0..array.len]),
+                        else => @compileError("expected a buffer slice or pointer to an array"),
+                    },
                     .slice => @constCast(buffer),
                     else => @compileError("expected a buffer slice or pointer to an array"),
                 },
@@ -366,7 +372,7 @@ pub fn quietWriter(self: File) QuietWriter {
 }
 
 pub fn isTty(self: File) bool {
-    return std.posix.isatty(self.handle.cast());
+    return std.c.isatty(self.handle.cast()) != 0;
 }
 
 /// Asserts in debug that this File object is valid
@@ -617,7 +623,7 @@ pub fn toSourceAt(dir_fd: anytype, path: anytype, allocator: std.mem.Allocator, 
 }
 
 pub fn toSource(path: anytype, allocator: std.mem.Allocator, opts: ToSourceOptions) Maybe(bun.logger.Source) {
-    return toSourceAt(std.fs.cwd(), path, allocator, opts);
+    return toSourceAt(bun.FD.cwd(), path, allocator, opts);
 }
 
 const bun = @import("bun");

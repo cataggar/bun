@@ -478,8 +478,8 @@ pub const CronRegisterJob = struct {
             .global = globalObject,
             .bun_exe = bun_exe,
             .abs_path = abs_path,
-            .schedule = bun.handleOom(bun.default_allocator.dupeZ(u8, normalized_schedule)),
-            .title = bun.handleOom(bun.default_allocator.dupeZ(u8, title_slice.slice())),
+            .schedule = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, normalized_schedule)),
+            .title = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, title_slice.slice())),
             .parsed_cron = parsed,
             .promise = jsc.JSPromise.Strong.init(globalObject),
         };
@@ -774,7 +774,7 @@ pub const CronRemoveJob = struct {
         const job = bun.handleOom(bun.default_allocator.create(CronRemoveJob));
         job.* = .{
             .global = globalObject,
-            .title = bun.handleOom(bun.default_allocator.dupeZ(u8, title_slice.slice())),
+            .title = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, title_slice.slice())),
             .promise = jsc.JSPromise.Strong.init(globalObject),
         };
 
@@ -914,7 +914,7 @@ pub const CronJob = struct {
     fn computeNextTimespec(this: *CronJob) ?bun.timespec {
         // Cron occurrences are calendar-based (real epoch); the timer heap is
         // monotonic. Anchor both to real time so fake timers don't half-apply.
-        const now_ms: f64 = @floatFromInt(std.time.milliTimestamp());
+        const now_ms: f64 = @floatFromInt(std.Io.Clock.real.now(bun.blockingIo()).toMilliseconds());
         // The monotonic timer can fire fractionally before the wall-clock target
         // (clock skew / NTP step); floor next() at the prior target so it can't
         // recompute the same minute and double-fire.
@@ -1148,7 +1148,7 @@ pub fn cronParse(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) b
         } else {
             return globalObject.throwInvalidArguments("Bun.cron.parse() expects the second argument to be a Date or number (ms since epoch)", .{});
         }
-    } else @as(f64, @floatFromInt(std.time.milliTimestamp()));
+    } else @as(f64, @floatFromInt(std.Io.Clock.real.now(bun.blockingIo()).toMilliseconds()));
 
     if (std.math.isNan(from_ms) or std.math.isInf(from_ms))
         return globalObject.throwInvalidArguments("Invalid date value", .{});
@@ -1315,7 +1315,7 @@ fn resolvePath(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame, pat
     const source_dir = if (raw_dir.len == 0) "." else raw_dir;
     var resolved = vm.transpiler.resolver.resolve(source_dir, path, .entry_point_run) catch return error.ModuleNotFound;
     const entry_path = resolved.path() orelse return error.ModuleNotFound;
-    return bun.default_allocator.dupeZ(u8, entry_path.text);
+    return bun.dupeZ(bun.default_allocator, u8, entry_path.text);
 }
 
 /// XML-escape a string for safe embedding in plist XML.
@@ -1757,7 +1757,7 @@ fn allocPrintZ(allocator: std.mem.Allocator, comptime fmt: []const u8, args: any
 fn makeTempPath(comptime prefix: []const u8) ![:0]const u8 {
     var name_buf: bun.PathBuffer = undefined;
     const name = bun.fs.FileSystem.tmpname(prefix ++ "tmp", &name_buf, bun.fastRandom()) catch return error.OutOfMemory;
-    return bun.default_allocator.dupeZ(u8, bun.path.joinAbsString(bun.fs.FileSystem.RealFS.platformTempDir(), &.{name}, .auto));
+    return bun.dupeZ(bun.default_allocator, u8, bun.path.joinAbsString(bun.fs.FileSystem.RealFS.platformTempDir(), &.{name}, .auto));
 }
 
 const std = @import("std");

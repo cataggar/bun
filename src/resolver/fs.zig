@@ -48,7 +48,7 @@ pub const FileSystem = struct {
 
     var tmpname_id_number = std.atomic.Value(u32).init(0);
     pub fn tmpname(extname: string, buf: []u8, hash: u64) std.fmt.BufPrintError![:0]u8 {
-        const hex_value = @as(u64, @truncate(@as(u128, @intCast(hash)) | @as(u128, @intCast(std.time.nanoTimestamp()))));
+        const hex_value = @as(u64, @truncate(@as(u128, @intCast(hash)) | @as(u128, bun.hw_timer.nowNs())));
 
         return try bun.fmt.bufPrintZ(buf, ".{f}-{f}.{s}", .{
             bun.fmt.hexIntLower(hex_value),
@@ -885,9 +885,10 @@ pub const FileSystem = struct {
             }
 
             pub fn generate(_: *RealFS, _: string, file: std.Io.File) anyerror!ModKey {
-                const stat = try file.stat();
+                const stat = try file.stat(bun.blockingIo());
 
-                const seconds = @divTrunc(stat.mtime, @as(@TypeOf(stat.mtime), std.time.ns_per_s));
+                const mtime = stat.mtime.toNanoseconds();
+                const seconds = @divTrunc(mtime, std.time.ns_per_s);
 
                 // We can't detect changes if the file system zeros out the modification time
                 if (seconds == 0 and std.time.ns_per_s == 0) {
@@ -895,9 +896,9 @@ pub const FileSystem = struct {
                 }
 
                 // Don't generate a modification key if the file is too new
-                const now = std.time.nanoTimestamp();
+                const now = std.Io.Timestamp.now(bun.blockingIo(), .real).toNanoseconds();
                 const now_seconds = @divTrunc(now, std.time.ns_per_s);
-                if (seconds > seconds or (seconds == now_seconds and stat.mtime > now)) {
+                if (seconds > now_seconds or (seconds == now_seconds and mtime > now)) {
                     return error.Unusable;
                 }
 
@@ -1084,7 +1085,7 @@ pub const FileSystem = struct {
 
             defer {
                 if (maybe_handle == null and (!store_fd or fs.needToCloseFiles())) {
-                    handle.close();
+                    handle.close(bun.blockingIo());
                 }
             }
 
@@ -1314,7 +1315,7 @@ pub const FileSystem = struct {
             var outpath: bun.PathBuffer = undefined;
 
             const stat = try bun.sys.lstat_absolute(absolute_path);
-            const is_symlink = stat.kind == std.Io.File.Kind.SymLink;
+            const is_symlink = stat.kind == std.Io.File.Kind.sym_link;
             var _kind = stat.kind;
             var cache = Entry.Cache{
                 .kind = Entry.Kind.file,
@@ -1338,16 +1339,16 @@ pub const FileSystem = struct {
                         cache.fd = file.handle;
                     }
                 }
-                const _stat = try file.stat();
+                const _stat = try file.stat(bun.blockingIo());
 
                 symlink = try bun.getFdPath(file.handle, &outpath);
 
                 _kind = _stat.kind;
             }
 
-            bun.assert(_kind != .SymLink);
+            bun.assert(_kind != .sym_link);
 
-            if (_kind == .Directory) {
+            if (_kind == .directory) {
                 cache.kind = .dir;
             } else {
                 cache.kind = .file;
@@ -1456,7 +1457,7 @@ pub const FileSystem = struct {
                 var file: bun.FD = if (existing_fd.unwrapValid()) |valid|
                     valid
                 else if (store_fd)
-                    .fromStdFile(try std.fs.openFileAbsoluteZ(absolute_path_c, .{ .mode = .read_only }))
+                    .fromStdFile(try std.Io.Dir.openFileAbsolute(bun.blockingIo(), absolute_path_c, .{ .mode = .read_only }))
                 else
                     .fromStdFile(try bun.openFileForPath(absolute_path_c));
                 setMaxFd(file.native());

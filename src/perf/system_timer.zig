@@ -75,5 +75,5 @@ fn elapsed(started: std.Io.Timestamp, ended: std.Io.Timestamp) u64 {
 }
 
 const bun = @import("bun");
-const Environment = @import("../bun_core/env.zig");
+const Environment = bun.Environment;
 const std = @import("std");

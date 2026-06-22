@@ -187,7 +187,7 @@ current_bundle: ?struct {
     /// Information BundleV2 needs to finalize the bundle
     start_data: bun.bundle_v2.DevServerInput,
     /// Started when the bundle was queued
-    timer: std.time.Timer,
+    timer: SystemTimer.Timer,
     /// If any files in this bundle were due to hot-reloading, some extra work
     /// must be done to inform clients to reload routes. When this is false,
     /// all entry points do not have bundles yet.
@@ -298,14 +298,14 @@ pub fn init(options: Options) bun.JSOOM!*DevServer {
 
     var dump_dir = if (bun.FeatureFlags.bake_debugging_features)
         if (options.dump_sources) |dir|
-            std.fs.cwd().makeOpenPath(dir, .{}) catch |err| dir: {
+            std.Io.Dir.cwd().createDirPathOpen(bun.blockingIo(), dir, .{}) catch |err| dir: {
                 bun.handleErrorReturnTrace(err, @errorReturnTrace());
                 Output.warn("Could not open directory for dumping sources: {}", .{err});
                 break :dir null;
             }
         else
             null;
-    errdefer if (bun.FeatureFlags.bake_debugging_features) if (dump_dir) |*dir| dir.close();
+    errdefer if (bun.FeatureFlags.bake_debugging_features) if (dump_dir) |*dir| dir.close(bun.blockingIo());
 
     const separate_ssr_graph = if (options.framework.server_components) |sc| sc.separate_ssr_graph else false;
 
@@ -625,7 +625,7 @@ pub fn deinit(dev: *DevServer) void {
             dev.vm.timer.remove(&dev.memory_visualizer_timer),
         .graph_safety_lock = dev.graph_safety_lock.lock(),
         .bun_watcher = dev.bun_watcher.deinit(true),
-        .dump_dir = if (bun.FeatureFlags.bake_debugging_features) if (dev.dump_dir) |*dir| dir.close(),
+        .dump_dir = if (bun.FeatureFlags.bake_debugging_features) if (dev.dump_dir) |*dir| dir.close(bun.blockingIo()),
         .log = dev.log.deinit(),
         .server_fetch_function_callback = dev.server_fetch_function_callback.deinit(),
         .server_register_update_callback = dev.server_register_update_callback.deinit(),
@@ -1173,7 +1173,7 @@ fn ensureRouteIsBundled(
             dev.startAsyncBundle(
                 entry_points,
                 false,
-                std.time.Timer.start() catch @panic("timers unsupported"),
+                SystemTimer.Timer.start() catch @panic("timers unsupported"),
             ) catch |err| bun.handleOom(err);
         },
         .deferred_to_next_bundle => {
@@ -1865,7 +1865,7 @@ pub fn startAsyncBundle(
     dev: *DevServer,
     entry_points: EntryPointList,
     had_reload_event: bool,
-    timer: std.time.Timer,
+    timer: SystemTimer.Timer,
 ) bun.OOM!void {
     assert(dev.current_bundle == null);
     assert(entry_points.set.count() > 0);
@@ -3043,7 +3043,7 @@ fn startNextBundleIfPresent(dev: *DevServer) void {
             }
 
             break :brk .{ true, reload_event_timer };
-        } else .{ false, std.time.Timer.start() catch @panic("timers unsupported") };
+        } else .{ false, SystemTimer.Timer.start() catch @panic("timers unsupported") };
 
         for (dev.next_bundle.route_queue.keys()) |route_bundle_index| {
             const rb = dev.routeBundlePtr(route_bundle_index);
@@ -3612,11 +3612,11 @@ pub fn dumpBundle(dump_dir: std.Io.Dir, graph: bake.Graph, rel_path: []const u8,
         @tagName(graph),
         rel_path,
     }, .auto)[1..];
-    var inner_dir = try dump_dir.makeOpenPath(bun.Dirname.dirname(u8, name).?, .{});
-    defer inner_dir.close();
+    var inner_dir = try dump_dir.createDirPathOpen(bun.blockingIo(), bun.Dirname.dirname(u8, name).?, .{});
+    defer inner_dir.close(bun.blockingIo());
 
-    const file = try inner_dir.createFile(bun.path.basename(name), .{});
-    defer file.close();
+    const file = try inner_dir.createFile(bun.blockingIo(), bun.path.basename(name), .{});
+    defer file.close(bun.blockingIo());
     var file_buffer: [1024]u8 = undefined;
     var file_writer = file.writerStreaming(bun.blockingIo(), &file_buffer);
     const bufw = &file_writer.interface;
@@ -3627,7 +3627,7 @@ pub fn dumpBundle(dump_dir: std.Io.Dir, graph: bake.Graph, rel_path: []const u8,
             @tagName(graph),
         });
         try bufw.print("// Bundled at {d}, Bun " ++ bun.Global.package_json_version_with_canary ++ "\n", .{
-            std.time.nanoTimestamp(),
+            SystemTimer.nanoTimestamp(),
         });
     }
 
@@ -4250,13 +4250,13 @@ fn dumpStateDueToCrash(dev: *DevServer) !void {
 
     // being conservative about how much stuff is put on the stack.
     var filepath_buf: [@min(4096, bun.MAX_PATH_BYTES)]u8 = undefined;
-    const filepath = bun.fmt.bufPrintZ(&filepath_buf, "incremental-graph-crash-dump.{d}.html", .{std.time.timestamp()}) catch "incremental-graph-crash-dump.html";
-    const file = std.fs.cwd().createFileZ(filepath, .{}) catch |err| {
+    const filepath = bun.fmt.bufPrintZ(&filepath_buf, "incremental-graph-crash-dump.{d}.html", .{SystemTimer.timestamp()}) catch "incremental-graph-crash-dump.html";
+    const file = std.Io.Dir.cwd().createFile(bun.blockingIo(), filepath, .{}) catch |err| {
         bun.handleErrorReturnTrace(err, @errorReturnTrace());
         Output.warn("Could not open file for dumping incremental graph: {}", .{err});
         return;
     };
-    defer file.close();
+    defer file.close(bun.blockingIo());
 
     const start, const end = comptime brk: {
         @setEvalBranchQuota(5000);
@@ -4724,6 +4724,7 @@ fn extractPathnameFromUrl(url: []const u8) []const u8 {
 }
 
 const bun = @import("bun");
+const SystemTimer = bun.SystemTimer;
 const Environment = bun.Environment;
 const Output = bun.Output;
 const SourceMap = bun.SourceMap;

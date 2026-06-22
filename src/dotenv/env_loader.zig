@@ -570,9 +570,13 @@ pub const Loader = struct {
     pub fn loadProcess(this: *Loader) OOM!void {
         if (this.did_load_process) return;
 
-        try this.map.map.ensureTotalCapacity(std.os.environ.len);
-        for (std.os.environ) |_env| {
-            var env = bun.span(_env);
+        var env_count: usize = 0;
+        while (std.c.environ[env_count] != null) : (env_count += 1) {}
+
+        try this.map.map.ensureTotalCapacity(env_count);
+        var env_i: usize = 0;
+        while (std.c.environ[env_i]) |_env| : (env_i += 1) {
+            var env = bun.sliceTo(_env, 0);
             if (strings.indexOfChar(env, '=')) |i| {
                 const key = env[0..i];
                 const value = env[i + 1 ..];
@@ -659,7 +663,7 @@ pub const Loader = struct {
         comptime suffix: DotEnvFileSuffix,
         value_buffer: *std.array_list.Managed(u8),
     ) !void {
-        const dir_handle: std.Io.Dir = std.fs.cwd();
+        const dir_handle: std.Io.Dir = bun.FD.cwd().stdDir();
 
         switch (comptime suffix) {
             .development => {
@@ -1248,25 +1252,25 @@ pub const Map = struct {
     ///
     /// To prevent
     pub fn stdEnvMap(this: *Map, allocator: std.mem.Allocator) OOM!StdEnvMapWrapper {
-        var env_map = std.process.EnvMap.init(allocator);
+        var env_map = std.process.Environ.Map.init(allocator);
 
         var iter = this.map.iterator();
         while (iter.next()) |entry| {
-            try env_map.hash_map.put(entry.key_ptr.*, entry.value_ptr.value);
+            try env_map.array_hash_map.put(allocator, entry.key_ptr.*, entry.value_ptr.value);
         }
 
         return .{ .unsafe_map = env_map };
     }
 
     pub const StdEnvMapWrapper = struct {
-        unsafe_map: std.process.EnvMap,
+        unsafe_map: std.process.Environ.Map,
 
-        pub fn get(this: *const StdEnvMapWrapper) *const std.process.EnvMap {
+        pub fn get(this: *const StdEnvMapWrapper) *const std.process.Environ.Map {
             return &this.unsafe_map;
         }
 
         pub fn deinit(this: *StdEnvMapWrapper) void {
-            this.unsafe_map.hash_map.deinit();
+            this.unsafe_map.array_hash_map.deinit(this.unsafe_map.allocator);
         }
     };
 
@@ -1409,7 +1413,13 @@ pub const Map = struct {
     }
 
     pub fn cloneWithAllocator(this: *const Map, new_allocator: std.mem.Allocator) OOM!Map {
-        return .{ .map = try this.map.cloneWithAllocator(new_allocator) };
+        var cloned = Map.init(new_allocator);
+        try cloned.map.ensureTotalCapacity(this.map.count());
+        var iter = this.map.iterator();
+        while (iter.next()) |entry| {
+            cloned.map.putAssumeCapacity(entry.key_ptr.*, entry.value_ptr.*);
+        }
+        return cloned;
     }
 };
 

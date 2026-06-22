@@ -11,7 +11,7 @@ const SslContextCacheEntry = struct {
 };
 const ssl_context_cache_max_size = 60;
 const ssl_context_cache_ttl_ns = 30 * std.time.ns_per_min;
-var custom_ssl_context_map = std.AutoArrayHashMap(*SSLConfig, SslContextCacheEntry).init(bun.default_allocator);
+var custom_ssl_context_map: std.AutoArrayHashMapUnmanaged(*SSLConfig, SslContextCacheEntry) = .empty;
 
 loop: *jsc.MiniEventLoop,
 http_context: NewHTTPContext(false),
@@ -31,15 +31,15 @@ deferred_tasks: std.ArrayListUnmanaged(*AsyncHTTP) = .empty,
 /// path stays O(1). Owned by the HTTP thread.
 has_pending_queued_abort: bool = false,
 
-queued_shutdowns: std.ArrayListUnmanaged(ShutdownMessage) = std.ArrayListUnmanaged(ShutdownMessage){},
-queued_writes: std.ArrayListUnmanaged(WriteMessage) = std.ArrayListUnmanaged(WriteMessage){},
-queued_response_body_drains: std.ArrayListUnmanaged(DrainMessage) = std.ArrayListUnmanaged(DrainMessage){},
+queued_shutdowns: std.ArrayListUnmanaged(ShutdownMessage) = .empty,
+queued_writes: std.ArrayListUnmanaged(WriteMessage) = .empty,
+queued_response_body_drains: std.ArrayListUnmanaged(DrainMessage) = .empty,
 
 queued_shutdowns_lock: bun.Mutex = .{},
 queued_writes_lock: bun.Mutex = .{},
 queued_response_body_drains_lock: bun.Mutex = .{},
 
-queued_threadlocal_proxy_derefs: std.ArrayListUnmanaged(*ProxyTunnel) = std.ArrayListUnmanaged(*ProxyTunnel){},
+queued_threadlocal_proxy_derefs: std.ArrayListUnmanaged(*ProxyTunnel) = .empty,
 
 has_awoken: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
 timer: SystemTimer,
@@ -297,7 +297,7 @@ pub fn connect(this: *@This(), client: *HTTPClient, comptime is_ssl: bool) !?New
             };
 
             const now = this.timer.read();
-            bun.handleOom(custom_ssl_context_map.put(requested_config, .{
+            bun.handleOom(custom_ssl_context_map.put(bun.default_allocator, requested_config, .{
                 .ctx = custom_context,
                 .last_used_ns = now,
                 // Clone a strong ref for the cache entry; client.tls_props keeps its own.
@@ -385,7 +385,7 @@ fn drainQueuedShutdowns(this: *@This()) void {
             this.queued_shutdowns_lock.lock();
             defer this.queued_shutdowns_lock.unlock();
             const shutdowns = this.queued_shutdowns;
-            this.queued_shutdowns = .{};
+            this.queued_shutdowns = .empty;
             break :brk shutdowns;
         };
         defer queued_shutdowns.deinit(bun.default_allocator);
@@ -442,7 +442,7 @@ fn drainQueuedWrites(this: *@This()) void {
             this.queued_writes_lock.lock();
             defer this.queued_writes_lock.unlock();
             const writes = this.queued_writes;
-            this.queued_writes = .{};
+            this.queued_writes = .empty;
             break :brk writes;
         };
         defer queued_writes.deinit(bun.default_allocator);
@@ -490,7 +490,7 @@ fn drainQueuedHTTPResponseBodyDrains(this: *@This()) void {
             this.queued_response_body_drains_lock.lock();
             defer this.queued_response_body_drains_lock.unlock();
             const drains = this.queued_response_body_drains;
-            this.queued_response_body_drains = .{};
+            this.queued_response_body_drains = .empty;
             break :brk drains;
         };
         defer queued_response_body_drains.deinit(bun.default_allocator);
@@ -572,7 +572,7 @@ fn drainEvents(this: *@This()) void {
     this.has_pending_queued_abort = false;
     {
         var pending = this.deferred_tasks;
-        this.deferred_tasks = .{};
+        this.deferred_tasks = .empty;
         defer pending.deinit(bun.default_allocator);
         for (pending.items) |http| {
             if (http.client.signals.get(.aborted) or active < max) {

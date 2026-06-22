@@ -133,10 +133,10 @@ pub fn parse(global: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) bun.JSError
     const paddr = host.latin1(); // presentation address
     const addr = if (paddr[0] == '[' and paddr[paddr.len - 1] == ']') v6: {
         const v6 = net.Ip6Address.parse(paddr[1 .. paddr.len - 1], port_) catch return .js_undefined;
-        break :v6 SocketAddress{ ._addr = .{ .sin6 = v6.sa } };
+        break :v6 SocketAddress.initIPv6(v6.bytes, v6.port, v6.flow, v6.interface.index);
     } else v4: {
         const v4 = net.Ip4Address.parse(paddr, port_) catch return .js_undefined;
-        break :v4 SocketAddress{ ._addr = .{ .sin = v4.sa } };
+        break :v4 SocketAddress.initIPv4(v4.bytes, v4.port);
     };
 
     return SocketAddress.new(addr).toJS(global);
@@ -690,4 +690,4 @@ const CallFrame = jsc.CallFrame;
 const JSValue = jsc.JSValue;
 
 const std = @import("std");
-const net = std.net;
+const net = std.Io.net;

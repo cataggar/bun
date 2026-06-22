@@ -1358,11 +1358,13 @@ pub fn enumTagList(comptime Enum: type, comptime separator: @TypeOf(.enum_litera
     return EnumTagListFormatter(Enum, separator){};
 }
 
-pub fn formatIp(address: std.net.Address, into: []u8) ![]u8 {
+pub fn formatIp(address: std.Io.net.IpAddress, into: []u8) ![]u8 {
     // std.net.Address.format includes `:<port>` and square brackets (IPv6)
     //  while Node does neither.  This uses format then strips these to bring
     //  the result into conformance with Node.
-    var result = try std.fmt.bufPrint(into, "{f}", .{address});
+    var writer = std.Io.Writer.fixed(into);
+    try address.format(&writer);
+    var result = writer.buffered();
 
     // Strip `:<port>`
     if (std.mem.lastIndexOfScalar(u8, result, ':')) |colon| {
@@ -1592,8 +1594,7 @@ const FormatDurationData = struct {
 fn formatDurationOneDecimal(data: FormatDurationData, writer: *std.Io.Writer) !void {
     // worst case: "-XXXyXXwXXdXXhXXmXX.XXXs".len = 24
     var buf: [24]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    var buf_writer = fbs.writer();
+    var buf_writer = std.Io.Writer.fixed(&buf);
     if (data.negative) {
         buf_writer.writeByte('-') catch unreachable;
     }
@@ -1612,7 +1613,7 @@ fn formatDurationOneDecimal(data: FormatDurationData, writer: *std.Io.Writer) !v
             buf_writer.writeByte(unit.sep) catch unreachable;
             ns_remaining -= units * unit.ns;
             if (ns_remaining == 0)
-                return writer.writeAll(fbs.getWritten());
+                return writer.writeAll(buf_writer.buffered());
         }
     }
 
@@ -1631,13 +1632,13 @@ fn formatDurationOneDecimal(data: FormatDurationData, writer: *std.Io.Writer) !v
                 buf_writer.writeAll(&decimal_buf) catch unreachable;
             }
             buf_writer.writeAll(unit.sep) catch unreachable;
-            return writer.writeAll(fbs.getWritten());
+            return writer.writeAll(buf_writer.buffered());
         }
     }
 
     buf_writer.print("{d}", .{ns_remaining}) catch unreachable;
     buf_writer.writeAll("ns") catch unreachable;
-    return writer.writeAll(fbs.getWritten());
+    return writer.writeAll(buf_writer.buffered());
 }
 
 /// Return a Formatter for number of nanoseconds according to its magnitude:

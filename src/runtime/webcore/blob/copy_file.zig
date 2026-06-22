@@ -416,7 +416,7 @@ pub const CopyFile = struct {
         if (Environment.isWindows) return; //why
         // defer task.onFinish();
 
-        var stat_: ?bun.Stat = null;
+        var stat_: ?bun.sys.Stat = null;
 
         if (this.destination_file_store.pathlike == .fd) {
             this.destination_fd = this.destination_file_store.pathlike.fd;
@@ -442,12 +442,12 @@ pub const CopyFile = struct {
                             .result => |result| {
                                 stat_ = result;
 
-                                if (posix.S.ISDIR(result.mode)) {
+                                if (posix.S.ISDIR(@intCast(result.mode))) {
                                     this.system_error = unsupported_directory_error;
                                     return;
                                 }
 
-                                if (!posix.S.ISREG(result.mode))
+                                if (!posix.S.ISREG(@intCast(result.mode)))
                                     break :do_clonefile;
                             },
                             .err => |err| {
@@ -513,7 +513,7 @@ pub const CopyFile = struct {
 
         if (this.destination_file_store.pathlike == .fd) {}
 
-        const stat: bun.Stat = stat_ orelse switch (bun.sys.fstat(this.source_fd)) {
+        const stat: bun.sys.Stat = stat_ orelse switch (bun.sys.fstat(this.source_fd)) {
             .result => |result| result,
             .err => |err| {
                 this.doClose();
@@ -522,7 +522,7 @@ pub const CopyFile = struct {
             },
         };
 
-        if (posix.S.ISDIR(stat.mode)) {
+        if (posix.S.ISDIR(@intCast(stat.mode))) {
             this.system_error = unsupported_directory_error;
             this.doClose();
             return;

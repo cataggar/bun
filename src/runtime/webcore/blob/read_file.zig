@@ -313,7 +313,7 @@ pub const ReadFile = struct {
     }
 
     fn resolveSizeAndLastModified(this: *ReadFile, fd: bun.FD) void {
-        const stat: bun.Stat = switch (bun.sys.fstat(fd)) {
+        const stat: bun.sys.Stat = switch (bun.sys.fstat(fd)) {
             .result => |result| result,
             .err => |err| {
                 this.errno = bun.errnoToZigErr(err.errno);
@@ -375,7 +375,7 @@ pub const ReadFile = struct {
         // Special files might report a size of > 0, and be wrong.
         // so we should check specifically that its a regular file before trusting the size.
         if (this.size == 0 and bun.isRegularFile(this.file_store.mode)) {
-            this.buffer = .{};
+            this.buffer = .empty;
             this.byte_store = ByteStore.init(this.buffer.items, bun.default_allocator);
 
             this.onFinish();

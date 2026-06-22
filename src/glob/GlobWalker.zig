@@ -150,7 +150,7 @@ pub const SyscallAccessor = struct {
         };
     }
 
-    pub fn statat(handle: Handle, path: [:0]const u8) Maybe(bun.Stat) {
+    pub fn statat(handle: Handle, path: [:0]const u8) Maybe(Syscall.Stat) {
         if (comptime bun.Environment.isWindows) return statatWindows(handle.value, path);
         return switch (Syscall.fstatat(handle.value, path)) {
             .err => |err| .{ .err = err },
@@ -159,7 +159,7 @@ pub const SyscallAccessor = struct {
     }
 
     /// Like statat but does not follow symlinks.
-    pub fn lstatat(handle: Handle, path: [:0]const u8) Maybe(bun.Stat) {
+    pub fn lstatat(handle: Handle, path: [:0]const u8) Maybe(Syscall.Stat) {
         if (comptime bun.Environment.isWindows) return statatWindows(handle.value, path);
         return Syscall.lstatat(handle.value, path);
     }
@@ -688,7 +688,7 @@ pub fn GlobWalker_(
                         const stackbuf_size = 256;
                         var stfb = bun.stackFallback(stackbuf_size, this.walker.arena.allocator());
                         const pathz = try bun.dupeZ(stfb.get(), u8, this.walker.patternComponents.items[idx].patternSlice(this.walker.pattern));
-                        const stat_result: bun.Stat = switch (Accessor.statat(fd, pathz)) {
+                        const stat_result: Syscall.Stat = switch (Accessor.statat(fd, pathz)) {
                             .err => |e_| {
                                 var e: bun.sys.Error = e_;
                                 if (e.getErrno() == .NOENT) {

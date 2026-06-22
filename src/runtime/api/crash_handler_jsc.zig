@@ -87,7 +87,7 @@ pub const js_bindings = struct {
         // Not the github ref or the git tag.
         obj.put(global, jsc.ZigString.static("revision"), try bun.String.init(bun.Environment.git_sha).toJS(global));
 
-        obj.put(global, jsc.ZigString.static("generated_at"), JSValue.jsNumberFromInt64(@max(std.time.milliTimestamp(), 0)));
+        obj.put(global, jsc.ZigString.static("generated_at"), JSValue.jsNumberFromInt64(@max(std.Io.Clock.real.now(bun.blockingIo()).toMilliseconds(), 0)));
         return obj;
     }
 };

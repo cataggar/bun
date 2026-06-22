@@ -327,8 +327,7 @@ pub const ShellLsTask = struct {
 
         if (!this.opts.list_directories) {
             if (this.print_directory) {
-                const writer = this.output.writer();
-                bun.handleOom(writer.print("{s}:\n", .{this.path}));
+                this.printOutput("{s}:\n", .{this.path});
             }
 
             var iterator = DirIterator.iterate(fd, .u8);
@@ -355,8 +354,7 @@ pub const ShellLsTask = struct {
             return;
         }
 
-        const writer = this.output.writer();
-        bun.handleOom(writer.print("{s}\n", .{this.path}));
+        this.printOutput("{s}\n", .{this.path});
         return;
     }
 
@@ -395,14 +393,11 @@ pub const ShellLsTask = struct {
         const stat = switch (stat_result) {
             .err => {
                 // If stat fails, just output the name with placeholders
-                const writer = this.output.writer();
-                bun.handleOom(writer.print("?????????? ? ? ? ?            ? {s}\n", .{name}));
+                this.printOutput("?????????? ? ? ? ?            ? {s}\n", .{name});
                 return;
             },
             .result => |s| s,
         };
-
-        const writer = this.output.writer();
 
         // File type and permissions
         const mode: u32 = @intCast(stat.mode);
@@ -423,7 +418,7 @@ pub const ShellLsTask = struct {
         const mtime = stat.mtime();
         const time_str = formatTime(@intCast(mtime.sec), this.#now_secs);
 
-        bun.handleOom(writer.print("{c}{s} {d: >3} {d: >5} {d: >5} {d: >8} {s} {s}\n", .{
+        this.printOutput("{c}{s} {d: >3} {d: >5} {d: >5} {d: >8} {s} {s}\n", .{
             file_type,
             &perms,
             nlink,
@@ -432,7 +427,20 @@ pub const ShellLsTask = struct {
             size,
             &time_str,
             name,
-        }));
+        });
+    }
+
+    fn printOutput(this: *@This(), comptime fmt: []const u8, args: anytype) void {
+        const allocator = this.output.allocator;
+        var list = this.output.moveToUnmanaged();
+        var writer = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
+        writer.writer.print(fmt, args) catch bun.outOfMemory();
+        list = writer.toArrayList();
+        this.output = .{
+            .items = list.items,
+            .capacity = list.capacity,
+            .allocator = allocator,
+        };
     }
 
     fn getFileTypeChar(mode: u32) u8 {

@@ -420,9 +420,9 @@ fn openDestination(this: *TarballStream) !void {
         buf[0..],
         bun.fastRandom(),
     );
-    this.tmpname = try this.allocator.dupeZ(u8, tmpname);
+    this.tmpname = try bun.dupeZ(this.allocator, u8, tmpname);
 
-    this.dest = .fromStdDir(try bun.MakePath.makeOpenPath(tarball.temp_dir, this.tmpname, .{}));
+    this.dest = .fromStdDir(try tarball.temp_dir.createDirPathOpen(bun.blockingIo(), this.tmpname, .{}));
 }
 
 fn closeOutputFile(this: *TarballStream) void {
@@ -800,7 +800,7 @@ fn finish(this: *TarballStream) void {
             d.close();
             this.dest = null;
         }
-        task.request.extract.tarball.temp_dir.deleteTree(this.tmpname) catch {};
+        task.request.extract.tarball.temp_dir.deleteTree(bun.blockingIo(), this.tmpname) catch {};
     }
 
     this.deinit();

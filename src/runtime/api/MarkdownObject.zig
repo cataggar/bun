@@ -137,20 +137,20 @@ fn parseOptions(globalThis: *jsc.JSGlobalObject, opts_value: JSValue) bun.JSErro
         }
 
         // Handle remaining boolean options (autolinks/headings are only settable via compound options above)
-        inline for (@typeInfo(md.Options).@"struct".fields) |field| {
-            comptime if (field.type != bool or
-                std.mem.eql(u8, field.name, "permissive_autolinks") or
-                std.mem.eql(u8, field.name, "permissive_url_autolinks") or
-                std.mem.eql(u8, field.name, "permissive_www_autolinks") or
-                std.mem.eql(u8, field.name, "permissive_email_autolinks") or
-                std.mem.eql(u8, field.name, "heading_ids") or
-                std.mem.eql(u8, field.name, "autolink_headings")) continue;
+        inline for (@typeInfo(md.Options).@"struct".field_names, @typeInfo(md.Options).@"struct".field_types) |field_name, FieldType| {
+            comptime if (FieldType != bool or
+                std.mem.eql(u8, field_name, "permissive_autolinks") or
+                std.mem.eql(u8, field_name, "permissive_url_autolinks") or
+                std.mem.eql(u8, field_name, "permissive_www_autolinks") or
+                std.mem.eql(u8, field_name, "permissive_email_autolinks") or
+                std.mem.eql(u8, field_name, "heading_ids") or
+                std.mem.eql(u8, field_name, "autolink_headings")) continue;
 
-            if (try opts_value.getBooleanLoose(globalThis, comptime camelCaseOf(field.name))) |val| {
-                @field(options, field.name) = val;
-            } else if (comptime !std.mem.eql(u8, camelCaseOf(field.name), field.name)) {
-                if (try opts_value.getBooleanLoose(globalThis, field.name)) |val| {
-                    @field(options, field.name) = val;
+            if (try opts_value.getBooleanLoose(globalThis, comptime camelCaseOf(field_name))) |val| {
+                @field(options, field_name) = val;
+            } else if (comptime !std.mem.eql(u8, camelCaseOf(field_name), field_name)) {
+                if (try opts_value.getBooleanLoose(globalThis, field_name)) |val| {
+                    @field(options, field_name) = val;
                 }
             }
         }
@@ -407,10 +407,10 @@ const ParseRenderer = struct {
     /// and used as the `type` field instead of the default string tag name.
     fn extractComponents(self: *ParseRenderer, opts: JSValue) bun.JSError!void {
         if (opts.isUndefinedOrNull() or !opts.isObject()) return;
-        inline for (@typeInfo(Components).@"struct".fields) |field| {
-            if (try opts.getTruthy(self.#globalObject, field.name)) |val| {
+        inline for (@typeInfo(Components).@"struct".field_names) |field_name| {
+            if (try opts.getTruthy(self.#globalObject, field_name)) |val| {
                 if (!val.isBoolean()) {
-                    @field(self.#components, field.name) = val;
+                    @field(self.#components, field_name) = val;
                     self.#marked_args.append(val);
                 }
             }
@@ -691,7 +691,7 @@ const ParseRenderer = struct {
                 }
             } else if (len > 1) {
                 // Multiple children — concatenate string parts
-                var alt_buf = std.ArrayListUnmanaged(u8){};
+                var alt_buf: std.ArrayListUnmanaged(u8) = .empty;
                 defer alt_buf.deinit(bun.default_allocator);
                 for (0..len) |i| {
                     const child = try entry.children.getIndex(g, @truncate(i));
@@ -831,10 +831,10 @@ const JsCallbackRenderer = struct {
 
     fn extractCallbacks(self: *JsCallbackRenderer, opts: JSValue) bun.JSError!void {
         if (opts.isUndefinedOrNull() or !opts.isObject()) return;
-        inline for (@typeInfo(Callbacks).@"struct".fields) |field| {
-            if (try opts.getTruthy(self.#globalObject, field.name)) |val| {
+        inline for (@typeInfo(Callbacks).@"struct".field_names) |field_name| {
+            if (try opts.getTruthy(self.#globalObject, field_name)) |val| {
                 if (val.isCallable()) {
-                    @field(self.#callbacks, field.name) = val;
+                    @field(self.#callbacks, field_name) = val;
                 }
             }
         }

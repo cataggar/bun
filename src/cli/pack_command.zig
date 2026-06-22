@@ -985,7 +985,7 @@ pub const PackCommand = struct {
             if (bin.expr.asString(allocator)) |bin_str| {
                 const normalized = bun.path.normalizeBuf(bin_str, &path_buf, .posix);
                 try bins.append(allocator, .{
-                    .path = try allocator.dupeZ(u8, normalized),
+                    .path = try bun.dupeZ(allocator, u8, normalized),
                     .type = .file,
                 });
                 return bins.items;
@@ -1000,7 +1000,7 @@ pub const PackCommand = struct {
                             if (bin_prop_value.asString(allocator)) |bin_str| {
                                 const normalized = bun.path.normalizeBuf(bin_str, &path_buf, .posix);
                                 try bins.append(allocator, .{
-                                    .path = try allocator.dupeZ(u8, normalized),
+                                    .path = try bun.dupeZ(allocator, u8, normalized),
                                     .type = .file,
                                 });
                             }
@@ -1020,7 +1020,7 @@ pub const PackCommand = struct {
                         if (bin.expr.asString(allocator)) |bin_str| {
                             const normalized = bun.path.normalizeBuf(bin_str, &path_buf, .posix);
                             try bins.append(allocator, .{
-                                .path = try allocator.dupeZ(u8, normalized),
+                                .path = try bun.dupeZ(allocator, u8, normalized),
                                 .type = .dir,
                             });
                         }
@@ -1591,7 +1591,7 @@ pub const PackCommand = struct {
                     .manager = manager,
                     .package_name = package_name,
                     .package_version = package_version,
-                    .abs_tarball_path = try ctx.allocator.dupeZ(u8, abs_tarball_dest),
+                    .abs_tarball_path = try bun.dupeZ(ctx.allocator, u8, abs_tarball_dest),
                     .tarball_bytes = "",
                     .shasum = undefined,
                     .integrity = undefined,
@@ -1671,7 +1671,7 @@ pub const PackCommand = struct {
             const most_likely_a_slash = dest_buf[abs_tarball_dest_dir_end];
             dest_buf[abs_tarball_dest_dir_end] = 0;
             const abs_tarball_dest_dir = dest_buf[0..abs_tarball_dest_dir_end :0];
-            bun.makePath(std.fs.cwd(), abs_tarball_dest_dir) catch {};
+            bun.makePath(std.Io.Dir.cwd(), abs_tarball_dest_dir) catch {};
             dest_buf[abs_tarball_dest_dir_end] = most_likely_a_slash;
         }
 
@@ -1926,7 +1926,7 @@ pub const PackCommand = struct {
                 .manager = manager,
                 .package_name = package_name,
                 .package_version = package_version,
-                .abs_tarball_path = try ctx.allocator.dupeZ(u8, abs_tarball_dest),
+                .abs_tarball_path = try bun.dupeZ(ctx.allocator, u8, abs_tarball_dest),
                 .tarball_bytes = tarball_bytes,
                 .shasum = shasum,
                 .integrity = integrity,
@@ -2648,7 +2648,7 @@ pub const bindings = struct {
         const tarball_path = tarball_path_str.toUTF8(bun.default_allocator);
         defer tarball_path.deinit();
 
-        const tarball_file = File.from(std.fs.cwd().openFile(tarball_path.slice(), .{}) catch |err| {
+        const tarball_file = File.from(std.Io.Dir.cwd().openFile(bun.blockingIo(), tarball_path.slice(), .{}) catch |err| {
             return global.throw("failed to open tarball file \"{s}\": {s}", .{ tarball_path.slice(), @errorName(err) });
         });
         defer tarball_file.close();

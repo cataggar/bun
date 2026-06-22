@@ -101,7 +101,10 @@ pub const FD = packed struct(backing_int) {
     }
 
     pub fn stdFile(fd: FD) std.Io.File {
-        return .{ .handle = fd.native() };
+        return .{
+            .handle = fd.native(),
+            .flags = .{ .nonblocking = false },
+        };
     }
 
     pub fn stdDir(fd: FD) std.Io.Dir {
@@ -416,16 +419,23 @@ pub const FD = packed struct(backing_int) {
                     // support the standard library functions (since they would
                     // likely have run the Zig compiler, and it's not the end of
                     // the world if this fails.
-                    const path = std.os.getFdPath(fd_native, &path_buf) catch |err| switch (err) {
-                        error.FileNotFound => {
-                            try writer.writeAll("[BADF]");
-                            break :print_with_path;
-                        },
-                        else => |e| {
-                            try writer.print("[unknown: error.{s}]", .{@errorName(e)});
+                    const path = switch (bun.sys.getFdPath(fd, &path_buf)) {
+                        .result => |path| path,
+                        .err => |err| {
+                            if (err.getErrno() == .BADF or err.getErrno() == .NOENT) {
+                                try writer.writeAll("[BADF]");
+                                break :print_with_path;
+                            }
+                            try writer.print("[unknown: {s}]", .{err.name()});
                             break :print_with_path;
                         },
                     };
+                    if (path.len == 0) {
+                        if (fd_native < 0) {
+                            try writer.writeAll("[BADF]");
+                            break :print_with_path;
+                        }
+                    }
                     try writer.print("[{s}]", .{path});
                 }
             },

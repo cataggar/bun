@@ -199,7 +199,7 @@ pub const AnsiRenderer = struct {
 
     pub fn init(allocator: Allocator, src_text: []const u8, theme: Theme) AnsiRenderer {
         var r: AnsiRenderer = .{
-            .out = .{ .list = .{}, .allocator = allocator, .oom = false },
+            .out = .{ .list = .empty, .allocator = allocator, .oom = false },
             .allocator = allocator,
             .src_text = src_text,
             .theme = theme,
@@ -1604,7 +1604,7 @@ pub const AnsiRenderer = struct {
             for (segments) |*s| s.deinit(self.allocator);
             self.allocator.free(segments);
         }
-        @memset(segments, .{});
+        @memset(segments, .empty);
 
         // Per-cell ANSI state snapshotted at the START of each segment.
         // `state_at[col][line]` is the SGR/OSC 8 state that was active
@@ -1619,7 +1619,7 @@ pub const AnsiRenderer = struct {
             for (state_at) |*s| s.deinit(self.allocator);
             self.allocator.free(state_at);
         }
-        @memset(state_at, .{});
+        @memset(state_at, .empty);
 
         var lines: usize = 1;
         for (widths, 0..) |w, i| {
@@ -2178,7 +2178,7 @@ fn resolveLocalImagePath(src: []const u8, allocator: Allocator, base_dir: ?[]con
     // for any entry, including directories — and emitKittyImageFile sets
     // q=2 so the terminal silently drops directory paths without falling
     // through to alt text.
-    const abs_z = allocator.dupeZ(u8, abs) catch {
+    const abs_z = bun.dupeZ(allocator, u8, abs) catch {
         allocator.free(abs);
         return null;
     };

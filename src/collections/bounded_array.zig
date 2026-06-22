@@ -282,7 +282,26 @@ pub fn BoundedArrayAligned(
             @compileError("The Writer interface is only defined for BoundedArray(u8, ...) " ++
                 "but the given type is BoundedArray(" ++ @typeName(T) ++ ", ...)")
         else
-            std.io.GenericWriter(*Self, error{Overflow}, appendWrite);
+            struct {
+                context: *Self,
+
+                pub const Error = error{Overflow};
+
+                pub fn writeAll(w: *@This(), bytes: []const u8) Error!void {
+                    try w.context.appendSlice(bytes);
+                }
+
+                pub fn writeByte(w: *@This(), byte: u8) Error!void {
+                    try w.context.append(byte);
+                }
+
+                pub fn print(w: *@This(), comptime fmt: []const u8, args: anytype) Error!void {
+                    const initial_len = w.context.len;
+                    var fixed = std.Io.Writer.fixed(w.context.unusedCapacitySlice());
+                    fixed.print(fmt, args) catch return error.Overflow;
+                    try w.context.resize(initial_len + fixed.end);
+                }
+            };
 
         /// Initializes a writer which will write into the array.
         pub fn writer(self: *Self) Writer {

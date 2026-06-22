@@ -4,9 +4,17 @@ pub fn BufferedReader(comptime buffer_size: usize, comptime ReaderType: type) ty
         buf: [buffer_size]u8,
         start: usize = 0,
         end: usize = 0,
+        reader_instance: std.Io.Reader = .{
+            .vtable = &.{
+                .stream = stream,
+            },
+            .buffer = &.{},
+            .seek = 0,
+            .end = 0,
+        },
 
         pub const Error = ReaderType.Error;
-        pub const Reader = std.Io.GenericReader(*Self, Error, read);
+        pub const Reader = *std.Io.Reader;
 
         const Self = @This();
 
@@ -35,7 +43,21 @@ pub fn BufferedReader(comptime buffer_size: usize, comptime ReaderType: type) ty
         }
 
         pub fn reader(self: *Self) Reader {
-            return .{ .context = self };
+            self.reader_instance.seek = 0;
+            self.reader_instance.end = 0;
+            return &self.reader_instance;
+        }
+
+        fn stream(reader_: *std.Io.Reader, writer: *std.Io.Writer, limit: std.Io.Limit) std.Io.Reader.StreamError!usize {
+            const self: *Self = @alignCast(@fieldParentPtr("reader_instance", reader_));
+            const max = limit.toInt() orelse std.math.maxInt(usize);
+            if (max == 0) return 0;
+
+            var buf: [buffer_size]u8 = undefined;
+            const dest = buf[0..@min(buf.len, max)];
+            const amt = self.read(dest) catch return error.ReadFailed;
+            try writer.writeAll(dest[0..amt]);
+            return amt;
         }
     };
 }

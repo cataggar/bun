@@ -732,7 +732,7 @@ pub fn onStructuredCloneDeserialize(globalThis: *jsc.JSGlobalObject, ptr: *[*]u8
     var reader = std.Io.Reader.fixed(ptr.*[0..total_length]);
 
     const result = _onStructuredCloneDeserialize(globalThis, @TypeOf(&reader), &reader) catch |err| switch (err) {
-        error.EndOfStream, error.TooSmall, error.InvalidValue => {
+        error.EndOfStream, error.InvalidValue => {
             return globalThis.throw("Blob.onStructuredCloneDeserialize failed", .{});
         },
         error.OutOfMemory => {

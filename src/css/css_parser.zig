@@ -530,12 +530,13 @@ pub fn DefineRectShorthand(comptime T: type, comptime V: type) type {
 }
 
 pub fn DefineSizeShorthand(comptime T: type, comptime V: type) type {
-    if (std.meta.fields(T).len != 2) @compileError("DefineSizeShorthand must be used on a struct with 2 fields");
+    const field_names = std.meta.fieldNames(T);
+    if (field_names.len != 2) @compileError("DefineSizeShorthand must be used on a struct with 2 fields");
     return struct {
         pub fn toCss(this: *const T, dest: *Printer) PrintErr!void {
             const size: css_values.size.Size2D(V) = .{
-                .a = @field(this, std.meta.fields(T)[0].name),
-                .b = @field(this, std.meta.fields(T)[1].name),
+                .a = @field(this, field_names[0]),
+                .b = @field(this, field_names[1]),
             };
             return size.toCss(dest);
             // TODO: unfuck this
@@ -549,8 +550,8 @@ pub fn DefineSizeShorthand(comptime T: type, comptime V: type) type {
             };
 
             var this: T = undefined;
-            @field(this, std.meta.fields(T)[0].name) = size.a;
-            @field(this, std.meta.fields(T)[1].name) = size.b;
+            @field(this, field_names[0]) = size.a;
+            @field(this, field_names[1]) = size.b;
 
             return .{ .result = this };
             // TODO: unfuck this
@@ -575,8 +576,8 @@ pub fn DeriveParse(comptime T: type) type {
                     var first_payload_index: ?usize = null;
                     var payload_count: usize = 0;
                     var void_count: usize = 0;
-                    for (tyinfo.@"union".fields, 0..) |field, i| {
-                        if (field.type == void) {
+                    for (tyinfo.@"union".field_types, 0..) |FieldType, i| {
+                        if (FieldType == void) {
                             void_count += 1;
                             if (first_void_index == null) first_void_index = i;
                         } else {
@@ -604,10 +605,11 @@ pub fn DeriveParse(comptime T: type) type {
                 .err => |e| return .{ .err = e },
             };
             if (Map.getCaseInsensitiveWithEql(ident, bun.strings.eqlComptimeIgnoreLen)) |matched| {
-                inline for (bun.meta.EnumFields(enum_actual_type)) |field| {
-                    if (field.value == @intFromEnum(matched)) {
-                        if (comptime is_union_enum) return .{ .result = @unionInit(T, field.name, void) };
-                        return .{ .result = @enumFromInt(field.value) };
+                const enum_info = @typeInfo(enum_actual_type).@"enum";
+                inline for (enum_info.field_names, enum_info.field_values) |field_name, field_value| {
+                    if (field_value == @intFromEnum(matched)) {
+                        if (comptime is_union_enum) return .{ .result = @unionInit(T, field_name, void) };
+                        return .{ .result = @enumFromInt(field_value) };
                     }
                 }
                 unreachable;
@@ -653,72 +655,87 @@ pub fn DeriveParse(comptime T: type) type {
         ) Result(T) {
             const last_payload_index = first_payload_index + payload_count - 1;
             if (comptime maybe_first_void_index == null) {
-                inline for (tyinfo.@"union".fields[first_payload_index .. first_payload_index + payload_count], first_payload_index..) |field, i| {
+                inline for (
+                    tyinfo.@"union".field_names[first_payload_index .. first_payload_index + payload_count],
+                    tyinfo.@"union".field_types[first_payload_index .. first_payload_index + payload_count],
+                    first_payload_index..,
+                ) |field_name, FieldType, i| {
                     if (comptime (i == last_payload_index)) {
-                        return .{ .result = switch (generic.parseFor(field.type)(input)) {
-                            .result => |v| @unionInit(T, field.name, v),
+                        return .{ .result = switch (generic.parseFor(FieldType)(input)) {
+                            .result => |v| @unionInit(T, field_name, v),
                             .err => |e| return .{ .err = e },
                         } };
                     }
-                    if (input.tryParse(generic.parseFor(field.type), .{}).asValue()) |v| {
-                        return .{ .result = @unionInit(T, field.name, v) };
+                    if (input.tryParse(generic.parseFor(FieldType), .{}).asValue()) |v| {
+                        return .{ .result = @unionInit(T, field_name, v) };
                     }
                 }
             }
 
             const first_void_index = maybe_first_void_index.?;
 
-            const void_fields = bun.meta.EnumFields(T)[first_void_index .. first_void_index + void_count];
+            const enum_info = enum_type.@"enum";
+            const void_field_names = enum_info.field_names[first_void_index .. first_void_index + void_count];
+            const void_field_values = enum_info.field_values[first_void_index .. first_void_index + void_count];
 
             if (comptime void_count == 1) {
-                const void_field = enum_type.@"enum".fields[first_void_index];
+                const void_field_name = enum_info.field_names[first_void_index];
+                const void_field_value = enum_info.field_values[first_void_index];
                 // The field is declared before the payload fields.
                 // So try to parse an ident matching the name of the field, then fallthrough
                 // to parsing the payload fields.
                 if (comptime first_void_index < first_payload_index) {
-                    if (input.tryParse(Parser.expectIdentMatching, .{void_field.name}).isOk()) {
-                        if (comptime is_union_enum) return .{ .result = @unionInit(T, void_field.name, {}) };
-                        return .{ .result = @enumFromInt(void_field.value) };
+                    if (input.tryParse(Parser.expectIdentMatching, .{void_field_name}).isOk()) {
+                        if (comptime is_union_enum) return .{ .result = @unionInit(T, void_field_name, {}) };
+                        return .{ .result = @enumFromInt(void_field_value) };
                     }
 
-                    inline for (tyinfo.@"union".fields[first_payload_index .. first_payload_index + payload_count], first_payload_index..) |field, i| {
+                    inline for (
+                        tyinfo.@"union".field_names[first_payload_index .. first_payload_index + payload_count],
+                        tyinfo.@"union".field_types[first_payload_index .. first_payload_index + payload_count],
+                        first_payload_index..,
+                    ) |field_name, FieldType, i| {
                         if (comptime (i == last_payload_index and last_payload_index > first_void_index)) {
-                            return .{ .result = switch (generic.parseFor(field.type)(input)) {
-                                .result => |v| @unionInit(T, field.name, v),
+                            return .{ .result = switch (generic.parseFor(FieldType)(input)) {
+                                .result => |v| @unionInit(T, field_name, v),
                                 .err => |e| return .{ .err = e },
                             } };
                         }
-                        if (input.tryParse(generic.parseFor(field.type), .{}).asValue()) |v| {
-                            return .{ .result = @unionInit(T, field.name, v) };
+                        if (input.tryParse(generic.parseFor(FieldType), .{}).asValue()) |v| {
+                            return .{ .result = @unionInit(T, field_name, v) };
                         }
                     }
                 } else {
-                    inline for (tyinfo.@"union".fields[first_payload_index .. first_payload_index + payload_count], first_payload_index..) |field, i| {
+                    inline for (
+                        tyinfo.@"union".field_names[first_payload_index .. first_payload_index + payload_count],
+                        tyinfo.@"union".field_types[first_payload_index .. first_payload_index + payload_count],
+                        first_payload_index..,
+                    ) |field_name, FieldType, i| {
                         if (comptime (i == last_payload_index and last_payload_index > first_void_index)) {
-                            return .{ .result = switch (generic.parseFor(field.type)(input)) {
-                                .result => |v| @unionInit(T, field.name, v),
+                            return .{ .result = switch (generic.parseFor(FieldType)(input)) {
+                                .result => |v| @unionInit(T, field_name, v),
                                 .err => |e| return .{ .err = e },
                             } };
                         }
-                        if (input.tryParse(generic.parseFor(field.type), .{}).asValue()) |v| {
-                            return .{ .result = @unionInit(T, field.name, v) };
+                        if (input.tryParse(generic.parseFor(FieldType), .{}).asValue()) |v| {
+                            return .{ .result = @unionInit(T, field_name, v) };
                         }
                     }
 
                     // We can generate this as the last statements of the function, avoiding the `input.tryParse` routine above
-                    if (input.expectIdentMatching(void_field.name).asErr()) |e| return .{ .err = e };
-                    if (comptime is_union_enum) return .{ .result = @unionInit(T, void_field.name, {}) };
-                    return .{ .result = @enumFromInt(void_field.value) };
+                    if (input.expectIdentMatching(void_field_name).asErr()) |e| return .{ .err = e };
+                    if (comptime is_union_enum) return .{ .result = @unionInit(T, void_field_name, {}) };
+                    return .{ .result = @enumFromInt(void_field_value) };
                 }
             } else if (comptime first_void_index < first_payload_index) {
                 // Multiple fields declared before the payload fields, use tryParse
                 const state = input.state();
                 if (input.tryParse(Parser.expectIdent, .{}).asValue()) |ident| {
                     if (Map.getCaseInsensitiveWithEql(ident, bun.strings.eqlComptimeIgnoreLen)) |matched| {
-                        inline for (void_fields) |field| {
-                            if (field.value == @intFromEnum(matched)) {
-                                if (comptime is_union_enum) return .{ .result = @unionInit(T, field.name, {}) };
-                                return .{ .result = @enumFromInt(field.value) };
+                        inline for (void_field_names, void_field_values) |field_name, field_value| {
+                            if (field_value == @intFromEnum(matched)) {
+                                if (comptime is_union_enum) return .{ .result = @unionInit(T, field_name, {}) };
+                                return .{ .result = @enumFromInt(field_value) };
                             }
                         }
                         unreachable;
@@ -726,27 +743,35 @@ pub fn DeriveParse(comptime T: type) type {
                     input.reset(&state);
                 }
 
-                inline for (tyinfo.@"union".fields[first_payload_index .. first_payload_index + payload_count], first_payload_index..) |field, i| {
+                inline for (
+                    tyinfo.@"union".field_names[first_payload_index .. first_payload_index + payload_count],
+                    tyinfo.@"union".field_types[first_payload_index .. first_payload_index + payload_count],
+                    first_payload_index..,
+                ) |field_name, FieldType, i| {
                     if (comptime (i == last_payload_index and last_payload_index > first_void_index)) {
-                        return .{ .result = switch (generic.parseFor(field.type)(input)) {
-                            .result => |v| @unionInit(T, field.name, v),
+                        return .{ .result = switch (generic.parseFor(FieldType)(input)) {
+                            .result => |v| @unionInit(T, field_name, v),
                             .err => |e| return .{ .err = e },
                         } };
                     }
-                    if (input.tryParse(generic.parseFor(field.type), .{}).asValue()) |v| {
-                        return .{ .result = @unionInit(T, field.name, v) };
+                    if (input.tryParse(generic.parseFor(FieldType), .{}).asValue()) |v| {
+                        return .{ .result = @unionInit(T, field_name, v) };
                     }
                 }
             } else if (comptime first_void_index > first_payload_index) {
-                inline for (tyinfo.@"union".fields[first_payload_index .. first_payload_index + payload_count], first_payload_index..) |field, i| {
+                inline for (
+                    tyinfo.@"union".field_names[first_payload_index .. first_payload_index + payload_count],
+                    tyinfo.@"union".field_types[first_payload_index .. first_payload_index + payload_count],
+                    first_payload_index..,
+                ) |field_name, FieldType, i| {
                     if (comptime (i == last_payload_index and last_payload_index > first_void_index)) {
-                        return .{ .result = switch (generic.parseFor(field.type)(input)) {
-                            .result => |v| @unionInit(T, field.name, v),
+                        return .{ .result = switch (generic.parseFor(FieldType)(input)) {
+                            .result => |v| @unionInit(T, field_name, v),
                             .err => |e| return .{ .err = e },
                         } };
                     }
-                    if (input.tryParse(generic.parseFor(field.type), .{}).asValue()) |v| {
-                        return .{ .result = @unionInit(T, field.name, v) };
+                    if (input.tryParse(generic.parseFor(FieldType), .{}).asValue()) |v| {
+                        return .{ .result = @unionInit(T, field_name, v) };
                     }
                 }
 
@@ -756,10 +781,10 @@ pub fn DeriveParse(comptime T: type) type {
                     .err => |e| return .{ .err = e },
                 };
                 if (Map.getCaseInsensitiveWithEql(ident, bun.strings.eqlComptimeIgnoreLen)) |matched| {
-                    inline for (void_fields) |field| {
-                        if (field.value == @intFromEnum(matched)) {
-                            if (comptime is_union_enum) return .{ .result = @unionInit(T, field.name, {}) };
-                            return .{ .result = @enumFromInt(field.value) };
+                    inline for (void_field_names, void_field_values) |field_name, field_value| {
+                        if (field_value == @intFromEnum(matched)) {
+                            if (comptime is_union_enum) return .{ .result = @unionInit(T, field_name, {}) };
+                            return .{ .result = @enumFromInt(field_value) };
                         }
                     }
                     unreachable;
@@ -806,43 +831,52 @@ pub fn DeriveParse(comptime T: type) type {
 /// - anonymous structs, will automatically serialize it if it has a `__generateToCss` function
 pub fn DeriveToCss(comptime T: type) type {
     const tyinfo = @typeInfo(T);
-    const enum_fields = bun.meta.EnumFields(T);
     const is_enum_or_union_enum = tyinfo == .@"union" or tyinfo == .@"enum";
+    const enum_info = if (tyinfo == .@"union") @typeInfo(tyinfo.@"union".tag_type.?).@"enum" else if (tyinfo == .@"enum") tyinfo.@"enum" else undefined;
 
     return struct {
         pub fn toCss(this: *const T, dest: *Printer) PrintErr!void {
             if (comptime is_enum_or_union_enum) {
-                inline for (std.meta.fields(T), 0..) |field, i| {
-                    if (@intFromEnum(this.*) == enum_fields[i].value) {
-                        if (comptime tyinfo == .@"enum" or field.type == void) {
-                            return dest.writeStr(enum_fields[i].name);
-                        } else if (comptime generic.hasToCss(field.type)) {
-                            return generic.toCss(field.type, &@field(this, field.name), dest);
-                        } else if (@hasDecl(field.type, "__generateToCss") and @typeInfo(field.type) == .@"struct") {
-                            const variant_fields = std.meta.fields(field.type);
-                            if (variant_fields.len > 1) {
-                                const last = variant_fields.len - 1;
-                                inline for (variant_fields, 0..) |variant_field, j| {
-                                    // Unwrap it from the optional
-                                    if (@typeInfo(variant_field.type) == .optional) {
-                                        if (@field(@field(this, field.name), variant_field.name)) |*value| {
-                                            try value.toCss(dest);
+                if (comptime tyinfo == .@"enum") {
+                    inline for (enum_info.field_names, enum_info.field_values) |field_name, field_value| {
+                        if (@intFromEnum(this.*) == field_value) {
+                            return dest.writeStr(field_name);
+                        }
+                    }
+                } else {
+                    inline for (tyinfo.@"union".field_names, tyinfo.@"union".field_types, enum_info.field_values) |field_name, FieldType, field_value| {
+                        if (@intFromEnum(this.*) == field_value) {
+                            if (comptime FieldType == void) {
+                                return dest.writeStr(field_name);
+                            } else if (comptime generic.hasToCss(FieldType)) {
+                                return generic.toCss(FieldType, &@field(this, field_name), dest);
+                            } else if (@hasDecl(FieldType, "__generateToCss") and @typeInfo(FieldType) == .@"struct") {
+                                const variant_info = @typeInfo(FieldType).@"struct";
+                                if (variant_info.field_names.len > 1) {
+                                    const last = variant_info.field_names.len - 1;
+                                    inline for (variant_info.field_names, variant_info.field_types, 0..) |variant_field_name, VariantFieldType, j| {
+                                        // Unwrap it from the optional
+                                        if (@typeInfo(VariantFieldType) == .optional) {
+                                            if (@field(@field(this, field_name), variant_field_name)) |*value| {
+                                                try value.toCss(dest);
+                                            }
+                                        } else {
+                                            try @field(@field(this, field_name), variant_field_name).toCss(dest);
                                         }
-                                    } else {
-                                        try @field(@field(this, field.name), variant_field.name).toCss(dest);
-                                    }
 
-                                    // Emit a space if there are more fields after
-                                    if (comptime j != last) {
-                                        try dest.writeChar(' ');
+                                        // Emit a space if there are more fields after
+                                        if (comptime j != last) {
+                                            try dest.writeChar(' ');
+                                        }
                                     }
+                                } else {
+                                    const variant_field_name = variant_info.field_names[0];
+                                    const VariantFieldType = variant_info.field_types[0];
+                                    try @field(VariantFieldType, "toCss")(@field(@field(this, field_name), variant_field_name), dest);
                                 }
                             } else {
-                                const variant_field = variant_fields[0];
-                                try @field(variant_field.type, "toCss")(@field(@field(this, field.name), variant_field.name), dest);
+                                @compileError("Don't know how to serialize this variant: " ++ @typeName(FieldType) ++ ", on " ++ @typeName(T) ++ ".\n\nYou probably want to implement a `toCss` function for this type, or add a dummy `fn __generateToCss() void {}` to the type signal that it is okay for it to be auto-generated by this function..");
                             }
-                        } else {
-                            @compileError("Don't know how to serialize this variant: " ++ @typeName(field.type) ++ ", on " ++ @typeName(T) ++ ".\n\nYou probably want to implement a `toCss` function for this type, or add a dummy `fn __generateToCss() void {}` to the type signal that it is okay for it to be auto-generated by this function..");
                         }
                     }
                 }
@@ -857,8 +891,9 @@ pub fn DeriveToCss(comptime T: type) type {
 pub const enum_property_util = struct {
     pub fn asStr(comptime T: type, this: *const T) []const u8 {
         const tag = @intFromEnum(this.*);
-        inline for (bun.meta.EnumFields(T)) |field| {
-            if (tag == field.value) return field.name;
+        const enum_info = @typeInfo(T).@"enum";
+        inline for (enum_info.field_names, enum_info.field_values) |field_name, field_value| {
+            if (tag == field_value) return field_name;
         }
         unreachable;
     }
@@ -885,7 +920,7 @@ pub const enum_property_util = struct {
 };
 
 pub fn DefineEnumProperty(comptime T: type) type {
-    const fields: []const std.builtin.Type.EnumField = std.meta.fields(T);
+    const enum_info = @typeInfo(T).@"enum";
 
     return struct {
         pub fn eql(lhs: *const T, rhs: *const T) bool {
@@ -900,8 +935,8 @@ pub fn DefineEnumProperty(comptime T: type) type {
             };
 
             // todo_stuff.match_ignore_ascii_case
-            inline for (fields) |field| {
-                if (bun.strings.eqlCaseInsensitiveASCIIICheckLength(ident, field.name)) return .{ .result = @enumFromInt(field.value) };
+            inline for (enum_info.field_names, enum_info.field_values) |field_name, field_value| {
+                if (bun.strings.eqlCaseInsensitiveASCIIICheckLength(ident, field_name)) return .{ .result = @enumFromInt(field_value) };
             }
 
             return .{ .err = location.newUnexpectedTokenError(.{ .ident = ident }) };
@@ -923,12 +958,12 @@ pub fn DefineEnumProperty(comptime T: type) type {
 }
 
 pub fn DeriveValueType(comptime T: type, comptime ValueTypeMap: anytype) type {
-    const field_values: []const MediaFeatureType = field_values: {
-        const fields = std.meta.fields(T);
-        var mapping: [fields.len]MediaFeatureType = undefined;
-        for (fields, 0..) |field, i| {
+    const enum_info = @typeInfo(T).@"enum";
+    const value_types: []const MediaFeatureType = field_values: {
+        var mapping: [enum_info.field_names.len]MediaFeatureType = undefined;
+        for (enum_info.field_names, 0..) |field_name, i| {
             // Check that it exists in the type map
-            mapping[i] = @field(ValueTypeMap, field.name);
+            mapping[i] = @field(ValueTypeMap, field_name);
         }
         const mapping_final = mapping;
         break :field_values mapping_final[0..];
@@ -936,9 +971,9 @@ pub fn DeriveValueType(comptime T: type, comptime ValueTypeMap: anytype) type {
 
     return struct {
         pub fn valueType(this: *const T) MediaFeatureType {
-            inline for (std.meta.fields(T), 0..) |field, i| {
-                if (field.value == @intFromEnum(this.*)) {
-                    return field_values[i];
+            inline for (enum_info.field_values, 0..) |field_value, i| {
+                if (field_value == @intFromEnum(this.*)) {
+                    return value_types[i];
                 }
             }
             unreachable;
@@ -1929,8 +1964,8 @@ pub fn TopLevelRuleParser(comptime AtRuleParserT: type) type {
             return NestedRuleParser(AtRuleParserT){
                 .options = this.options,
                 .at_rule_parser = this.at_rule_parser,
-                .declarations = DeclarationList{},
-                .important_declarations = DeclarationList{},
+                .declarations = .empty,
+                .important_declarations = .empty,
                 .rules = this.rules,
                 .is_in_style_rule = false,
                 .allow_declarations = false,
@@ -2068,9 +2103,9 @@ pub fn NestedRuleParser(comptime T: type) type {
                                     return input2.parseCommaSeparated(css_rules.page.PageSelector, css_rules.page.PageSelector.parse);
                                 }
                             };
-                            const selectors = switch (input.tryParse(Fn.parsefn, .{})) {
+                            const selectors: ArrayList(css_rules.page.PageSelector) = switch (input.tryParse(Fn.parsefn, .{})) {
                                 .result => |v| v,
-                                .err => ArrayList(css_rules.page.PageSelector){},
+                                .err => .empty,
                             };
                             break :brk .{ .page = selectors };
                         },
@@ -2206,7 +2241,7 @@ pub fn NestedRuleParser(comptime T: type) type {
                         var decl_parser = css_rules.font_face.FontFaceDeclarationParser{};
                         var parser = RuleBodyParser(css_rules.font_face.FontFaceDeclarationParser).new(input, &decl_parser);
                         // todo_stuff.think_mem_mgmt
-                        var properties: ArrayList(css_rules.font_face.FontFaceProperty) = .{};
+                        var properties: ArrayList(css_rules.font_face.FontFaceProperty) = .empty;
 
                         while (parser.next()) |result| {
                             if (result.asValue()) |decl| {
@@ -2343,7 +2378,7 @@ pub fn NestedRuleParser(comptime T: type) type {
                         var parser = css_rules.keyframes.KeyframesListParser{};
                         var iter = RuleBodyParser(css_rules.keyframes.KeyframesListParser).new(input, &parser);
                         // todo_stuff.think_mem_mgmt
-                        var keyframes = ArrayList(css_rules.keyframes.Keyframe){};
+                        var keyframes: ArrayList(css_rules.keyframes.Keyframe) = .empty;
 
                         while (iter.next()) |result| {
                             if (result.asValue()) |keyframe| {
@@ -2624,7 +2659,7 @@ pub fn NestedRuleParser(comptime T: type) type {
                 // about that).
                 if (this.composes_state == .allow) {
                     const len = input.position() - location;
-                    var usage = PropertyBitset.initEmpty();
+                    var usage = PropertyBitset.empty;
                     var custom_properties = bun.BabyList([]const u8){};
                     fillPropertyBitSet(this.allocator, &usage, &declarations, &custom_properties);
 
@@ -2699,8 +2734,8 @@ pub fn NestedRuleParser(comptime T: type) type {
                 .allocator = input.allocator(),
                 .options = this.options,
                 .at_rule_parser = this.at_rule_parser,
-                .declarations = DeclarationList{},
-                .important_declarations = DeclarationList{},
+                .declarations = .empty,
+                .important_declarations = .empty,
                 .rules = &rules,
                 .is_in_style_rule = this.is_in_style_rule or is_style_rule,
                 .allow_declarations = this.allow_declarations or this.is_in_style_rule or is_style_rule,
@@ -2716,7 +2751,7 @@ pub fn NestedRuleParser(comptime T: type) type {
 
             const parse_declarations = This.RuleBodyItemParser.parseDeclarations(&nested_parser);
             // TODO: think about memory management
-            var errors = ArrayList(ParseError(ParserError)){};
+            var errors = ArrayList(ParseError(ParserError)).empty;
             var iter = RuleBodyParser(This).new(input, &nested_parser);
 
             while (iter.next()) |result| {
@@ -3002,7 +3037,7 @@ pub const ComposesEntry = struct {
     composes: bun.BabyList(Composes) = .{},
 };
 pub const PropertyUsage = struct {
-    bitset: PropertyBitset = PropertyBitset.initEmpty(),
+    bitset: PropertyBitset = .empty,
     custom_properties: []const []const u8 = &.{},
     range: bun.logger.Range,
 
@@ -3012,7 +3047,7 @@ pub const PropertyUsage = struct {
     }
 };
 
-pub const PropertyBitset = std.bit_set.ArrayBitSet(usize, std.math.ceilPowerOfTwo(u16, bun.meta.EnumFields(PropertyIdTag).len) catch unreachable);
+pub const PropertyBitset = std.bit_set.ArrayBitSet(usize, std.math.ceilPowerOfTwo(u16, @typeInfo(PropertyIdTag).@"enum".field_names.len) catch unreachable);
 pub fn fillPropertyBitSet(allocator: Allocator, bitset: *PropertyBitset, block: *const DeclarationBlock, custom_properties: *bun.BabyList([]const u8)) void {
     for (block.declarations.items) |*prop| {
         const tag = switch (prop.*) {
@@ -3079,11 +3114,11 @@ pub fn StyleSheet(comptime AtRule: type) type {
         pub fn empty(allocator: Allocator) This {
             return This{
                 .rules = .{},
-                .sources = .{},
-                .source_map_urls = .{},
-                .license_comments = .{},
+                .sources = .empty,
+                .source_map_urls = .empty,
+                .license_comments = .empty,
                 .options = ParserOptions.default(allocator, null),
-                .composes = .{},
+                .composes = .empty,
             };
         }
 
@@ -3273,7 +3308,7 @@ pub fn StyleSheet(comptime AtRule: type) type {
                 &parser_extra,
             );
 
-            var license_comments = ArrayList([]const u8){};
+            var license_comments: ArrayList([]const u8) = .empty;
             var state = parser.state();
             while (switch (parser.nextIncludingWhitespaceAndComments()) {
                 .result => |v| v,
@@ -3308,9 +3343,9 @@ pub fn StyleSheet(comptime AtRule: type) type {
                 }
             }
 
-            var sources = ArrayList([]const u8){};
+            var sources: ArrayList([]const u8) = .empty;
             bun.handleOom(sources.append(allocator, options.filename));
-            var source_map_urls = ArrayList(?[]const u8){};
+            var source_map_urls: ArrayList(?[]const u8) = .empty;
             bun.handleOom(source_map_urls.append(allocator, parser.currentSourceMapUrl()));
 
             return .{
@@ -3383,9 +3418,9 @@ pub fn StyleSheet(comptime AtRule: type) type {
 
             const stylesheet = This{
                 .rules = imports_from_tailwind,
-                .sources = .{},
-                .source_map_urls = .{},
-                .license_comments = .{},
+                .sources = .empty,
+                .source_map_urls = .empty,
+                .license_comments = .empty,
                 .options = options,
             };
 

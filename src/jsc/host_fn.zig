@@ -93,14 +93,59 @@ pub fn toJSHostCall(
     scope.init(globalThis, src);
     defer scope.deinit();
 
-    const returned: error{ OutOfMemory, JSError, JSTerminated }!JSValue = @call(.auto, function, args);
-    const normal = returned catch |err| switch (err) {
-        error.JSError => .zero,
-        error.OutOfMemory => globalThis.throwOutOfMemoryValue(),
-        error.JSTerminated => .zero,
+    const returned = @call(.auto, function, args);
+    const ReturnType = @TypeOf(returned);
+    const normal = switch (@typeInfo(ReturnType)) {
+        .error_union => |info| brk: {
+            if (info.payload != JSValue) {
+                @compileError("toJSHostCall only supports JSValue or an error union payload of JSValue");
+            }
+            break :brk returned catch |err| jsHostErrorToValue(info.error_set, globalThis, err);
+        },
+        else => brk: {
+            if (ReturnType != JSValue) {
+                @compileError("toJSHostCall only supports JSValue or an error union payload of JSValue");
+            }
+            break :brk returned;
+        },
     };
     scope.assertExceptionPresenceMatches(normal == .zero);
     return normal;
+}
+
+inline fn errorSetContains(comptime ErrorSet: type, comptime name: []const u8) bool {
+    const names = @typeInfo(ErrorSet).error_set.error_names orelse return true;
+    for (names) |error_name| {
+        if (std.mem.eql(u8, error_name, name)) return true;
+    }
+    return false;
+}
+
+inline fn validateJSHostErrorSet(comptime ErrorSet: type) void {
+    const names = @typeInfo(ErrorSet).error_set.error_names orelse
+        @compileError("host functions must not return anyerror");
+    for (names) |error_name| {
+        if (!std.mem.eql(u8, error_name, "JSError") and
+            !std.mem.eql(u8, error_name, "OutOfMemory") and
+            !std.mem.eql(u8, error_name, "JSTerminated"))
+        {
+            @compileError("host functions must not return error." ++ error_name);
+        }
+    }
+}
+
+fn jsHostErrorToValue(comptime ErrorSet: type, globalThis: *JSGlobalObject, err: ErrorSet) JSValue {
+    comptime validateJSHostErrorSet(ErrorSet);
+    if (comptime errorSetContains(ErrorSet, "JSError")) {
+        if (err == error.JSError) return .zero;
+    }
+    if (comptime errorSetContains(ErrorSet, "OutOfMemory")) {
+        if (err == error.OutOfMemory) return globalThis.throwOutOfMemoryValue();
+    }
+    if (comptime errorSetContains(ErrorSet, "JSTerminated")) {
+        if (err == error.JSTerminated) return .zero;
+    }
+    unreachable;
 }
 
 /// Convert the return value of a function returning a maybe-empty JSValue into an error union.
@@ -154,16 +199,18 @@ pub fn fromJSHostCallGeneric(
 const ParsedHostFunctionErrorSet = struct {
     OutOfMemory: bool = false,
     JSError: bool = false,
+    JSTerminated: bool = false,
 };
 
-inline fn parseErrorSet(T: type, errors: []const std.builtin.Type.Error) ParsedHostFunctionErrorSet {
+inline fn parseErrorSet(T: type, errors: ?[]const [:0]const u8) ParsedHostFunctionErrorSet {
     return comptime brk: {
+        const error_names = errors orelse @compileError("host functions must not return anyerror");
         var errs: ParsedHostFunctionErrorSet = .{};
-        for (errors) |err| {
-            if (!@hasField(ParsedHostFunctionErrorSet, err.name)) {
-                @compileError("Return value from host function '" ++ @typeInfo(T) ++ "' can not contain error '" ++ err.name ++ "'");
+        for (error_names) |err_name| {
+            if (!@hasField(ParsedHostFunctionErrorSet, err_name)) {
+                @compileError("Return value from host function '" ++ @typeName(T) ++ "' can not contain error '" ++ err_name ++ "'");
             }
-            @field(errs, err.name) = true;
+            @field(errs, err_name) = true;
         }
         break :brk errs;
     };

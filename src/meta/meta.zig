@@ -2,19 +2,34 @@ pub fn OptionalChild(comptime T: type) type {
     const tyinfo = @typeInfo(T);
     if (tyinfo != .pointer) @compileError("OptionalChild(T) requires that T be a pointer to an optional type.");
     const child = @typeInfo(tyinfo.pointer.child);
-    if (child != .Optional) @compileError("OptionalChild(T) requires that T be a pointer to an optional type.");
-    return child.Optional.child;
+    if (child != .optional) @compileError("OptionalChild(T) requires that T be a pointer to an optional type.");
+    return child.optional.child;
 }
 
-pub fn EnumFields(comptime T: type) []const std.builtin.Type.EnumField {
-    const tyinfo = @typeInfo(T);
-    return switch (tyinfo) {
-        .@"union" => std.meta.fields(tyinfo.@"union".tag_type.?),
-        .@"enum" => tyinfo.@"enum".fields,
-        else => {
-            @compileError("Used `EnumFields(T)` on a type that is not an `enum` or a `union(enum)`");
-        },
+pub const EnumField = struct {
+    name: [:0]const u8,
+    value: comptime_int,
+};
+
+fn enumFieldCount(comptime T: type) usize {
+    return switch (@typeInfo(T)) {
+        .@"union" => |info| @typeInfo(info.tag_type.?).@"enum".field_names.len,
+        .@"enum" => |info| info.field_names.len,
+        else => @compileError("Used `EnumFields(T)` on a type that is not an `enum` or a `union(enum)`"),
     };
+}
+
+pub fn EnumFields(comptime T: type) [enumFieldCount(T)]EnumField {
+    const enum_info = switch (@typeInfo(T)) {
+        .@"union" => |info| @typeInfo(info.tag_type.?).@"enum",
+        .@"enum" => |info| info,
+        else => @compileError("Used `EnumFields(T)` on a type that is not an `enum` or a `union(enum)`"),
+    };
+    var fields: [enum_info.field_names.len]EnumField = undefined;
+    inline for (enum_info.field_names, enum_info.field_values, 0..) |name, value, i| {
+        fields[i] = .{ .name = name, .value = value };
+    }
+    return fields;
 }
 
 pub fn ReturnOfMaybe(comptime function: anytype) type {
@@ -28,17 +43,17 @@ pub fn MaybeResult(comptime MaybeType: type) type {
     const maybe_ty_info = @typeInfo(MaybeType);
 
     const maybe = maybe_ty_info.@"union";
-    if (maybe.fields.len != 2) @compileError("Expected the Maybe type to be a union(enum) with two variants");
+    if (maybe.field_names.len != 2) @compileError("Expected the Maybe type to be a union(enum) with two variants");
 
-    if (!std.mem.eql(u8, maybe.fields[0].name, "err")) {
-        @compileError("Expected the first field of the Maybe type to be \"err\", got: " ++ maybe.fields[0].name);
+    if (!std.mem.eql(u8, maybe.field_names[0], "err")) {
+        @compileError("Expected the first field of the Maybe type to be \"err\", got: " ++ maybe.field_names[0]);
     }
 
-    if (!std.mem.eql(u8, maybe.fields[1].name, "result")) {
-        @compileError("Expected the second field of the Maybe type to be \"result\"" ++ maybe.fields[1].name);
+    if (!std.mem.eql(u8, maybe.field_names[1], "result")) {
+        @compileError("Expected the second field of the Maybe type to be \"result\"" ++ maybe.field_names[1]);
     }
 
-    return maybe.fields[1].type;
+    return maybe.field_types[1];
 }
 
 pub fn ReturnOf(comptime function: anytype) type {
@@ -70,9 +85,10 @@ pub inline fn typeBaseName(comptime fullname: [:0]const u8) [:0]const u8 {
 }
 
 pub fn enumFieldNames(comptime Type: type) []const []const u8 {
-    var names: [std.meta.fieldNames(Type).len][]const u8 = std.meta.fieldNames(Type).*;
+    const field_names = std.meta.fieldNames(Type);
+    var names: [field_names.len][]const u8 = undefined;
     var i: usize = 0;
-    for (names) |name| {
+    for (field_names) |name| {
         // zig seems to include "_" or an empty string in the list of enum field names
         // it makes sense, but humans don't want that
         if (bun.strings.eqlAnyComptime(name, &.{ "_none", "", "_" })) {
@@ -215,11 +231,11 @@ pub const TaggedUnion = @import("./tagged_union.zig").TaggedUnion;
 pub fn hasStableMemoryLayout(comptime T: type) bool {
     const tyinfo = @typeInfo(T);
     return switch (tyinfo) {
-        .Type => true,
-        .Void => true,
-        .Bool => true,
-        .Int => true,
-        .Float => true,
+        .type => true,
+        .void => true,
+        .bool => true,
+        .int => true,
+        .float => true,
         .@"enum" => {
             // not supporting this rn
             if (tyinfo.@"enum".is_exhaustive) return false;
@@ -227,8 +243,8 @@ pub fn hasStableMemoryLayout(comptime T: type) bool {
         },
         .@"struct" => switch (tyinfo.@"struct".layout) {
             .auto => {
-                inline for (tyinfo.@"struct".fields) |field| {
-                    if (!hasStableMemoryLayout(field.field_type)) return false;
+                inline for (tyinfo.@"struct".field_types) |field_type| {
+                    if (!hasStableMemoryLayout(field_type)) return false;
                 }
                 return true;
             },
@@ -239,8 +255,8 @@ pub fn hasStableMemoryLayout(comptime T: type) bool {
             .auto => {
                 if (tyinfo.@"union".tag_type == null or !hasStableMemoryLayout(tyinfo.@"union".tag_type.?)) return false;
 
-                inline for (tyinfo.@"union".fields) |field| {
-                    if (!hasStableMemoryLayout(field.type)) return false;
+                inline for (tyinfo.@"union".field_types) |field_type| {
+                    if (!hasStableMemoryLayout(field_type)) return false;
                 }
 
                 return true;
@@ -262,14 +278,14 @@ pub fn isSimpleCopyType(comptime T: type) bool {
         .float => true,
         .@"enum" => true,
         .@"struct" => {
-            inline for (tyinfo.@"struct".fields) |field| {
-                if (!isSimpleCopyType(field.type)) return false;
+            inline for (tyinfo.@"struct".field_types) |field_type| {
+                if (!isSimpleCopyType(field_type)) return false;
             }
             return true;
         },
         .@"union" => {
-            inline for (tyinfo.@"union".fields) |field| {
-                if (!isSimpleCopyType(field.type)) return false;
+            inline for (tyinfo.@"union".field_types) |field_type| {
+                if (!isSimpleCopyType(field_type)) return false;
             }
             return true;
         },
@@ -311,13 +327,13 @@ pub const ListContainerType = enum {
 pub fn looksLikeListContainerType(comptime T: type) ?struct { list: ListContainerType, child: type } {
     const tyinfo = @typeInfo(T);
     if (tyinfo == .@"struct") {
-        const fields = tyinfo.@"struct".fields;
+        const info = tyinfo.@"struct";
 
         // Looks like array list
-        if (fields.len == 2 and
-            std.mem.eql(u8, fields[0].name, "items") and
-            std.mem.eql(u8, fields[1].name, "capacity"))
-            return .{ .list = .array_list, .child = std.meta.Child(fields[0].type) };
+        if (info.field_names.len == 2 and
+            std.mem.eql(u8, info.field_names[0], "items") and
+            std.mem.eql(u8, info.field_names[1], "capacity"))
+            return .{ .list = .array_list, .child = std.meta.Child(info.field_types[0]) };
 
         // Looks like babylist
         if (@hasDecl(T, "looksLikeContainerTypeBabyList")) {

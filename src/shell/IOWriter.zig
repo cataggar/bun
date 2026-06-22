@@ -669,9 +669,10 @@ pub fn enqueueFmt(
     comptime fmt: []const u8,
     args: anytype,
 ) Yield {
-    var buf_writer = this.buf.writer(bun.default_allocator);
-    const start = this.buf.items.len;
-    bun.handleOom(buf_writer.print(fmt, args));
+    var buf_writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.buf);
+    const start = buf_writer.writer.end;
+    buf_writer.writer.print(fmt, args) catch bun.outOfMemory();
+    this.buf = buf_writer.toArrayList();
 
     const childptr = if (@TypeOf(ptr) == ChildPtr) ptr else ChildPtr.init(ptr);
     if (this.handleBrokenPipe(childptr)) |yield| return yield;

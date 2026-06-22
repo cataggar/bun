@@ -109,7 +109,7 @@ pub const Lazy = union(enum) {
                 file.is_atty = true;
             }
 
-            const stat: bun.Stat = switch (bun.sys.fstat(fd)) {
+            const stat: bun.sys.Stat = switch (bun.sys.fstat(fd)) {
                 .result => |result| result,
                 .err => |err| {
                     fd.close();
@@ -117,7 +117,7 @@ pub const Lazy = union(enum) {
                 },
             };
 
-            if (bun.S.ISDIR(stat.mode)) {
+            if (bun.S.ISDIR(@intCast(stat.mode))) {
                 bun.Async.Closer.close(fd, {});
                 return .{ .err = .fromCode(.ISDIR, .fstat) };
             }
