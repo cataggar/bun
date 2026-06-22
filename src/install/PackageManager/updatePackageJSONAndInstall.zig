@@ -423,9 +423,9 @@ fn updatePackageJSONAndInstallWithManagerWithUpdates(
             0,
         ).unwrap()).handle.stdFile();
 
-        try workspace_package_json_file.pwriteAll(source, 0);
-        std.posix.ftruncate(workspace_package_json_file.handle, source.len) catch {};
-        workspace_package_json_file.close();
+        _ = try bun.sys.pwrite(bun.FD.fromStdFile(workspace_package_json_file), source, 0).unwrap();
+        bun.sys.ftruncate(bun.FD.fromStdFile(workspace_package_json_file), @intCast(source.len)).unwrap() catch {};
+        workspace_package_json_file.close(bun.blockingIo());
 
         if (subcommand == .remove) {
             if (!any_changes) {
