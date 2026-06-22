@@ -731,7 +731,6 @@ pub const UpdateInteractiveCommand = struct {
 
         var version_buf = std.array_list.Managed(u8).init(allocator);
         defer version_buf.deinit();
-        const version_writer = version_buf.writer();
 
         for (workspace_pkg_ids) |workspace_pkg_id| {
             const pkg_deps = pkg_dependencies[workspace_pkg_id];
@@ -787,15 +786,15 @@ pub const UpdateInteractiveCommand = struct {
                 }
 
                 version_buf.clearRetainingCapacity();
-                try version_writer.print("{f}", .{resolution.value.npm.version.fmt(string_buf)});
+                try version_buf.print("{f}", .{resolution.value.npm.version.fmt(string_buf)});
                 const current_version_buf = try allocator.dupe(u8, version_buf.items);
 
                 version_buf.clearRetainingCapacity();
-                try version_writer.print("{f}", .{update_version.version.fmt(manifest.string_buf)});
+                try version_buf.print("{f}", .{update_version.version.fmt(manifest.string_buf)});
                 const update_version_buf = try allocator.dupe(u8, version_buf.items);
 
                 version_buf.clearRetainingCapacity();
-                try version_writer.print("{f}", .{latest.version.fmt(manifest.string_buf)});
+                try version_buf.print("{f}", .{latest.version.fmt(manifest.string_buf)});
                 const latest_version_buf = try allocator.dupe(u8, version_buf.items);
 
                 // Already filtered by version.order check above

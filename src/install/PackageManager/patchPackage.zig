@@ -71,7 +71,7 @@ pub fn doPatchCommit(
 
     // Attempt to open the existing node_modules folder
     var root_node_modules = switch (bun.sys.openatOSPath(bun.FD.cwd(), bun.OSPathLiteral("node_modules"), bun.O.DIRECTORY | bun.O.RDONLY, 0o755)) {
-        .result => |fd| std.Io.Dir{ .fd = fd.cast() },
+        .result => |fd| std.Io.Dir{ .handle = fd.cast() },
         .err => |e| {
             Output.prettyError(
                 "<r><red>error<r>: failed to open root <b>node_modules<r> folder: {f}<r>\n",
