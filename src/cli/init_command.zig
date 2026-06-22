@@ -23,7 +23,14 @@ pub const InitCommand = struct {
         };
 
         var input: std.array_list.Managed(u8) = .init(alloc);
-        try bun.Output.buffered_stdin.reader().readUntilDelimiterArrayList(&input, '\n', 1024);
+        // Read a line from stdin. The deprecated buffered_stdin reader only
+        // supports streaming (empty buffer) under Zig 0.17, so read directly.
+        while (input.items.len < 1024) {
+            var byte: [1]u8 = undefined;
+            const n = bun.sys.read(bun.FD.stdin(), &byte).unwrap() catch break;
+            if (n == 0 or byte[0] == '\n') break;
+            try input.append(byte[0]);
+        }
 
         if (strings.endsWithChar(input.items, '\r')) {
             _ = input.pop();
@@ -229,12 +236,12 @@ pub const InitCommand = struct {
         /// Create a new asset file, overriding anything that already exists. Known
         /// assets will have their contents pre-populated; otherwise the file will be empty.
         fn create(comptime asset_name: []const u8, args: anytype) !void {
-            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".fields.len > 0;
+            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".field_names.len > 0;
             return createFull(asset_name, asset_name, "", is_template, args);
         }
 
         pub fn createWithContents(comptime asset_name: []const u8, comptime contents: []const u8, args: anytype) !void {
-            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".fields.len > 0;
+            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".field_names.len > 0;
             return createFullWithContents(asset_name, contents, "", is_template, args);
         }
 
@@ -512,8 +519,8 @@ pub const InitCommand = struct {
             }
 
             // Find any source file
-            var dir = std.fs.cwd().openDir(".", .{ .iterate = true }) catch break :infer;
-            defer dir.close();
+            var dir = std.Io.Dir.cwd().openDir(bun.blockingIo(), ".", .{ .iterate = true }) catch break :infer;
+            defer dir.close(bun.blockingIo());
             var it = bun.DirIterator.iterate(.fromStdDir(dir), .u8);
             while (try it.next().unwrap()) |file| {
                 if (file.kind != .file) continue;

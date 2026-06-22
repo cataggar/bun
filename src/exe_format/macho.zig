@@ -398,7 +398,7 @@ pub const MachoFile = struct {
 
             // First pass: find segments to establish bounds
             while (try it.next()) |cmd| {
-                if (cmd.cmd() == .SEGMENT_64) {
+                if (cmd.hdr.cmd == .SEGMENT_64) {
                     const seg = cmd.cast(macho.segment_command_64).?;
 
                     // Store segment info
@@ -418,13 +418,14 @@ pub const MachoFile = struct {
 
             // Reset iterator
             it = macho.LoadCommandIterator{
+                .next_index = 0,
                 .ncmds = header.ncmds,
-                .buffer = obj[header_size..][0..header.sizeofcmds],
+                .r = std.Io.Reader.fixed(obj[header_size..][0..header.sizeofcmds]),
             };
 
             // Second pass: find code signature
             while (try it.next()) |cmd| {
-                switch (cmd.cmd()) {
+                switch (cmd.hdr.cmd) {
                     .CODE_SIGNATURE => {
                         const cs = cmd.cast(macho.linkedit_data_command).?;
                         sig_off = cs.dataoff;
@@ -545,13 +546,13 @@ pub const MachoFile = struct {
             @memset(self.data.unusedCapacitySlice(), 0);
 
             // Position writer at signature offset
-            var sig_writer = self.data.writer();
+            // append directly to self.data (Io.Writer has no writeInt; writeAll-only here)
 
             // Write signature components
-            try sig_writer.writeAll(mem.asBytes(&super_blob));
-            try sig_writer.writeAll(mem.asBytes(&blob_index));
-            try sig_writer.writeAll(mem.asBytes(&code_dir));
-            try sig_writer.writeAll(id);
+            try self.data.appendSlice(mem.asBytes(&super_blob));
+            try self.data.appendSlice(mem.asBytes(&blob_index));
+            try self.data.appendSlice(mem.asBytes(&code_dir));
+            try self.data.appendSlice(id);
 
             // Hash and write pages
             var remaining = self.data.items[0..self.sig_off];
@@ -559,7 +560,7 @@ pub const MachoFile = struct {
                 const page = remaining[0..PAGE_SIZE];
                 var digest: bun.sha.SHA256.Digest = undefined;
                 bun.sha.SHA256.hash(page, &digest, null);
-                try sig_writer.writeAll(&digest);
+                try self.data.appendSlice(&digest);
                 remaining = remaining[PAGE_SIZE..];
             }
 
@@ -568,7 +569,7 @@ pub const MachoFile = struct {
                 @memcpy(last_page[0..remaining.len], remaining);
                 var digest: bun.sha.SHA256.Digest = undefined;
                 bun.sha.SHA256.hash(&last_page, &digest, null);
-                try sig_writer.writeAll(&digest);
+                try self.data.appendSlice(&digest);
             }
 
             // Finally, ensure that the length of data we write matches the total data expected

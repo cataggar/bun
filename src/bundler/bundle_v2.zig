@@ -2358,7 +2358,7 @@ pub const BundleV2 = struct {
     ) !void {
         if (outdir.len > 0) {
             // Open the output directory
-            var root_dir = bun.FD.cwd().stdDir().makeOpenPath(outdir, .{}) catch |err| {
+            var root_dir = bun.FD.cwd().stdDir().createDirPathOpen(bun.blockingIo(), outdir, .{}) catch |err| {
                 bun.Output.warn("Failed to open output directory '{s}': {s}", .{ outdir, @errorName(err) });
                 return;
             };

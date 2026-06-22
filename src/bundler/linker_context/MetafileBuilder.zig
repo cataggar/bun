@@ -357,9 +357,9 @@ pub fn generateMarkdown(allocator: std.mem.Allocator, metafile_json: []const u8)
     const root = parsed.value;
     if (root != .object) return error.InvalidJSON;
 
-    var md = std.array_list.Managed(u8).init(allocator);
-    errdefer md.deinit();
-    const writer = md.writer();
+    var md_aw: std.Io.Writer.Allocating = .init(allocator);
+    errdefer md_aw.deinit();
+    const writer = &md_aw.writer;
 
     // Get inputs and outputs
     const inputs = root.object.get("inputs") orelse return error.InvalidJSON;
@@ -544,7 +544,7 @@ pub fn generateMarkdown(allocator: std.mem.Allocator, metafile_json: []const u8)
                                 if (matched_key) |key| {
                                     const gop = try imported_by.getOrPut(key);
                                     if (!gop.found_existing) {
-                                        gop.value_ptr.* = .{};
+                                        gop.value_ptr.* = .empty;
                                     }
                                     try gop.value_ptr.append(allocator, path);
                                 }
@@ -1058,7 +1058,7 @@ pub fn generateMarkdown(allocator: std.mem.Allocator, metafile_json: []const u8)
         try writer.writeAll("```\n");
     }
 
-    return md.toOwnedSlice();
+    return md_aw.toOwnedSlice();
 }
 
 /// Strips leading "../" sequences from a relative path.
