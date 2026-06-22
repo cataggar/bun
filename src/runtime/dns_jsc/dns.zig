@@ -70,7 +70,7 @@ const LibInfo = struct {
 
         var stack_fallback = bun.stackFallback(1024, bun.default_allocator);
         const name_allocator = stack_fallback.get();
-        const name_z = bun.handleOom(bun.dupeZ(name_allocator, u8, query.name));
+        const name_z = bun.handleOom(bun.dupeZ(bun, name_allocator, u8, query.name));
         defer name_allocator.free(name_z);
 
         var request = GetAddrInfoRequest.init(
@@ -1217,7 +1217,7 @@ pub const internal = struct {
 
             pub fn toOwned(this: @This()) @This() {
                 if (this.host) |host| {
-                    const host_copy = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, host));
+                    const host_copy = bun.handleOom(bun.dupeZ(bun, bun.default_allocator, u8, host));
                     return .{
                         .host = host_copy,
                         .hash = this.hash,
@@ -1825,7 +1825,7 @@ pub const internal = struct {
             return globalThis.throwInvalidArguments("hostname must be a string", .{});
         }
 
-        const hostname_z = try bun.dupeZ(bun.default_allocator, u8, hostname_slice.slice());
+        const hostname_z = try bun.dupeZ(bun, bun.default_allocator, u8, hostname_slice.slice());
         defer bun.default_allocator.free(hostname_z);
 
         const port: u16 = brk: {

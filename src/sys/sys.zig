@@ -4490,7 +4490,7 @@ pub fn getSelfExeSharedLibPaths(allocator: std.mem.Allocator) error{OutOfMemory}
                     _ = size;
                     const name = info.dlpi_name orelse return;
                     if (name[0] == '/') {
-                        const item = try bun.dupeZ(list.allocator, u8, mem.sliceTo(name, 0));
+                        const item = try bun.dupeZ(bun, list.allocator, u8, mem.sliceTo(name, 0));
                         errdefer list.allocator.free(item);
                         try list.append(item);
                     }
@@ -4510,7 +4510,7 @@ pub fn getSelfExeSharedLibPaths(allocator: std.mem.Allocator) error{OutOfMemory}
             const img_count = std.c._dyld_image_count();
             for (0..img_count) |i| {
                 const name = std.c._dyld_get_image_name(i);
-                const item = try bun.dupeZ(allocator, u8, mem.sliceTo(name, 0));
+                const item = try bun.dupeZ(bun, allocator, u8, mem.sliceTo(name, 0));
                 errdefer allocator.free(item);
                 try paths.append(item);
             }
@@ -4528,7 +4528,7 @@ pub fn getSelfExeSharedLibPaths(allocator: std.mem.Allocator) error{OutOfMemory}
             }
 
             const b = "/boot/system/runtime_loader";
-            const item = try bun.dupeZ(allocator, u8, mem.sliceTo(b, 0));
+            const item = try bun.dupeZ(bun, allocator, u8, mem.sliceTo(b, 0));
             errdefer allocator.free(item);
             try paths.append(item);
 

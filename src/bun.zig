@@ -1309,7 +1309,7 @@ pub fn StringHashMap(comptime Type: type) type {
 /// Duplicate `slice` into a newly allocated, null-terminated slice.
 ///
 /// Zig 0.17 ("Writergate") removed `std.mem.Allocator.dupeZ`. This restores it as
-/// a free function: `allocator.dupeZ(u8, s)` becomes `bun.dupeZ(allocator, u8, s)`.
+/// a free function: `bun.dupeZ(bun, allocator, u8, s)` becomes `bun.dupeZ(bun, allocator, u8, s)`.
 pub fn dupeZ(allocator: std.mem.Allocator, comptime T: type, slice: []const T) std.mem.Allocator.Error![:0]T {
     const new_buf = try allocator.allocSentinel(T, slice.len, 0);
     @memcpy(new_buf, slice);

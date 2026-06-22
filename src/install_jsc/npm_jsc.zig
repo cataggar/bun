@@ -72,7 +72,7 @@ pub const ManifestBindings = struct {
         const registry = registry_str.toUTF8(bun.default_allocator);
         defer registry.deinit();
 
-        const manifest_path = try bun.dupeZ(bun.default_allocator, u8, manifest_filename.slice());
+        const manifest_path = try bun.dupeZ(bun, bun.default_allocator, u8, manifest_filename.slice());
         defer bun.default_allocator.free(manifest_path);
 
         const manifest_file = switch (bun.sys.File.open(manifest_path, bun.O.RDONLY, 0)) {
