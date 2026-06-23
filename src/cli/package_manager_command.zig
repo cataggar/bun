@@ -268,7 +268,7 @@ pub const PackageManagerCommand = struct {
 
                 bunx: {
                     const tmp = bun.fs.FileSystem.RealFS.platformTempDir();
-                    const tmp_dir = std.fs.openDirAbsolute(tmp, .{ .iterate = true }) catch |err| {
+                    const tmp_dir = std.Io.Dir.openDirAbsolute(bun.blockingIo(), tmp, .{ .iterate = true }) catch |err| {
                         Output.err(err, "Could not open {s}", .{tmp});
                         had_err = true;
                         break :bunx;
@@ -281,13 +281,13 @@ pub const PackageManagerCommand = struct {
                     });
 
                     var deleted: usize = 0;
-                    while (iter.next() catch |err| {
+                    while (iter.next(bun.blockingIo()) catch |err| {
                         Output.err(err, "Could not read {s}", .{tmp});
                         had_err = true;
                         break :bunx;
                     }) |entry| {
                         if (std.mem.startsWith(u8, entry.name, prefix)) {
-                            tmp_dir.deleteTree(entry.name) catch |err| {
+                            tmp_dir.deleteTree(bun.blockingIo(), entry.name) catch |err| {
                                 Output.err(err, "Could not delete {s}", .{entry.name});
                                 had_err = true;
                                 continue;
