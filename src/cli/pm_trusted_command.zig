@@ -414,7 +414,7 @@ pub const TrustCommand = struct {
         const new_package_json_contents = package_json_writer.ctx.writtenWithoutTrailingZero();
 
         try (bun.sys.File{ .handle = bun.FD.fromStdFile(pm.root_package_json_file) }).pwriteAll(new_package_json_contents, 0).unwrap();
-        std.posix.ftruncate(pm.root_package_json_file.handle, new_package_json_contents.len) catch {};
+        bun.sys.ftruncate(bun.FD.fromStdFile(pm.root_package_json_file), @intCast(new_package_json_contents.len)).unwrap() catch {};
         pm.root_package_json_file.close(bun.blockingIo());
 
         if (comptime Environment.allow_assert) {
