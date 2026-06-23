@@ -115,7 +115,7 @@ fn link(ctx: Command.Context) !void {
                 }
             } else {
                 // create the symlink
-                node_modules.symLink(Fs.FileSystem.instance.topLevelDirWithoutTrailingSlash(), name, .{ .is_directory = true }) catch |err| {
+                node_modules.symLink(bun.blockingIo(), Fs.FileSystem.instance.topLevelDirWithoutTrailingSlash(), name, .{ .is_directory = true }) catch |err| {
                     if (manager.options.log_level != .silent)
                         Output.prettyErrorln("<r><red>error:<r> failed to create symlink to node_modules in global dir due to error {s}", .{@errorName(err)});
                     Global.crash();
