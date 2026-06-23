@@ -260,7 +260,7 @@ pub const PackageManagerCommand = struct {
 
                 var had_err = false;
 
-                std.fs.deleteTreeAbsolute(outpath) catch |err| {
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), outpath) catch |err| {
                     Output.err(err, "Could not delete {s}", .{outpath});
                     had_err = true;
                 };
