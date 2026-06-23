@@ -631,7 +631,7 @@ pub const CreateCommand = struct {
             if (comptime Environment.isWindows) {
                 parent_dir.copyFile("gitignore", parent_dir, ".gitignore", bun.blockingIo(), .{}) catch {};
             } else {
-                std.posix.linkat(parent_dir.handle, "gitignore", parent_dir.handle, ".gitignore", 0) catch {};
+                bun.sys.linkat(.fromStdDir(parent_dir), "gitignore", .fromStdDir(parent_dir), ".gitignore").unwrap() catch {};
             }
 
             std.posix.unlinkat(

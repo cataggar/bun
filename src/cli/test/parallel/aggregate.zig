@@ -63,7 +63,7 @@ pub fn mergeJUnitFragments(coord: *Coordinator, outfile: []const u8, summary: *c
 
     var contents: std.ArrayListUnmanaged(u8) = .empty;
     defer contents.deinit(bun.default_allocator);
-    const elapsed_time = @as(f64, @floatFromInt(std.time.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
+    const elapsed_time = @as(f64, @floatFromInt(bun.SystemTimer.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
     bun.handleOom(contents.writer(bun.default_allocator).print(
         \\<?xml version="1.0" encoding="UTF-8"?>
         \\<testsuites name="bun test" tests="{d}" assertions="{d}" failures="{d}" skipped="{d}" time="{d}">
