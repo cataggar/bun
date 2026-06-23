@@ -997,7 +997,7 @@ pub fn uptime(global: *jsc.JSGlobalObject) bun.JSError!f64 {
                 else => return 0,
             };
 
-            return @floatFromInt(std.time.timestamp() - boot_time.sec);
+            return @floatFromInt(@divTrunc(bun.SystemTimer.milliTimestamp(), 1000) - boot_time.sec);
         },
         .linux => {
             var info: c.struct_sysinfo = undefined;

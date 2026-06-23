@@ -275,7 +275,7 @@ pub const BunxCommand = struct {
                     switch (rc) {
                         .SUCCESS => {
                             const time = std.os.windows.fromSysTime(info.LastWriteTime);
-                            const now = std.time.nanoTimestamp();
+                            const now = bun.SystemTimer.nanoTimestamp();
                             break :is_stale (now - time > nanoseconds_cache_valid);
                         },
                         // treat failures to stat as stale
@@ -626,7 +626,7 @@ pub const BunxCommand = struct {
                             switch (rc) {
                                 .SUCCESS => {
                                     const time = std.os.windows.fromSysTime(info.LastWriteTime);
-                                    const now = std.time.nanoTimestamp();
+                                    const now = bun.SystemTimer.nanoTimestamp();
                                     break :is_stale (now - time > nanoseconds_cache_valid);
                                 },
                                 // treat failures to stat as stale

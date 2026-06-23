@@ -428,7 +428,7 @@ pub const TrustCommand = struct {
             if (total_packages_with_scripts > 1) "s" else "",
         });
 
-        Output.printStartEndStdout(bun.start_time, std.time.nanoTimestamp());
+        Output.printStartEndStdout(bun.start_time, bun.SystemTimer.nanoTimestamp());
         Output.print("\n", .{});
 
         if (total_skipped_packages > 0) {

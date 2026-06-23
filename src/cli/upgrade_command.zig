@@ -869,7 +869,7 @@ pub const UpgradeCommand = struct {
                 }) catch {};
             }
 
-            Output.printStartEnd(ctx.start_time, std.time.nanoTimestamp());
+            Output.printStartEnd(ctx.start_time, bun.SystemTimer.nanoTimestamp());
 
             if (use_canary) {
                 Output.prettyErrorln(

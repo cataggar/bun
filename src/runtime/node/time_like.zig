@@ -67,7 +67,7 @@ fn fromMilliseconds(milliseconds: f64) TimeLike {
 
 fn fromNow() TimeLike {
     if (Environment.isWindows) {
-        const nanos = std.time.nanoTimestamp();
+        const nanos = bun.SystemTimer.nanoTimestamp();
         return @as(TimeLike, @floatFromInt(nanos)) / std.time.ns_per_s;
     }
 

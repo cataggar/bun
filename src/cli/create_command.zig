@@ -1454,7 +1454,7 @@ pub const CreateCommand = struct {
         }
 
         if (npm_client_) |npm_client| {
-            const start_time = std.time.nanoTimestamp();
+            const start_time = bun.SystemTimer.nanoTimestamp();
             const install_args = &[_]string{ npm_client.bin, "install" };
             Output.flush();
             Output.pretty("\n<r><d>$ <b><cyan>{s}<r><d> install", .{@tagName(npm_client.tag)});
@@ -1470,7 +1470,7 @@ pub const CreateCommand = struct {
             Output.flush();
             defer {
                 Output.printErrorln("\n", .{});
-                Output.printStartEnd(start_time, std.time.nanoTimestamp());
+                Output.printStartEnd(start_time, bun.SystemTimer.nanoTimestamp());
                 Output.prettyError(" <r><d>{s} install<r>\n", .{@tagName(npm_client.tag)});
                 Output.flush();
 
@@ -1504,7 +1504,7 @@ pub const CreateCommand = struct {
         }
 
         Output.printError("\n", .{});
-        Output.printStartEnd(ctx.start_time, std.time.nanoTimestamp());
+        Output.printStartEnd(ctx.start_time, bun.SystemTimer.nanoTimestamp());
         Output.prettyErrorln(" <r><d>bun create {s}<r>", .{template});
 
         Output.flush();
@@ -2372,7 +2372,7 @@ const GitHandler = struct {
         PATH: string,
         comptime verbose: bool,
     ) !bool {
-        const git_start = std.time.nanoTimestamp();
+        const git_start = bun.SystemTimer.nanoTimestamp();
 
         // Not sure why...
         // But using libgit for this operation is slower than the CLI!
@@ -2422,7 +2422,7 @@ const GitHandler = struct {
             }
 
             Output.prettyError("\n", .{});
-            Output.printStartEnd(git_start, std.time.nanoTimestamp());
+            Output.printStartEnd(git_start, bun.SystemTimer.nanoTimestamp());
             Output.prettyError(" <d>git<r>\n", .{});
             return true;
         }
