@@ -605,7 +605,7 @@ pub const CreateCommand = struct {
                         };
                         if (comptime Environment.isWindows) try pkg.seekTo(prev_file_pos);
                         // The printer doesn't truncate, so we must do so manually
-                        std.posix.ftruncate(pkg.handle, 0) catch {};
+                        bun.sys.ftruncate(bun.FD.fromStdFile(pkg), 0).unwrap() catch {};
 
                         initializeStore();
                     }
