@@ -1,11 +1,11 @@
-var file: std.fs.File = undefined;
+var file: std.Io.File = undefined;
 pub var enabled = false;
-pub var check = std.once(load);
+pub var check = bun.once(load);
 
 pub fn load() void {
     if (bun.env_var.BUN_POSTGRES_SOCKET_MONITOR_READER.get()) |monitor| {
         enabled = true;
-        file = std.fs.cwd().createFile(monitor, .{ .truncate = true }) catch {
+        file = bun.FD.cwd().stdDir().createFile(bun.blockingIo(), monitor, .{ .truncate = true }) catch {
             enabled = false;
             return;
         };
@@ -14,7 +14,7 @@ pub fn load() void {
 }
 
 pub fn write(data: []const u8) void {
-    file.writeAll(data) catch {};
+    file.writeStreamingAll(bun.blockingIo(), data) catch {};
 }
 
 const debug = bun.Output.scoped(.Postgres, .visible);

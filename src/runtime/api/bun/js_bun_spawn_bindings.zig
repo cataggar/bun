@@ -34,17 +34,17 @@ fn getArgv0(globalThis: *jsc.JSGlobalObject, PATH: []const u8, cwd: []const u8, 
         "";
 
     if (PATH_to_use.len == 0) {
-        actual_argv0 = try allocator.dupeZ(u8, argv0_to_use);
+        actual_argv0 = try bun.dupeZ(allocator, u8, argv0_to_use);
     } else {
         const resolved = which(path_buf, PATH_to_use, cwd, argv0_to_use) orelse {
             return throwCommandNotFound(globalThis, argv0_to_use);
         };
-        actual_argv0 = try allocator.dupeZ(u8, resolved);
+        actual_argv0 = try bun.dupeZ(allocator, u8, resolved);
     }
 
     return .{
         .argv0 = actual_argv0,
-        .arg0 = if (pretend_argv0) |p| try allocator.dupeZ(u8, bun.sliceTo(p, 0)) else try allocator.dupeZ(u8, arg0.slice()),
+        .arg0 = if (pretend_argv0) |p| try bun.dupeZ(allocator, u8, bun.sliceTo(p, 0)) else try bun.dupeZ(allocator, u8, arg0.slice()),
     };
 }
 
@@ -123,7 +123,7 @@ pub fn spawnMaybeSync(
     const allocator = arena.allocator();
 
     var override_env = false;
-    var env_array = std.ArrayListUnmanaged(?[*:0]const u8){};
+    var env_array = std.ArrayListUnmanaged(?[*:0]const u8).empty;
     var jsc_vm = globalThis.bunVM();
 
     var cwd = jsc_vm.transpiler.fs.top_level_dir;
@@ -513,7 +513,7 @@ pub fn spawnMaybeSync(
             }
         };
 
-        const pipe_env = std.fmt.bufPrintZ(
+        const pipe_env = bun.fmt.bufPrintZ(
             &ipc_env_buf,
             "NODE_CHANNEL_FD={d}",
             .{ipc_fd},
@@ -671,7 +671,7 @@ pub fn spawnMaybeSync(
         .stdin = .{ .ignore = {} },
         .stdout = .{ .ignore = {} },
         .stderr = .{ .ignore = {} },
-        .stdio_pipes = .{},
+        .stdio_pipes = .empty,
         .ipc_data = null,
         .flags = .{
             .is_sync = is_sync,

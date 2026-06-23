@@ -15,7 +15,7 @@ fn throwInvalidParameter(globalThis: *jsc.JSGlobalObject) bun.JSError {
     return globalThis.ERR(.CRYPTO_SCRYPT_INVALID_PARAMETER, "Invalid scrypt parameters", .{}).throw();
 }
 
-fn throwInvalidParams(globalThis: *jsc.JSGlobalObject, comptime error_type: @Type(.enum_literal), comptime message: [:0]const u8, fmt: anytype) bun.JSError {
+fn throwInvalidParams(globalThis: *jsc.JSGlobalObject, comptime error_type: @TypeOf(.enum_literal), comptime message: [:0]const u8, fmt: anytype) bun.JSError {
     if (error_type != .RangeError) @compileError("Error type not added!");
     BoringSSL.ERR_clear_error();
     return globalThis.ERR(.CRYPTO_INVALID_SCRYPT_PARAMS, message, fmt).throw();
@@ -145,7 +145,7 @@ pub fn Bun__randomUUIDv7_(globalThis: *jsc.JSGlobalObject, callframe: *jsc.CallF
             break :brk @intCast(try globalThis.validateIntegerRange(timestamp_value, i64, 0, .{ .min = 0, .field_name = "timestamp" }));
         }
 
-        break :brk @intCast(@max(0, std.time.milliTimestamp()));
+        break :brk @intCast(@max(0, SystemTimer.milliTimestamp()));
     };
 
     const entropy = globalThis.bunVM().rareData().entropySlice(8);
@@ -284,5 +284,6 @@ const UUID5 = @import("../../jsc/uuid.zig").UUID5;
 const UUID7 = @import("../../jsc/uuid.zig").UUID7;
 
 const bun = @import("bun");
+const SystemTimer = @import("../../perf/system_timer.zig");
 const jsc = bun.jsc;
 const BoringSSL = bun.BoringSSL.c;

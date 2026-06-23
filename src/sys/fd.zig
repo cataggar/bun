@@ -68,7 +68,7 @@ pub const FD = packed struct(backing_int) {
     }
 
     pub fn cwd() FD {
-        return .fromNative(std.fs.cwd().fd);
+        return .fromNative(std.Io.Dir.cwd().handle);
     }
 
     pub fn stdin() FD {
@@ -92,20 +92,23 @@ pub const FD = packed struct(backing_int) {
         return windows_cached_stderr;
     }
 
-    pub fn fromStdFile(file: std.fs.File) FD {
+    pub fn fromStdFile(file: std.Io.File) FD {
         return .fromNative(file.handle);
     }
 
-    pub fn fromStdDir(dir: std.fs.Dir) FD {
-        return .fromNative(dir.fd);
+    pub fn fromStdDir(dir: std.Io.Dir) FD {
+        return .fromNative(dir.handle);
     }
 
-    pub fn stdFile(fd: FD) std.fs.File {
+    pub fn stdFile(fd: FD) std.Io.File {
+        return .{
+            .handle = fd.native(),
+            .flags = .{ .nonblocking = false },
+        };
+    }
+
+    pub fn stdDir(fd: FD) std.Io.Dir {
         return .{ .handle = fd.native() };
-    }
-
-    pub fn stdDir(fd: FD) std.fs.Dir {
-        return .{ .fd = fd.native() };
     }
 
     /// Perform different logic for each kind of windows file descriptor
@@ -416,16 +419,23 @@ pub const FD = packed struct(backing_int) {
                     // support the standard library functions (since they would
                     // likely have run the Zig compiler, and it's not the end of
                     // the world if this fails.
-                    const path = std.os.getFdPath(fd_native, &path_buf) catch |err| switch (err) {
-                        error.FileNotFound => {
-                            try writer.writeAll("[BADF]");
-                            break :print_with_path;
-                        },
-                        else => |e| {
-                            try writer.print("[unknown: error.{s}]", .{@errorName(e)});
+                    const path = switch (bun.sys.getFdPath(fd, &path_buf)) {
+                        .result => |path| path,
+                        .err => |err| {
+                            if (err.getErrno() == .BADF or err.getErrno() == .NOENT) {
+                                try writer.writeAll("[BADF]");
+                                break :print_with_path;
+                            }
+                            try writer.print("[unknown: {s}]", .{err.name()});
                             break :print_with_path;
                         },
                     };
+                    if (path.len == 0) {
+                        if (fd_native < 0) {
+                            try writer.writeAll("[BADF]");
+                            break :print_with_path;
+                        }
+                    }
                     try writer.print("[{s}]", .{path});
                 }
             },
@@ -497,7 +507,7 @@ pub const FD = packed struct(backing_int) {
 
     // TODO: make our own version of deleteTree
     pub fn deleteTree(dir: FD, subpath: []const u8) !void {
-        try dir.stdDir().deleteTree(subpath);
+        try dir.stdDir().deleteTree(bun.blockingIo(), subpath);
     }
 
     // The following functions are from bun.sys but with the 'f' prefix dropped

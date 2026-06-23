@@ -86,7 +86,7 @@ resolved_count: usize = 0,
 had_errors: bool = false,
 
 macros: MacroMap,
-macro_entry_points: std.AutoArrayHashMap(i32, *MacroEntryPoint),
+macro_entry_points: std.AutoArrayHashMapUnmanaged(i32, *MacroEntryPoint),
 macro_mode: bool = false,
 no_macros: bool = false,
 auto_killer: ProcessAutoKiller = .{ .enabled = false },
@@ -121,7 +121,7 @@ remap_stack_frames_mutex: bun.Mutex = .{},
 ///          []
 argv: []const []const u8 = &[_][]const u8{},
 
-origin_timer: std.time.Timer = undefined,
+origin_timer: Timer = undefined,
 origin_timestamp: u64 = 0,
 /// For fake timers: override performance.now() with a specific value (in nanoseconds)
 /// When null, use the real timer. When set, return this value instead.
@@ -948,7 +948,7 @@ pub fn onExit(this: *VirtualMachine) void {
     while (rare_data.cleanup_hooks.items.len > 0) {
         var hooks = rare_data.cleanup_hooks;
         defer hooks.deinit(bun.default_allocator);
-        rare_data.cleanup_hooks = .{};
+        rare_data.cleanup_hooks = .empty;
         for (hooks.items) |hook| {
             hook.execute();
         }
@@ -1049,7 +1049,7 @@ pub fn waitForTasks(this: *VirtualMachine) void {
     }
 }
 
-pub const MacroMap = std.AutoArrayHashMap(i32, jsc.C.JSObjectRef);
+pub const MacroMap = std.AutoArrayHashMapUnmanaged(i32, jsc.C.JSObjectRef);
 
 pub fn enableMacroMode(this: *VirtualMachine) void {
     jsc.markBinding(@src());
@@ -1094,7 +1094,7 @@ fn getOriginTimestamp() u64 {
             u128,
             // handle if they set their system clock to be before epoch
             @intCast(@max(
-                std.time.nanoTimestamp(),
+                std.Io.Timestamp.now(bun.blockingIo(), .real).toNanoseconds(),
                 origin_relative_epoch,
             )),
         ) - origin_relative_epoch),
@@ -1133,9 +1133,9 @@ pub fn initWithModuleGraph(
         .origin = transpiler.options.origin,
         .saved_source_map_table = SavedSourceMap.HashTable.init(bun.default_allocator),
         .source_mappings = undefined,
-        .macros = MacroMap.init(allocator),
-        .macro_entry_points = @TypeOf(vm.macro_entry_points).init(allocator),
-        .origin_timer = std.time.Timer.start() catch @panic("Timers are not supported on this system."),
+        .macros = .empty,
+        .macro_entry_points = .empty,
+        .origin_timer = Timer.start() catch @panic("Timers are not supported on this system."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -1262,9 +1262,9 @@ pub fn init(opts: Options) !*VirtualMachine {
 
         .saved_source_map_table = SavedSourceMap.HashTable.init(bun.default_allocator),
         .source_mappings = undefined,
-        .macros = MacroMap.init(allocator),
-        .macro_entry_points = @TypeOf(vm.macro_entry_points).init(allocator),
-        .origin_timer = std.time.Timer.start() catch @panic("Please don't mess with timers."),
+        .macros = .empty,
+        .macro_entry_points = .empty,
+        .origin_timer = Timer.start() catch @panic("Please don't mess with timers."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -1430,9 +1430,9 @@ pub fn initWorker(
 
         .saved_source_map_table = SavedSourceMap.HashTable.init(bun.default_allocator),
         .source_mappings = undefined,
-        .macros = MacroMap.init(allocator),
-        .macro_entry_points = @TypeOf(vm.macro_entry_points).init(allocator),
-        .origin_timer = std.time.Timer.start() catch @panic("Please don't mess with timers."),
+        .macros = .empty,
+        .macro_entry_points = .empty,
+        .origin_timer = Timer.start() catch @panic("Please don't mess with timers."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -1526,9 +1526,9 @@ pub fn initBake(opts: Options) anyerror!*VirtualMachine {
         .origin = transpiler.options.origin,
         .saved_source_map_table = SavedSourceMap.HashTable.init(bun.default_allocator),
         .source_mappings = undefined,
-        .macros = MacroMap.init(allocator),
-        .macro_entry_points = @TypeOf(vm.macro_entry_points).init(allocator),
-        .origin_timer = std.time.Timer.start() catch @panic("Please don't mess with timers."),
+        .macros = .empty,
+        .macro_entry_points = .empty,
+        .origin_timer = Timer.start() catch @panic("Please don't mess with timers."),
         .origin_timestamp = getOriginTimestamp(),
         .ref_strings = jsc.RefString.Map.init(allocator),
         .ref_strings_mutex = .{},
@@ -2604,7 +2604,7 @@ pub fn swapGlobalForTestIsolation(this: *VirtualMachine) void {
 }
 
 pub fn loadMacroEntryPoint(this: *VirtualMachine, entry_path: string, function_name: string, specifier: string, hash: i32) !*JSInternalPromise {
-    const entry_point_entry = try this.macro_entry_points.getOrPut(hash);
+    const entry_point_entry = try this.macro_entry_points.getOrPut(this.allocator, hash);
 
     if (!entry_point_entry.found_existing) {
         var macro_entry_pointer: *MacroEntryPoint = this.allocator.create(MacroEntryPoint) catch unreachable;
@@ -3354,7 +3354,7 @@ fn printErrorInstance(
         last_pad = pad;
         try writer.splatByteAll(' ', pad);
 
-        const trimmed = std.mem.trimRight(u8, std.mem.trim(u8, source.text.slice(), "\n"), "\t ");
+        const trimmed = std.mem.trimEnd(u8, std.mem.trim(u8, source.text.slice(), "\n"), "\t ");
         const clamped = trimmed[0..@min(trimmed.len, max_line_length)];
 
         if (clamped.len != trimmed.len) {
@@ -3418,7 +3418,7 @@ fn printErrorInstance(
         if (top_frame == null or top_frame.?.position.isInvalid()) {
             defer did_print_name = true;
             defer source.text.deinit();
-            const trimmed = std.mem.trimRight(u8, std.mem.trim(u8, source.text.slice(), "\n"), "\t ");
+            const trimmed = std.mem.trimEnd(u8, std.mem.trim(u8, source.text.slice(), "\n"), "\t ");
 
             const text = trimmed[0..@min(trimmed.len, max_line_length)];
 
@@ -3450,7 +3450,7 @@ fn printErrorInstance(
             try writer.splatByteAll(' ', pad);
             defer source.text.deinit();
             const text = source.text.slice();
-            const trimmed = std.mem.trimRight(u8, std.mem.trim(u8, text, "\n"), "\t ");
+            const trimmed = std.mem.trimEnd(u8, std.mem.trim(u8, text, "\n"), "\t ");
 
             // TODO: preserve the divot position and possibly use stringWidth() to figure out where to put the divot
             const clamped = trimmed[0..@min(trimmed.len, max_line_length)];
@@ -4168,6 +4168,7 @@ const ImportWatcher = jsc.hot_reloader.ImportWatcher;
 
 const MacroEntryPoint = bun.transpiler.EntryPoints.MacroEntryPoint;
 const ServerEntryPoint = bun.transpiler.EntryPoints.ServerEntryPoint;
+const Timer = @import("../perf/system_timer.zig").Timer;
 
 const webcore = bun.webcore;
 const Body = webcore.Body;

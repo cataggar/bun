@@ -49,8 +49,8 @@ pub fn init(body: HTTPRequestBody, body_out_str: *MutableString) InternalState {
     return .{
         .original_request_body = body,
         .request_body = if (body == .bytes) body.bytes else "",
-        .compressed_body = MutableString{ .allocator = bun.http.default_allocator, .list = .{} },
-        .response_message_buffer = MutableString{ .allocator = bun.http.default_allocator, .list = .{} },
+        .compressed_body = MutableString{ .allocator = bun.http.default_allocator, .list = .empty },
+        .response_message_buffer = MutableString{ .allocator = bun.http.default_allocator, .list = .empty },
         .body_out_str = body_out_str,
         .stage = Stage.pending,
         .pending_response = null,
@@ -84,8 +84,8 @@ pub fn reset(this: *InternalState, allocator: std.mem.Allocator) void {
     this.original_request_body.deinit();
     this.* = .{
         .body_out_str = body_msg,
-        .compressed_body = MutableString{ .allocator = bun.http.default_allocator, .list = .{} },
-        .response_message_buffer = MutableString{ .allocator = bun.http.default_allocator, .list = .{} },
+        .compressed_body = MutableString{ .allocator = bun.http.default_allocator, .list = .empty },
+        .response_message_buffer = MutableString{ .allocator = bun.http.default_allocator, .list = .empty },
         .original_request_body = .{ .bytes = "" },
         .request_body = "",
         .certificate_info = null,
@@ -117,10 +117,10 @@ pub fn isDone(this: *InternalState) bool {
 
 pub fn decompressBytes(this: *InternalState, buffer: []const u8, body_out_str: *MutableString, is_final_chunk: bool) !void {
     defer this.compressed_body.reset();
-    var gzip_timer: std.time.Timer = undefined;
+    var gzip_timer: SystemTimer.Timer = undefined;
 
     if (bun.http.extremely_verbose)
-        gzip_timer = std.time.Timer.start() catch @panic("Timer failure");
+        gzip_timer = SystemTimer.Timer.start() catch @panic("Timer failure");
 
     var still_needs_to_decompress = true;
 
@@ -256,3 +256,4 @@ const Decompressor = HTTPClient.Decompressor;
 const Encoding = HTTPClient.Encoding;
 const HTTPRequestBody = HTTPClient.HTTPRequestBody;
 const HTTPResponseMetadata = HTTPClient.HTTPResponseMetadata;
+const SystemTimer = @import("../perf/system_timer.zig");

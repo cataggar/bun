@@ -131,10 +131,10 @@ pub const BundleV2 = struct {
 
     /// See the comment in `Chunk.OutputPiece`
     unique_key: u64 = 0,
-    dynamic_import_entry_points: std.AutoArrayHashMap(Index.Int, void) = undefined,
+    dynamic_import_entry_points: std.AutoArrayHashMapUnmanaged(Index.Int, void) = undefined,
     has_on_parse_plugins: bool = false,
 
-    finalizers: std.ArrayListUnmanaged(CacheEntry.ExternalFreeFunction) = .{},
+    finalizers: std.ArrayListUnmanaged(CacheEntry.ExternalFreeFunction) = .empty,
 
     drain_defer_task: DeferredBatchTask = .{},
 
@@ -284,7 +284,8 @@ pub const BundleV2 = struct {
         all_urls_for_css: []const []const u8,
         redirects: []u32,
         redirect_map: PathToSourceIndexMap,
-        dynamic_import_entry_points: *std.AutoArrayHashMap(Index.Int, void),
+        dynamic_import_entry_points: *std.AutoArrayHashMapUnmanaged(Index.Int, void),
+        allocator: std.mem.Allocator,
         /// Files which are Server Component Boundaries
         scb_bitset: ?bun.bit_set.DynamicBitSetUnmanaged,
         scb_list: ServerComponentBoundary.List.Slice,
@@ -306,7 +307,7 @@ pub const BundleV2 = struct {
             if (v.visited.isSet(source_index.get())) {
                 if (comptime check_dynamic_imports) {
                     if (was_dynamic_import) {
-                        v.dynamic_import_entry_points.put(source_index.get(), {}) catch unreachable;
+                        v.dynamic_import_entry_points.put(v.allocator, source_index.get(), {}) catch unreachable;
                     }
                 }
                 return;
@@ -375,7 +376,7 @@ pub const BundleV2 = struct {
             v.reachable.append(source_index) catch unreachable;
             if (comptime check_dynamic_imports) {
                 if (was_dynamic_import) {
-                    v.dynamic_import_entry_points.put(source_index.get(), {}) catch unreachable;
+                    v.dynamic_import_entry_points.put(v.allocator, source_index.get(), {}) catch unreachable;
                 }
             }
         }
@@ -387,7 +388,7 @@ pub const BundleV2 = struct {
 
         // Create a quick index for server-component boundaries.
         // We need to mark the generated files as reachable, or else many files will appear missing.
-        var sfa = std.heap.stackFallback(4096, this.allocator());
+        var sfa = bun.stackFallback(4096, this.allocator());
         const stack_alloc = sfa.get();
         var scb_bitset = if (this.graph.server_component_boundaries.list.len > 0)
             try this.graph.server_component_boundaries.slice().bitSet(stack_alloc, this.graph.input_files.len)
@@ -402,7 +403,7 @@ pub const BundleV2 = struct {
             additional_files_imported_by_css_and_inlined.deinit(stack_alloc);
         }
 
-        this.dynamic_import_entry_points = std.AutoArrayHashMap(Index.Int, void).init(this.allocator());
+        this.dynamic_import_entry_points = .empty;
 
         const all_urls_for_css = this.graph.ast.items(.url_for_css);
 
@@ -415,6 +416,7 @@ pub const BundleV2 = struct {
             .all_urls_for_css = all_urls_for_css,
             .redirect_map = this.pathToSourceIndexMap(this.transpiler.options.target).*,
             .dynamic_import_entry_points = &this.dynamic_import_entry_points,
+            .allocator = this.allocator(),
             .scb_bitset = scb_bitset,
             .scb_list = if (scb_bitset != null)
                 this.graph.server_component_boundaries.slice()
@@ -1246,8 +1248,8 @@ pub const BundleV2 = struct {
         var server = try AstBuilder.init(this.allocator(), &bake.server_virtual_source, this.transpiler.options.hot_module_reloading);
         var client = try AstBuilder.init(this.allocator(), &bake.client_virtual_source, this.transpiler.options.hot_module_reloading);
 
-        var server_manifest_props: std.ArrayListUnmanaged(G.Property) = .{};
-        var client_manifest_props: std.ArrayListUnmanaged(G.Property) = .{};
+        var server_manifest_props: std.ArrayListUnmanaged(G.Property) = .empty;
+        var client_manifest_props: std.ArrayListUnmanaged(G.Property) = .empty;
 
         const scbs = this.graph.server_component_boundaries.list.slice();
         const named_exports_array = this.graph.ast.items(.named_exports);
@@ -1574,7 +1576,7 @@ pub const BundleV2 = struct {
 
         this.waitForParse();
 
-        minify_duration.* = @as(u64, @intCast(@divTrunc(@as(i64, @truncate(std.time.nanoTimestamp())) - @as(i64, @truncate(bun.cli.start_time)), @as(i64, std.time.ns_per_ms))));
+        minify_duration.* = @as(u64, @intCast(@divTrunc(@as(i64, @truncate(bun.SystemTimer.nanoTimestamp())) - @as(i64, @truncate(bun.cli.start_time)), @as(i64, std.time.ns_per_ms))));
         source_code_size.* = this.source_code_length;
 
         if (this.transpiler.log.hasErrors()) {
@@ -2219,7 +2221,7 @@ pub const BundleV2 = struct {
         {
             // We do this first to make it harder for any dangling pointers to data to be used in there.
             var on_parse_finalizers = this.finalizers;
-            this.finalizers = .{};
+            this.finalizers = .empty;
             for (on_parse_finalizers.items) |finalizer| {
                 finalizer.call();
             }
@@ -2240,7 +2242,7 @@ pub const BundleV2 = struct {
                 for (this.graph.pool.workers_assignments.values()) |worker| {
                     worker.deinitSoon();
                 }
-                this.graph.pool.workers_assignments.deinit();
+                this.graph.pool.workers_assignments.deinit(bun.default_allocator);
             }
 
             this.graph.pool.worker_pool.wakeForIdleEvents();
@@ -2356,16 +2358,16 @@ pub const BundleV2 = struct {
     ) !void {
         if (outdir.len > 0) {
             // Open the output directory
-            var root_dir = bun.FD.cwd().stdDir().makeOpenPath(outdir, .{}) catch |err| {
+            var root_dir = bun.FD.cwd().stdDir().createDirPathOpen(bun.blockingIo(), outdir, .{}) catch |err| {
                 bun.Output.warn("Failed to open output directory '{s}': {s}", .{ outdir, @errorName(err) });
                 return;
             };
-            defer root_dir.close();
+            defer root_dir.close(bun.blockingIo());
 
             // Create parent directories if needed (relative to outdir)
             if (std.fs.path.dirname(file_path)) |parent| {
                 if (parent.len > 0) {
-                    root_dir.makePath(parent) catch {};
+                    bun.makePath(root_dir, parent) catch {};
                 }
             }
 
@@ -2447,7 +2449,7 @@ pub const BundleV2 = struct {
 
         this.graph.heap.helpCatchMemoryIssues();
 
-        this.dynamic_import_entry_points = .init(this.allocator());
+        this.dynamic_import_entry_points = .empty;
         var html_files: std.AutoArrayHashMapUnmanaged(Index, void) = .{};
 
         // Separate non-failing files into two lists: JS and CSS
@@ -4366,7 +4368,8 @@ pub const DevServerOutput = struct {
 };
 
 pub fn generateUniqueKey() u64 {
-    const key = std.crypto.random.int(u64) & @as(u64, 0x0FFFFFFF_FFFFFFFF);
+    var random_source: std.Random.IoSource = .{ .io = bun.blockingIo() };
+    const key = random_source.interface().int(u64) & @as(u64, 0x0FFFFFFF_FFFFFFFF);
     // without this check, putting unique_key in an object key would
     // sometimes get converted to an identifier. ensuring it starts
     // with a number forces that optimization off.

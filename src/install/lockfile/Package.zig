@@ -1417,13 +1417,13 @@ pub fn Package(comptime SemverIntType: type) type {
             // `peerDependencies`. Track the original key string so the
             // post-build pass can emit a real `Dependency` for any meta-only
             // names that nothing in the build loop consumed.
-            var optional_peer_dependencies = std.ArrayHashMap(PackageNameHash, []const u8, ArrayIdentityContext.U64, false).init(allocator);
-            defer optional_peer_dependencies.deinit();
+            var optional_peer_dependencies: std.ArrayHashMapUnmanaged(PackageNameHash, []const u8, ArrayIdentityContext.U64, false) = .empty;
+            defer optional_peer_dependencies.deinit(allocator);
 
             if (features.peer_dependencies) if (json.asProperty("peerDependenciesMeta")) |peer_dependencies_meta| {
                 if (peer_dependencies_meta.expr.data == .e_object) {
                     const props = peer_dependencies_meta.expr.data.e_object.properties.slice();
-                    try optional_peer_dependencies.ensureUnusedCapacity(props.len);
+                    try optional_peer_dependencies.ensureUnusedCapacity(allocator, props.len);
                     for (props) |prop| {
                         if (prop.value.?.asProperty("optional")) |optional| {
                             if (optional.expr.data != .e_boolean or !optional.expr.data.e_boolean.value) {
@@ -1655,7 +1655,7 @@ pub fn Package(comptime SemverIntType: type) type {
                     const key = prop.key.?;
                     const value = prop.value.?;
                     if (key.isString() and value.isString()) {
-                        var sfb = std.heap.stackFallback(1024, allocator);
+                        var sfb = bun.stackFallback(1024, allocator);
                         const keyhash = try key.asStringHash(sfb.get(), String.Builder.stringHash) orelse unreachable;
                         const patch_path = string_builder.append(String, value.asString(allocator).?);
                         lockfile.patched_dependencies.put(allocator, keyhash, .{ .path = patch_path }) catch unreachable;
@@ -1808,7 +1808,7 @@ pub fn Package(comptime SemverIntType: type) type {
                                 for (workspace_names.values(), workspace_names.keys()) |value, note_path| {
                                     if (note_path.ptr == path.ptr) continue;
                                     if (strings.eqlLong(value.name, entry.name, true)) {
-                                        const note_abs_path = bun.handleOom(allocator.dupeZ(u8, Path.joinAbsStringZ(cwd, &.{ note_path, "package.json" }, .auto)));
+                                        const note_abs_path = bun.handleOom(bun.dupeZ(allocator, u8, Path.joinAbsStringZ(cwd, &.{ note_path, "package.json" }, .auto)));
 
                                         const note_src = bun.sys.File.toSource(note_abs_path, allocator, .{}).unwrap() catch logger.Source.initEmptyFile(note_abs_path);
 
@@ -2019,7 +2019,7 @@ pub fn Package(comptime SemverIntType: type) type {
 
         pub const Serializer = struct {
             pub const sizes = blk: {
-                const fields = std.meta.fields(PackageType);
+                const fields = bun.meta.fields(PackageType);
                 const Data = struct {
                     size: usize,
                     size_index: usize,
@@ -2088,18 +2088,18 @@ pub fn Package(comptime SemverIntType: type) type {
                 const really_begin_at = try stream.getPos();
                 var sliced = list.slice();
 
-                inline for (FieldsEnum.fields) |field| {
-                    const value = sliced.items(@field(List.Field, field.name));
+                inline for (FieldsEnum.field_names) |field_name| {
+                    const value = sliced.items(@field(List.Field, field_name));
                     if (comptime Environment.allow_assert) {
-                        debug("save(\"{s}\") = {d} bytes", .{ field.name, std.mem.sliceAsBytes(value).len });
-                        if (comptime strings.eqlComptime(field.name, "meta")) {
+                        debug("save(\"{s}\") = {d} bytes", .{ field_name, std.mem.sliceAsBytes(value).len });
+                        if (comptime strings.eqlComptime(field_name, "meta")) {
                             for (value) |meta| {
                                 assert(meta.has_install_script != .old);
                             }
                         }
                     }
                     comptime assertNoUninitializedPadding(@TypeOf(value));
-                    if (comptime strings.eqlComptime(field.name, "resolution")) {
+                    if (comptime strings.eqlComptime(field_name, "resolution")) {
                         // copy each resolution to make sure the union is zero initialized
                         for (value) |val| {
                             const copy = val.copy();
@@ -2216,8 +2216,8 @@ pub fn Package(comptime SemverIntType: type) type {
             fn loadFields(stream: *Stream, end_at: u64, comptime ListType: type, list: *ListType, needs_update: *bool) !void {
                 var sliced = list.slice();
 
-                inline for (FieldsEnum.fields) |field| {
-                    const value = sliced.items(@field(List.Field, field.name));
+                inline for (FieldsEnum.field_names) |field_name| {
+                    const value = sliced.items(@field(List.Field, field_name));
 
                     comptime assertNoUninitializedPadding(@TypeOf(value));
                     const bytes = std.mem.sliceAsBytes(value);
@@ -2225,7 +2225,7 @@ pub fn Package(comptime SemverIntType: type) type {
                     if (end_pos <= end_at) {
                         @memcpy(bytes, stream.buffer[stream.pos..][0..bytes.len]);
                         stream.pos = end_pos;
-                        if (comptime strings.eqlComptime(field.name, "meta")) {
+                        if (comptime strings.eqlComptime(field_name, "meta")) {
                             // need to check if any values were created from an older version of bun
                             // (currently just `has_install_script`). If any are found, the values need
                             // to be updated before saving the lockfile.
@@ -2236,7 +2236,7 @@ pub fn Package(comptime SemverIntType: type) type {
                                 }
                             }
                         }
-                    } else if (comptime strings.eqlComptime(field.name, "scripts")) {
+                    } else if (comptime strings.eqlComptime(field_name, "scripts")) {
                         @memset(bytes, 0);
                     } else {
                         return error.@"Lockfile validation failed: invalid package list range";

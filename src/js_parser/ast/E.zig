@@ -1114,7 +1114,7 @@ pub const String = struct {
 
     pub fn stringZ(s: *const String, allocator: std.mem.Allocator) OOM![:0]const u8 {
         if (s.isUTF8()) {
-            return allocator.dupeZ(u8, s.data);
+            return bun.dupeZ(allocator, u8, s.data);
         } else {
             return strings.toUTF8AllocZ(allocator, s.slice16());
         }
@@ -1177,7 +1177,7 @@ pub const String = struct {
     }
 
     pub fn jsonStringify(s: *const String, writer: anytype) !void {
-        var buf = [_]u8{0} ** 4096;
+        var buf = @as([4096]u8, @splat(0));
         var i: usize = 0;
         for (s.slice16()) |char| {
             buf[i] = @as(u8, @intCast(char));

@@ -52,7 +52,7 @@ pub const Store = struct {
     pub const Installer = @import("./Installer.zig").Installer;
 
     /// Called from multiple threads. `parent_dedupe` should not be shared between threads.
-    pub fn isCycle(this: *const Store, id: Entry.Id, maybe_parent_id: Entry.Id, parent_dedupe: *std.AutoArrayHashMap(Entry.Id, void)) bool {
+    pub fn isCycle(this: *const Store, id: Entry.Id, maybe_parent_id: Entry.Id, parent_dedupe: *std.AutoArrayHashMapUnmanaged(Entry.Id, void)) bool {
         var i: usize = 0;
         var len: usize = 0;
 
@@ -65,7 +65,7 @@ pub const Store = struct {
             if (parent_id == maybe_parent_id) {
                 return true;
             }
-            bun.handleOom(parent_dedupe.put(parent_id, {}));
+            bun.handleOom(parent_dedupe.put(bun.default_allocator, parent_id, {}));
         }
 
         len = parent_dedupe.count();
@@ -77,7 +77,7 @@ pub const Store = struct {
                 if (parent_id == maybe_parent_id) {
                     return true;
                 }
-                bun.handleOom(parent_dedupe.put(parent_id, {}));
+                bun.handleOom(parent_dedupe.put(bun.default_allocator, parent_id, {}));
                 len = parent_dedupe.count();
             }
             i += 1;

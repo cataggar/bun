@@ -5,7 +5,7 @@
 const ClientContext = @This();
 
 qctx: *quic.Context,
-sessions: std.ArrayListUnmanaged(*ClientSession) = .{},
+sessions: std.ArrayListUnmanaged(*ClientSession) = .empty,
 
 /// One instance per HTTP-thread loop. Stored as a process global only
 /// because `bun.http.http_thread` is itself a process singleton — the
@@ -48,7 +48,7 @@ pub fn connect(this: *ClientContext, client: *HTTPClient, hostname: []const u8, 
         }
     }
 
-    const host_z = bun.handleOom(bun.default_allocator.dupeZ(u8, hostname));
+    const host_z = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, hostname));
     const session = ClientSession.new(.{
         .qsocket = null,
         .hostname = host_z,

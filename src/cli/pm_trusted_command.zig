@@ -26,7 +26,7 @@ pub const UntrustedCommand = struct {
         const resolutions: []Install.Resolution = packages.items(.resolution);
         const buf = pm.lockfile.buffers.string_bytes.items;
 
-        var untrusted_dep_ids: std.AutoArrayHashMapUnmanaged(DependencyID, void) = .{};
+        var untrusted_dep_ids: std.AutoArrayHashMapUnmanaged(DependencyID, void) = .empty;
         defer untrusted_dep_ids.deinit(ctx.allocator);
 
         // loop through dependencies and get trusted and untrusted deps with lifecycle scripts
@@ -48,7 +48,7 @@ pub const UntrustedCommand = struct {
             return;
         }
 
-        var untrusted_deps: std.AutoArrayHashMapUnmanaged(DependencyID, Lockfile.Package.Scripts.List) = .{};
+        var untrusted_deps: std.AutoArrayHashMapUnmanaged(DependencyID, Lockfile.Package.Scripts.List) = .empty;
         defer untrusted_deps.deinit(ctx.allocator);
 
         var tree_iterator = Lockfile.Tree.Iterator(.node_modules).init(pm.lockfile);
@@ -168,7 +168,7 @@ pub const TrustCommand = struct {
         PackageManagerCommand.handleLoadLockfileErrors(load_lockfile, pm);
         try pm.updateLockfileIfNeeded(load_lockfile);
 
-        var packages_to_trust: std.ArrayListUnmanaged(string) = .{};
+        var packages_to_trust: std.ArrayListUnmanaged(string) = .empty;
         defer packages_to_trust.deinit(ctx.allocator);
         try packages_to_trust.ensureUnusedCapacity(ctx.allocator, args[2..].len);
         for (args[2..]) |arg| {
@@ -210,12 +210,12 @@ pub const TrustCommand = struct {
         var node_modules_path: bun.AbsPath(.{ .sep = .auto }) = .initTopLevelDir();
         defer node_modules_path.deinit();
 
-        var package_names_to_add: bun.StringArrayHashMapUnmanaged(void) = .{};
+        var package_names_to_add: bun.StringArrayHashMapUnmanaged(void) = .empty;
         var scripts_at_depth: std.AutoArrayHashMapUnmanaged(usize, std.ArrayListUnmanaged(struct {
             package_id: PackageID,
             scripts_list: Lockfile.Package.Scripts.List,
             skip: bool,
-        })) = .{};
+        })) = .empty;
 
         var scripts_count: usize = 0;
 
@@ -224,11 +224,11 @@ pub const TrustCommand = struct {
             defer node_modules_path_save.restore();
             node_modules_path.append(node_modules.relative_path);
 
-            var node_modules_dir = bun.openDir(std.fs.cwd(), node_modules.relative_path) catch |err| {
+            var node_modules_dir = bun.openDir(std.Io.Dir.cwd(), node_modules.relative_path) catch |err| {
                 if (err == error.ENOENT) continue;
                 return err;
             };
-            defer node_modules_dir.close();
+            defer node_modules_dir.close(bun.blockingIo());
 
             for (node_modules.dependencies) |dep_id| {
                 if (untrusted_dep_ids.contains(dep_id)) {
@@ -273,7 +273,7 @@ pub const TrustCommand = struct {
 
                         // even if it is skipped we still add to scripts_at_depth for logging later
                         const entry = try scripts_at_depth.getOrPut(ctx.allocator, node_modules.depth);
-                        if (!entry.found_existing) entry.value_ptr.* = .{};
+                        if (!entry.found_existing) entry.value_ptr.* = .empty;
                         try entry.value_ptr.append(ctx.allocator, .{
                             .package_id = package_id,
                             .scripts_list = scripts_list,
@@ -347,7 +347,8 @@ pub const TrustCommand = struct {
             progress.* = .{};
         }
 
-        const package_json_contents = try pm.root_package_json_file.readToEndAlloc(ctx.allocator, try pm.root_package_json_file.getEndPos());
+        const root_pkg_read = (bun.sys.File{ .handle = bun.FD.fromStdFile(pm.root_package_json_file) }).readToEnd(ctx.allocator);
+        const package_json_contents = try root_pkg_read.unwrap();
         defer ctx.allocator.free(package_json_contents);
 
         const package_json_source = logger.Source.initPathString(PackageManager.root_package_json_path, package_json_contents);
@@ -412,9 +413,9 @@ pub const TrustCommand = struct {
 
         const new_package_json_contents = package_json_writer.ctx.writtenWithoutTrailingZero();
 
-        try pm.root_package_json_file.pwriteAll(new_package_json_contents, 0);
-        std.posix.ftruncate(pm.root_package_json_file.handle, new_package_json_contents.len) catch {};
-        pm.root_package_json_file.close();
+        try (bun.sys.File{ .handle = bun.FD.fromStdFile(pm.root_package_json_file) }).pwriteAll(new_package_json_contents, 0).unwrap();
+        bun.sys.ftruncate(bun.FD.fromStdFile(pm.root_package_json_file), @intCast(new_package_json_contents.len)).unwrap() catch {};
+        pm.root_package_json_file.close(bun.blockingIo());
 
         if (comptime Environment.allow_assert) {
             bun.assertWithLocation(total_scripts_ran > 0, @src());
@@ -427,7 +428,7 @@ pub const TrustCommand = struct {
             if (total_packages_with_scripts > 1) "s" else "",
         });
 
-        Output.printStartEndStdout(bun.start_time, std.time.nanoTimestamp());
+        Output.printStartEndStdout(bun.start_time, bun.SystemTimer.nanoTimestamp());
         Output.print("\n", .{});
 
         if (total_skipped_packages > 0) {

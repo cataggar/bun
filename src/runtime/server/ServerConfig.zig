@@ -306,7 +306,9 @@ pub fn deinit(this: *ServerConfig) void {
 
 pub fn computeID(this: *const ServerConfig, allocator: std.mem.Allocator) []const u8 {
     var arraylist = std.array_list.Managed(u8).init(allocator);
-    var writer = arraylist.writer();
+    var unmanaged = arraylist.moveToUnmanaged();
+    var allocating_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &unmanaged);
+    const writer = &allocating_writer.writer;
 
     writer.writeAll("[http]-") catch {};
     switch (this.address) {
@@ -329,6 +331,8 @@ pub fn computeID(this: *const ServerConfig, allocator: std.mem.Allocator) []cons
         },
     }
 
+    unmanaged = allocating_writer.toArrayList();
+    arraylist = unmanaged.toManaged(allocator);
     return arraylist.items;
 }
 
@@ -462,7 +466,7 @@ pub fn fromJS(
     var port = args.address.tcp.port;
 
     if (arguments.vm.transpiler.options.transform_options.origin) |origin| {
-        args.base_uri = try bun.default_allocator.dupeZ(u8, origin);
+        args.base_uri = try bun.dupeZ(bun.default_allocator, u8, origin);
     }
 
     defer {
@@ -572,7 +576,7 @@ pub fn fromJS(
                 }
 
                 if (value == .false) {
-                    const duped = bun.handleOom(bun.default_allocator.dupeZ(u8, path));
+                    const duped = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, path));
                     defer bun.default_allocator.free(path);
                     bun.handleOom(args.negative_routes.append(duped));
                     continue;
@@ -582,7 +586,7 @@ pub fn fromJS(
                     try validateRouteName(global, path);
                     args.user_routes_to_build.append(.{
                         .route = .{
-                            .path = bun.handleOom(bun.default_allocator.dupeZ(u8, path)),
+                            .path = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, path)),
                             .method = .any,
                         },
                         .callback = .create(value.withAsyncContextIfNeeded(global), global),
@@ -612,13 +616,13 @@ pub fn fromJS(
                             if (function.isCallable()) {
                                 args.user_routes_to_build.append(.{
                                     .route = .{
-                                        .path = bun.handleOom(bun.default_allocator.dupeZ(u8, path)),
+                                        .path = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, path)),
                                         .method = .{ .specific = method },
                                     },
                                     .callback = .create(function.withAsyncContextIfNeeded(global), global),
                                 }) catch |err| bun.handleOom(err);
                             } else if (try AnyRoute.fromJS(global, path, function, init_ctx)) |html_route| {
-                                var method_set = bun.http.Method.Set.initEmpty();
+                                var method_set = bun.http.Method.Set.empty;
                                 method_set.insert(method);
 
                                 args.static_routes.append(.{
@@ -732,8 +736,8 @@ pub fn fromJS(
                     init_ctx.arena.deinit();
                 }
             } else {
-                bun.debugAssert(init_ctx.arena.state.end_index == 0 and
-                    init_ctx.arena.state.buffer_list.first == null);
+                bun.debugAssert(init_ctx.arena.state.used_list == null and
+                    init_ctx.arena.state.free_list == null);
                 init_ctx.arena.deinit();
             }
         }
@@ -800,7 +804,7 @@ pub fn fromJS(
             defer host_str.deinit();
 
             if (host_str.len > 0) {
-                args.address.tcp.hostname = bun.default_allocator.dupeZ(u8, host_str.slice()) catch unreachable;
+                args.address.tcp.hostname = bun.dupeZ(bun.default_allocator, u8, host_str.slice()) catch unreachable;
                 has_hostname = true;
             }
         }
@@ -815,7 +819,7 @@ pub fn fromJS(
                     return global.throwInvalidArguments("Cannot specify both hostname and unix", .{});
                 }
 
-                args.address = .{ .unix = bun.default_allocator.dupeZ(u8, unix_str.slice()) catch unreachable };
+                args.address = .{ .unix = bun.dupeZ(bun.default_allocator, u8, unix_str.slice()) catch unreachable };
             }
         }
         if (global.hasException()) return error.JSError;
@@ -949,7 +953,7 @@ pub fn fromJS(
                         if (args.ssl_config == null) {
                             args.ssl_config = ssl_config;
                         } else {
-                            if ((ssl_config.server_name orelse "")[0] == 0) {
+                            if ((ssl_config.server_name orelse @as([*:0]const u8, ""))[0] == 0) {
                                 defer ssl_config.deinit();
                                 return global.throwInvalidArguments("SNI tls object must have a serverName", .{});
                             }

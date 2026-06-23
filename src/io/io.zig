@@ -34,7 +34,11 @@ pub const Loop = struct {
             .waker = bun.Async.Waker.init() catch @panic("failed to initialize waker"),
         };
         if (comptime Environment.isLinux) {
-            loop.epoll_fd = .fromNative(std.posix.epoll_create1(std.os.linux.EPOLL.CLOEXEC | 0) catch @panic("Failed to create epoll file descriptor"));
+            const epoll_fd = std.os.linux.epoll_create1(std.os.linux.EPOLL.CLOEXEC | 0);
+            switch (bun.sys.getErrno(epoll_fd)) {
+                .SUCCESS => loop.epoll_fd = .fromNative(@intCast(epoll_fd)),
+                else => @panic("Failed to create epoll file descriptor"),
+            }
 
             {
                 var epoll = std.mem.zeroes(std.os.linux.epoll_event);
@@ -72,14 +76,14 @@ pub const Loop = struct {
         }, onSpawnIOThread, .{}) catch @panic("Failed to spawn IO watcher thread");
         thread.detach();
     }
-    var once = std.once(load);
+    var once = bun.once(load);
 
     pub fn get() *Loop {
         if (Environment.isWindows) {
             @panic("Do not use this API on windows");
         }
 
-        once.call();
+        once.call(.{});
 
         return &loop;
     }
@@ -217,7 +221,7 @@ pub const Loop = struct {
         this.updateNow();
 
         while (true) {
-            var stack_fallback = std.heap.stackFallback(@sizeOf([256]EventType), bun.default_allocator);
+            var stack_fallback = bun.stackFallback(@sizeOf([256]EventType), bun.default_allocator);
             var events_list: std.array_list.Managed(EventType) = std.array_list.Managed(EventType).initCapacity(stack_fallback.get(), 256) catch unreachable;
             defer events_list.deinit();
 
@@ -436,7 +440,7 @@ const Pollable = struct {
 };
 
 pub const Poll = struct {
-    flags: Flags.Set = Flags.Set.initEmpty(),
+    flags: Flags.Set = .empty,
     generation_number: GenerationNumberInt = 0,
 
     const GenerationNumberInt = if (Environment.isMac and Environment.allow_assert) u64 else u0;
@@ -538,7 +542,7 @@ pub const Poll = struct {
         }
 
         pub fn applyKQueue(
-            comptime action: @Type(.enum_literal),
+            comptime action: @TypeOf(.enum_literal),
             tag: Pollable.Tag,
             poll: *Poll,
             fd: bun.FD,

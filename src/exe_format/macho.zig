@@ -63,7 +63,7 @@ pub const MachoFile = struct {
 
         var iter = self.iterator();
 
-        while (iter.next()) |entry| {
+        while (try iter.next()) |entry| {
             const cmd = entry.hdr;
             switch (cmd.cmd) {
                 .SEGMENT_64 => {
@@ -85,8 +85,8 @@ pub const MachoFile = struct {
                                     // Update segment with proper sizes and alignment
                                     self.segment.vmsize = alignVmsize(aligned_size, blob_alignment);
                                     self.segment.filesize = aligned_size;
-                                    self.segment.maxprot = macho.PROT.READ | macho.PROT.WRITE;
-                                    self.segment.initprot = macho.PROT.READ | macho.PROT.WRITE;
+                                    self.segment.maxprot = .{ .READ = true, .WRITE = true };
+                                    self.segment.initprot = .{ .READ = true, .WRITE = true };
 
                                     self.section = .{
                                         .sectname = SECTNAME,
@@ -265,7 +265,7 @@ pub const MachoFile = struct {
             .linkedit_filesize = new_linkedit_filesize,
         };
 
-        while (iter.next()) |entry| {
+        while (try iter.next()) |entry| {
             const cmd = entry.hdr;
             const cmd_ptr: [*]u8 = @constCast(entry.data.ptr);
 
@@ -326,8 +326,9 @@ pub const MachoFile = struct {
 
     pub fn iterator(self: *const MachoFile) macho.LoadCommandIterator {
         return .{
-            .buffer = self.data.items[@sizeOf(macho.mach_header_64)..][0..self.header.sizeofcmds],
+            .next_index = 0,
             .ncmds = self.header.ncmds,
+            .r = std.Io.Reader.fixed(self.data.items[@sizeOf(macho.mach_header_64)..][0..self.header.sizeofcmds]),
         };
     }
 
@@ -339,7 +340,7 @@ pub const MachoFile = struct {
         var iter = self.iterator();
         var prev_end: u64 = 0;
 
-        while (iter.next()) |entry| {
+        while (try iter.next()) |entry| {
             const cmd = entry.hdr;
             if (cmd.cmd == .SEGMENT_64) {
                 const seg = entry.cast(macho.segment_command_64).?;
@@ -353,10 +354,10 @@ pub const MachoFile = struct {
 
     pub fn buildAndSign(self: *MachoFile, writer: *std.Io.Writer) !void {
         if (self.header.cputype == macho.CPU_TYPE_ARM64 and !bun.feature_flag.BUN_NO_CODESIGN_MACHO_BINARY.get()) {
-            var data = std.array_list.Managed(u8).init(self.allocator);
-            defer data.deinit();
-            try self.build(data.writer());
-            var signer = try MachoSigner.init(self.allocator, data.items);
+            var aw = std.Io.Writer.Allocating.init(self.allocator);
+            defer aw.deinit();
+            try self.build(&aw.writer);
+            var signer = try MachoSigner.init(self.allocator, aw.written());
             defer signer.deinit();
             try signer.sign(writer);
         } else {
@@ -390,13 +391,14 @@ pub const MachoFile = struct {
             var linkedit_seg = std.mem.zeroes(macho.segment_command_64);
 
             var it = macho.LoadCommandIterator{
+                .next_index = 0,
                 .ncmds = header.ncmds,
-                .buffer = obj[header_size..][0..header.sizeofcmds],
+                .r = std.Io.Reader.fixed(obj[header_size..][0..header.sizeofcmds]),
             };
 
             // First pass: find segments to establish bounds
-            while (it.next()) |cmd| {
-                if (cmd.cmd() == .SEGMENT_64) {
+            while (try it.next()) |cmd| {
+                if (cmd.hdr.cmd == .SEGMENT_64) {
                     const seg = cmd.cast(macho.segment_command_64).?;
 
                     // Store segment info
@@ -416,13 +418,14 @@ pub const MachoFile = struct {
 
             // Reset iterator
             it = macho.LoadCommandIterator{
+                .next_index = 0,
                 .ncmds = header.ncmds,
-                .buffer = obj[header_size..][0..header.sizeofcmds],
+                .r = std.Io.Reader.fixed(obj[header_size..][0..header.sizeofcmds]),
             };
 
             // Second pass: find code signature
-            while (it.next()) |cmd| {
-                switch (cmd.cmd()) {
+            while (try it.next()) |cmd| {
+                switch (cmd.hdr.cmd) {
                     .CODE_SIGNATURE => {
                         const cs = cmd.cast(macho.linkedit_data_command).?;
                         sig_off = cs.dataoff;
@@ -543,13 +546,13 @@ pub const MachoFile = struct {
             @memset(self.data.unusedCapacitySlice(), 0);
 
             // Position writer at signature offset
-            var sig_writer = self.data.writer();
+            // append directly to self.data (Io.Writer has no writeInt; writeAll-only here)
 
             // Write signature components
-            try sig_writer.writeAll(mem.asBytes(&super_blob));
-            try sig_writer.writeAll(mem.asBytes(&blob_index));
-            try sig_writer.writeAll(mem.asBytes(&code_dir));
-            try sig_writer.writeAll(id);
+            try self.data.appendSlice(mem.asBytes(&super_blob));
+            try self.data.appendSlice(mem.asBytes(&blob_index));
+            try self.data.appendSlice(mem.asBytes(&code_dir));
+            try self.data.appendSlice(id);
 
             // Hash and write pages
             var remaining = self.data.items[0..self.sig_off];
@@ -557,16 +560,16 @@ pub const MachoFile = struct {
                 const page = remaining[0..PAGE_SIZE];
                 var digest: bun.sha.SHA256.Digest = undefined;
                 bun.sha.SHA256.hash(page, &digest, null);
-                try sig_writer.writeAll(&digest);
+                try self.data.appendSlice(&digest);
                 remaining = remaining[PAGE_SIZE..];
             }
 
             if (remaining.len > 0) {
-                var last_page = [_]u8{0} ** PAGE_SIZE;
+                var last_page = @as([PAGE_SIZE]u8, @splat(0));
                 @memcpy(last_page[0..remaining.len], remaining);
                 var digest: bun.sha.SHA256.Digest = undefined;
                 bun.sha.SHA256.hash(&last_page, &digest, null);
-                try sig_writer.writeAll(&digest);
+                try self.data.appendSlice(&digest);
             }
 
             // Finally, ensure that the length of data we write matches the total data expected

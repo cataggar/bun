@@ -211,7 +211,7 @@ pub fn generateChunksInParallel(
         defer path_names_map.deinit();
 
         const DuplicateEntry = struct {
-            sources: std.ArrayListUnmanaged(*Chunk) = .{},
+            sources: std.ArrayListUnmanaged(*Chunk) = .empty,
         };
         var duplicates_map: bun.StringArrayHashMapUnmanaged(DuplicateEntry) = .{};
 
@@ -251,14 +251,14 @@ pub fn generateChunksInParallel(
         }
 
         if (duplicates_map.count() > 0) {
-            var msg = std.array_list.Managed(u8).init(bun.default_allocator);
-            errdefer msg.deinit();
+            var aw = std.Io.Writer.Allocating.init(bun.default_allocator);
+            errdefer aw.deinit();
 
             var entry_naming: ?[]const u8 = null;
             var chunk_naming: ?[]const u8 = null;
             var asset_naming: ?[]const u8 = null;
 
-            const writer = msg.writer();
+            const writer = &aw.writer;
             try writer.print("Multiple files share the same output path\n", .{});
 
             const kinds = c.graph.files.items(.entry_point_kind);
@@ -282,7 +282,7 @@ pub fn generateChunksInParallel(
                 }
             }
 
-            try c.log.addError(null, Logger.Loc.Empty, try msg.toOwnedSlice());
+            try c.log.addError(null, Logger.Loc.Empty, try aw.toOwnedSlice());
 
             inline for (.{
                 .{ .name = "entry", .template = entry_naming },
@@ -335,7 +335,7 @@ pub fn generateChunksInParallel(
 
             // Collect replacements first (can't modify string table while iterating)
             const Replacement = struct { old_id: analyze_transpiled_module.StringID, resolved_path: []const u8 };
-            var replacements: std.ArrayListUnmanaged(Replacement) = .{};
+            var replacements: std.ArrayListUnmanaged(Replacement) = .empty;
             defer replacements.deinit(c.allocator());
 
             var offset: usize = 0;

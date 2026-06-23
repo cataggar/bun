@@ -136,8 +136,8 @@ pub const PackageManagerCommand = struct {
     }
 
     pub fn exec(ctx: Command.Context) !void {
-        var args = try std.process.argsAlloc(ctx.allocator);
-        args = args[1..];
+        const args = try ctx.allocator.alloc([:0]u8, bun.argv.len - 1);
+        for (args, bun.argv[1..]) |*a, src| a.* = @constCast(src);
 
         // Check if we're being invoked directly as "bun whoami" instead of "bun pm whoami"
         const is_direct_whoami = if (bun.argv.len > 1) strings.eqlComptime(bun.argv[1], "whoami") else false;
@@ -257,11 +257,11 @@ pub const PackageManagerCommand = struct {
             };
 
             if (pm.options.positionals.len > 1 and strings.eqlComptime(pm.options.positionals[1], "rm")) {
-                fd.close();
+                fd.close(bun.blockingIo());
 
                 var had_err = false;
 
-                std.fs.deleteTreeAbsolute(outpath) catch |err| {
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), outpath) catch |err| {
                     Output.err(err, "Could not delete {s}", .{outpath});
                     had_err = true;
                 };
@@ -269,7 +269,7 @@ pub const PackageManagerCommand = struct {
 
                 bunx: {
                     const tmp = bun.fs.FileSystem.RealFS.platformTempDir();
-                    const tmp_dir = std.fs.openDirAbsolute(tmp, .{ .iterate = true }) catch |err| {
+                    const tmp_dir = std.Io.Dir.openDirAbsolute(bun.blockingIo(), tmp, .{ .iterate = true }) catch |err| {
                         Output.err(err, "Could not open {s}", .{tmp});
                         had_err = true;
                         break :bunx;
@@ -282,13 +282,13 @@ pub const PackageManagerCommand = struct {
                     });
 
                     var deleted: usize = 0;
-                    while (iter.next() catch |err| {
+                    while (iter.next(bun.blockingIo()) catch |err| {
                         Output.err(err, "Could not read {s}", .{tmp});
                         had_err = true;
                         break :bunx;
                     }) |entry| {
                         if (std.mem.startsWith(u8, entry.name, prefix)) {
-                            tmp_dir.deleteTree(entry.name) catch |err| {
+                            tmp_dir.deleteTree(bun.blockingIo(), entry.name) catch |err| {
                                 Output.err(err, "Could not delete {s}", .{entry.name});
                                 had_err = true;
                                 continue;

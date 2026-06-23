@@ -38,11 +38,10 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
     var should_finalize_self = false;
     defer if (should_finalize_self) ctx.finalize();
 
-    var s = std.io.fixedBufferStream(body);
-    const reader = s.reader();
+    var reader = std.Io.Reader.fixed(body);
 
-    var sfa_general = std.heap.stackFallback(65536, ctx.dev.allocator());
-    var sfa_sourcemap = std.heap.stackFallback(65536, ctx.dev.allocator());
+    var sfa_general = bun.stackFallback(65536, ctx.dev.allocator());
+    var sfa_sourcemap = bun.stackFallback(65536, ctx.dev.allocator());
     const temp_alloc = sfa_general.get();
     var arena = std.heap.ArenaAllocator.init(temp_alloc);
     defer arena.deinit();
@@ -50,21 +49,21 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
     defer source_map_arena.deinit();
 
     // Read payload, assemble ZigException
-    const name = try readString32(reader, temp_alloc);
+    const name = try readString32(&reader, temp_alloc);
     defer temp_alloc.free(name);
-    const message = try readString32(reader, temp_alloc);
+    const message = try readString32(&reader, temp_alloc);
     defer temp_alloc.free(message);
-    const browser_url = try readString32(reader, temp_alloc);
+    const browser_url = try readString32(&reader, temp_alloc);
     defer temp_alloc.free(browser_url);
     var frames: ArrayListUnmanaged(jsc.ZigStackFrame) = .empty;
     defer frames.deinit(temp_alloc);
-    const stack_count = @min(try reader.readInt(u32, .little), 255); // does not support more than 255
+    const stack_count = @min(try reader.takeInt(u32, .little), 255); // does not support more than 255
     try frames.ensureTotalCapacity(temp_alloc, stack_count);
     for (0..stack_count) |_| {
-        const line = try reader.readInt(i32, .little);
-        const column = try reader.readInt(i32, .little);
-        const function_name = try readString32(reader, temp_alloc);
-        const file_name = try readString32(reader, temp_alloc);
+        const line = try reader.takeInt(i32, .little);
+        const column = try reader.takeInt(i32, .little);
+        const function_name = try readString32(&reader, temp_alloc);
+        const file_name = try readString32(&reader, temp_alloc);
         frames.appendAssumeCapacity(.{
             .function_name = .init(function_name),
             .source_url = .init(file_name),
@@ -241,27 +240,25 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
 
     var out: std.array_list.Managed(u8) = .init(ctx.dev.allocator());
     errdefer out.deinit();
-    const w = out.writer();
-
-    try w.writeInt(u32, exception.stack.frames_len, .little);
+    try appendIntLittle(&out, u32, exception.stack.frames_len);
     for (exception.stack.frames()) |frame| {
-        try w.writeInt(i32, frame.position.line.oneBased(), .little);
-        try w.writeInt(i32, frame.position.column.oneBased(), .little);
+        try appendIntLittle(&out, i32, frame.position.line.oneBased());
+        try appendIntLittle(&out, i32, frame.position.column.oneBased());
 
         const function_name = frame.function_name.value.ZigString.slice();
-        try w.writeInt(u32, @intCast(function_name.len), .little);
-        try w.writeAll(function_name);
+        try appendIntLittle(&out, u32, @intCast(function_name.len));
+        try out.appendSlice(function_name);
 
         const src_to_write = frame.source_url.value.ZigString.slice();
         if (bun.strings.hasPrefixComptime(src_to_write, "/")) {
             const relative_path_buf = bun.path_buffer_pool.get();
             defer bun.path_buffer_pool.put(relative_path_buf);
             const file = ctx.dev.relativePath(relative_path_buf, src_to_write);
-            try w.writeInt(u32, @intCast(file.len), .little);
-            try w.writeAll(file);
+            try appendIntLittle(&out, u32, @intCast(file.len));
+            try out.appendSlice(file);
         } else {
-            try w.writeInt(u32, @intCast(src_to_write.len), .little);
-            try w.writeAll(src_to_write);
+            try appendIntLittle(&out, u32, @intCast(src_to_write.len));
+            try out.appendSlice(src_to_write);
         }
     }
 
@@ -277,17 +274,17 @@ pub fn runWithBody(ctx: *ErrorReportRequest, body: []const u8, r: AnyResponse) !
             adjusted_lines.len -= 1;
         }
 
-        try w.writeInt(u8, @intCast(adjusted_lines.len), .little);
-        try w.writeInt(u32, @intCast(region_of_interest_line), .little);
-        try w.writeInt(u32, @intCast(first_line_of_interest + 1), .little);
-        try w.writeInt(u32, @intCast(top_frame_position.column.oneBased()), .little);
+        try appendIntLittle(&out, u8, @intCast(adjusted_lines.len));
+        try appendIntLittle(&out, u32, @intCast(region_of_interest_line));
+        try appendIntLittle(&out, u32, @intCast(first_line_of_interest + 1));
+        try appendIntLittle(&out, u32, @intCast(top_frame_position.column.oneBased()));
 
         for (adjusted_lines) |line| {
-            try w.writeInt(u32, @intCast(line.len), .little);
-            try w.writeAll(line);
+            try appendIntLittle(&out, u32, @intCast(line.len));
+            try out.appendSlice(line);
         }
     } else {
-        try w.writeInt(u8, 0, .little);
+        try appendIntLittle(&out, u8, 0);
     }
 
     StaticRoute.sendBlobThenDeinit(r, &.fromArrayList(out), .{
@@ -352,7 +349,7 @@ fn extractJsonEncodedSourceCode(contents: []const u8, target_line: u32, comptime
     };
     defer log.deinit();
 
-    var result: [n][]const u8 = .{""} ** n;
+    var result: [n][]const u8 = @splat("");
     for (&result) |*decoded_line| {
         var has_extra_escapes = false;
         prev = 0;
@@ -384,6 +381,12 @@ fn extractJsonEncodedSourceCode(contents: []const u8, target_line: u32, comptime
 
 const bun = @import("bun");
 const Output = bun.Output;
+
+fn appendIntLittle(list: *std.array_list.Managed(u8), comptime T: type, value: T) !void {
+    var buf: [@sizeOf(T)]u8 = undefined;
+    std.mem.writeInt(T, &buf, value, .little);
+    try list.appendSlice(&buf);
+}
 const bake = bun.bake;
 const jsc = bun.jsc;
 const Log = bun.logger.Log;

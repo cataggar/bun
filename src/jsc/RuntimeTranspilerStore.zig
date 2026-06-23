@@ -17,7 +17,7 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
     if (bun.feature_flag.BUN_DEBUG_NO_DUMP.get()) return;
 
     const BunDebugHolder = struct {
-        pub var dir: ?std.fs.Dir = null;
+        pub var dir: ?std.Io.Dir = null;
         pub var lock: bun.Mutex = .{};
     };
 
@@ -37,7 +37,8 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
                 break :brk win_temp_buffer[0 .. temp.len + suffix.len :0];
             },
         };
-        const dir = try std.fs.cwd().makeOpenPath(base_name, .{});
+        const io = bun.blockingIo();
+        const dir = try std.Io.Dir.cwd().createDirPathOpen(io, base_name, .{});
         BunDebugHolder.dir = dir;
         break :dir dir;
     };
@@ -47,9 +48,10 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
             else => "/".len,
             .windows => bun.path.windowsFilesystemRoot(dir_path).len,
         };
-        var parent = try dir.makeOpenPath(dir_path[root_len..], .{});
-        defer parent.close();
-        parent.writeFile(.{
+        const io = bun.blockingIo();
+        var parent = try dir.createDirPathOpen(io, dir_path[root_len..], .{});
+        defer parent.close(io);
+        parent.writeFile(io, .{
             .sub_path = std.fs.path.basename(specifier),
             .data = written,
         }) catch |e| {
@@ -60,18 +62,19 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
             defer mappings.deref();
             const map_path = bun.handleOom(std.mem.concat(bun.default_allocator, u8, &.{ std.fs.path.basename(specifier), ".map" }));
             defer bun.default_allocator.free(map_path);
-            const file = try parent.createFile(map_path, .{});
-            defer file.close();
+            const file = try parent.createFile(io, map_path, .{});
+            defer file.close(io);
 
             const source_file = parent.readFileAlloc(
-                bun.default_allocator,
+                io,
                 specifier,
-                std.math.maxInt(u64),
+                bun.default_allocator,
+                .unlimited,
             ) catch "";
             defer bun.default_allocator.free(source_file);
 
             var bufw_buffer: [4096]u8 = undefined;
-            var bufw = file.writerStreaming(&bufw_buffer);
+            var bufw = file.writerStreaming(bun.blockingIo(), &bufw_buffer);
             const w = &bufw.interface;
             try w.print(
                 \\{{
@@ -92,7 +95,8 @@ pub fn dumpSourceStringFailiable(vm: *VirtualMachine, specifier: string, written
             try w.flush();
         }
     } else {
-        dir.writeFile(.{
+        const io = bun.blockingIo();
+        dir.writeFile(io, .{
             .sub_path = std.fs.path.basename(specifier),
             .data = written,
         }) catch return;

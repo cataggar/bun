@@ -119,7 +119,7 @@ pub const Scripts = extern struct {
         const allocator = lockfile.allocator;
         var script_index: u8 = 0;
         var first_script_index: i8 = -1;
-        var scripts: [6]?string = .{null} ** 6;
+        var scripts: [6]?string = @splat(null);
         var counter: u8 = 0;
 
         if (add_node_gyp_rebuild_script) {
@@ -214,7 +214,7 @@ pub const Scripts = extern struct {
                 .items = scripts,
                 .first_index = @intCast(first_index),
                 .total = total,
-                .cwd = bun.handleOom(allocator.dupeZ(u8, cwd)),
+                .cwd = bun.handleOom(bun.dupeZ(allocator, u8, cwd)),
                 .package_name = bun.handleOom(lockfile.allocator.dupe(u8, package_name)),
             };
         }

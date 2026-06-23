@@ -191,7 +191,7 @@ pub const GetAddrInfo = struct {
     };
 
     pub const Result = struct {
-        address: std.net.Address,
+        address: std.Io.net.IpAddress,
         ttl: i32 = 0,
 
         pub const List = std.array_list.Managed(Result);
@@ -230,7 +230,7 @@ pub const GetAddrInfo = struct {
 
         pub fn fromAddrInfo(addrinfo: *std.c.addrinfo) ?Result {
             return Result{
-                .address = std.net.Address.initPosix(@alignCast(addrinfo.addr orelse return null)),
+                .address = std.Io.Threaded.addressFromPosix(@ptrCast(@alignCast(addrinfo.addr orelse return null))),
                 // no TTL in POSIX getaddrinfo()
                 .ttl = 0,
             };
@@ -239,36 +239,27 @@ pub const GetAddrInfo = struct {
         pub const toJS = options_jsc.resultToJS;
     };
 };
-pub fn addressToString(address: *const std.net.Address) bun.OOM!bun.String {
-    switch (address.any.family) {
-        std.posix.AF.INET => {
-            var self = address.in;
-            const bytes = @as(*const [4]u8, @ptrCast(&self.sa.addr));
-            return String.createFormat("{}.{}.{}.{}", .{
+pub fn addressToString(address: *const std.Io.net.IpAddress) bun.OOM!bun.String {
+    switch (address.*) {
+        .ip4 => |ip4| {
+            const bytes = &ip4.bytes;
+            return String.createFormat("{d}.{d}.{d}.{d}", .{
                 bytes[0],
                 bytes[1],
                 bytes[2],
                 bytes[3],
             });
         },
-        std.posix.AF.INET6 => {
-            var stack = std.heap.stackFallback(512, default_allocator);
+        .ip6 => |ip6| {
+            var stack = bun.stackFallback(512, default_allocator);
             const allocator = stack.get();
             var out = try std.fmt.allocPrint(allocator, "{f}", .{address.*});
             defer allocator.free(out);
             // TODO: this is a hack, fix it
             // This removes [.*]:port
             //              ^  ^^^^^^
-            return String.cloneLatin1(out[1 .. out.len - 1 - std.fmt.count("{d}", .{address.in6.getPort()}) - 1]);
+            return String.cloneLatin1(out[1 .. out.len - 1 - std.fmt.count("{d}", .{ip6.port}) - 1]);
         },
-        std.posix.AF.UNIX => {
-            if (comptime std.net.has_unix_sockets) {
-                return String.cloneLatin1(&address.un.path);
-            }
-
-            return String.empty;
-        },
-        else => return String.empty,
     }
 }
 

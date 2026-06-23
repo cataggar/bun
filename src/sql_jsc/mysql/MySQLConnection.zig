@@ -317,7 +317,7 @@ pub fn readAndProcessData(this: *MySQLConnection, data: []const u8) !void {
             if (err != error.ShortRead) {
                 if (comptime bun.Environment.allow_assert) {
                     if (@errorReturnTrace()) |trace| {
-                        debug("Error: {s}\n{f}", .{ @errorName(err), trace });
+                        debug("Error: {s}\n{any}", .{ @errorName(err), trace.instruction_addresses[0..@min(trace.index, trace.instruction_addresses.len)] });
                     }
                 }
                 return err;

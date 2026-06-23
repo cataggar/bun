@@ -1033,7 +1033,7 @@ pub const Interpreter = struct {
 
     pub fn initAndRunFromFile(ctx: bun.cli.Command.Context, mini: *jsc.MiniEventLoop, path: []const u8) !bun.shell.ExitCode {
         var shargs = ShellArgs.init();
-        const src = try std.fs.cwd().readFileAlloc(shargs.arena_allocator(), path, std.math.maxInt(u32));
+        const src = try std.Io.Dir.cwd().readFileAlloc(bun.blockingIo(), path, shargs.arena_allocator(), .limited(std.math.maxInt(u32)));
         defer shargs.deinit();
 
         const jsobjs: []JSValue = &[_]JSValue{};
@@ -1542,7 +1542,7 @@ pub fn StatePtrUnion(comptime TypesValue: anytype) type {
         pub fn scopedAllocator(this: @This()) if (bun.Environment.enableAllocScopes) *bun.AllocationScope else void {
             if (comptime !bun.Environment.enableAllocScopes) return;
 
-            const tags = comptime std.meta.fields(Ptr.Tag);
+            const tags = comptime bun.meta.EnumFields(Ptr.Tag);
             inline for (tags) |tag| {
                 if (this.tagInt() == tag.value) {
                     const Ty = comptime Ptr.typeFromTag(tag.value);
@@ -1558,7 +1558,7 @@ pub fn StatePtrUnion(comptime TypesValue: anytype) type {
         }
 
         pub fn allocator(this: @This()) std.mem.Allocator {
-            const tags = comptime std.meta.fields(Ptr.Tag);
+            const tags = comptime bun.meta.EnumFields(Ptr.Tag);
             inline for (tags) |tag| {
                 if (this.tagInt() == tag.value) {
                     const Ty = comptime Ptr.typeFromTag(tag.value);
@@ -1591,7 +1591,7 @@ pub fn StatePtrUnion(comptime TypesValue: anytype) type {
 
         /// Starts the state node.
         pub fn start(this: @This()) Yield {
-            const tags = comptime std.meta.fields(Ptr.Tag);
+            const tags = comptime bun.meta.EnumFields(Ptr.Tag);
             inline for (tags) |tag| {
                 if (this.tagInt() == tag.value) {
                     const Ty = comptime Ptr.typeFromTag(tag.value);
@@ -1605,7 +1605,7 @@ pub fn StatePtrUnion(comptime TypesValue: anytype) type {
 
         /// Deinitializes the state node
         pub fn deinit(this: @This()) void {
-            const tags = comptime std.meta.fields(Ptr.Tag);
+            const tags = comptime bun.meta.EnumFields(Ptr.Tag);
             inline for (tags) |tag| {
                 if (this.tagInt() == tag.value) {
                     const Ty = comptime Ptr.typeFromTag(tag.value);
@@ -1622,7 +1622,7 @@ pub fn StatePtrUnion(comptime TypesValue: anytype) type {
         /// Signals to the state node that one of its children completed with the
         /// given exit code
         pub fn childDone(this: @This(), child: anytype, exit_code: ExitCode) Yield {
-            const tags = comptime std.meta.fields(Ptr.Tag);
+            const tags = comptime bun.meta.EnumFields(Ptr.Tag);
             inline for (tags) |tag| {
                 if (this.tagInt() == tag.value) {
                     const Ty = comptime Ptr.typeFromTag(tag.value);
@@ -2116,10 +2116,10 @@ pub fn FlagParser(comptime Opts: type) type {
 pub fn isPollable(fd: bun.FD, mode: bun.Mode) bool {
     return switch (bun.Environment.os) {
         .windows, .wasm => false,
-        .linux, .freebsd => posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or posix.isatty(fd.native()),
+        .linux, .freebsd => posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or std.c.isatty(fd.native()) == 1,
         // macos DOES allow regular files to be pollable, but we don't want that because
         // our IOWriter code has a separate and better codepath for writing to files.
-        .mac => if (posix.S.ISREG(mode)) false else posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or posix.isatty(fd.native()),
+        .mac => if (posix.S.ISREG(mode)) false else posix.S.ISFIFO(mode) or posix.S.ISSOCK(mode) or std.c.isatty(fd.native()) == 1,
     };
 }
 

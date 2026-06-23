@@ -24,7 +24,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
         // we need to start with final so we validate the first frame
         receiving_is_final: bool = true,
 
-        ping_frame_bytes: [128 + 6]u8 = [_]u8{0} ** (128 + 6),
+        ping_frame_bytes: [128 + 6]u8 = @splat(0),
         ping_len: u8 = 0,
         ping_received: bool = false,
         pong_received: bool = false,
@@ -43,7 +43,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
 
         header_fragment: ?u8 = null,
 
-        payload_length_frame_bytes: [8]u8 = [_]u8{0} ** 8,
+        payload_length_frame_bytes: [8]u8 = @as([8]u8, @splat(0)),
         payload_length_frame_len: u8 = 0,
 
         initial_data_handler: ?*InitialDataHandler = null,
@@ -429,7 +429,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
                 }
             }
 
-            var header_bytes: [@sizeOf(usize)]u8 = [_]u8{0} ** @sizeOf(usize);
+            var header_bytes: [@sizeOf(usize)]u8 = @as([@sizeOf(usize)]u8, @splat(0));
 
             // In the WebSocket specification, control frames may not be fragmented.
             // However, the frame parser should handle fragmented control frames nonetheless.
@@ -1705,8 +1705,8 @@ const Copy = union(enum) {
                 bun.assert(@as(usize, encode_into_result.written) == content_byte_len);
                 bun.assert(@as(usize, encode_into_result.read) == utf16.len);
                 header.len = WebsocketHeader.packLength(encode_into_result.written);
-                var fib = std.io.fixedBufferStream(buf);
-                header.writeHeader(fib.writer(), encode_into_result.written) catch unreachable;
+                var writer = FixedBufferWriter.init(buf);
+                header.writeHeader(&writer, encode_into_result.written) catch unreachable;
 
                 Mask.fill(globalThis, buf[mask_offset..][0..4], to_mask[0..content_byte_len], to_mask[0..content_byte_len]);
             },
@@ -1718,14 +1718,14 @@ const Copy = union(enum) {
                 bun.assert(@as(usize, encode_into_result.read) == latin1.len);
 
                 header.len = WebsocketHeader.packLength(encode_into_result.written);
-                var fib = std.io.fixedBufferStream(buf);
-                header.writeHeader(fib.writer(), encode_into_result.written) catch unreachable;
+                var writer = FixedBufferWriter.init(buf);
+                header.writeHeader(&writer, encode_into_result.written) catch unreachable;
                 Mask.fill(globalThis, buf[mask_offset..][0..4], to_mask[0..content_byte_len], to_mask[0..content_byte_len]);
             },
             .bytes => |bytes| {
                 header.len = WebsocketHeader.packLength(bytes.len);
-                var fib = std.io.fixedBufferStream(buf);
-                header.writeHeader(fib.writer(), bytes.len) catch unreachable;
+                var writer = FixedBufferWriter.init(buf);
+                header.writeHeader(&writer, bytes.len) catch unreachable;
                 Mask.fill(globalThis, buf[mask_offset..][0..4], to_mask[0..content_byte_len], bytes);
             },
             .raw => unreachable,
@@ -1762,10 +1762,24 @@ const Copy = union(enum) {
 
         bun.assert(WebsocketHeader.frameSizeIncludingMask(content_byte_len) == buf.len);
 
-        var fib = std.io.fixedBufferStream(buf);
-        header.writeHeader(fib.writer(), content_byte_len) catch unreachable;
+        var writer = FixedBufferWriter.init(buf);
+        header.writeHeader(&writer, content_byte_len) catch unreachable;
 
         Mask.fill(globalThis, buf[mask_offset..][0..4], to_mask[0..content_byte_len], compressed_data);
+    }
+};
+
+const FixedBufferWriter = struct {
+    buffer: []u8,
+    pos: usize = 0,
+
+    fn init(buffer: []u8) FixedBufferWriter {
+        return .{ .buffer = buffer };
+    }
+
+    fn writeInt(this: *FixedBufferWriter, comptime T: type, value: T, endian: std.builtin.Endian) !void {
+        std.mem.writeInt(T, this.buffer[this.pos..][0..@sizeOf(T)], value, endian);
+        this.pos += @sizeOf(T);
     }
 };
 

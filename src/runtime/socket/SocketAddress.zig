@@ -133,10 +133,10 @@ pub fn parse(global: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) bun.JSError
     const paddr = host.latin1(); // presentation address
     const addr = if (paddr[0] == '[' and paddr[paddr.len - 1] == ']') v6: {
         const v6 = net.Ip6Address.parse(paddr[1 .. paddr.len - 1], port_) catch return .js_undefined;
-        break :v6 SocketAddress{ ._addr = .{ .sin6 = v6.sa } };
+        break :v6 SocketAddress.initIPv6(v6.bytes, v6.port, v6.flow, v6.interface.index);
     } else v4: {
         const v4 = net.Ip4Address.parse(paddr, port_) catch return .js_undefined;
-        break :v4 SocketAddress{ ._addr = .{ .sin = v4.sa } };
+        break :v4 SocketAddress.initIPv4(v4.bytes, v4.port);
     };
 
     return SocketAddress.new(addr).toJS(global);
@@ -211,7 +211,7 @@ pub fn initJS(global: *jsc.JSGlobalObject, options: Options) bun.JSError!SocketA
 
     // We need a zero-terminated cstring for `ares_inet_pton`, which forces us to
     // copy the string.
-    var stackfb = std.heap.stackFallback(64, bun.default_allocator);
+    var stackfb = bun.stackFallback(64, bun.default_allocator);
     const alloc = stackfb.get();
 
     // NOTE: `zig translate-c` creates semantically invalid code for `C.ntohs`.
@@ -650,7 +650,7 @@ win: {
     break :win struct {
         pub const IN4ADDR_LOOPBACK: u32 = ws2.IN4ADDR_LOOPBACK;
         pub const INET6_ADDRSTRLEN = ws2.INET6_ADDRSTRLEN;
-        pub const IN6ADDR_ANY_INIT: [16]u8 = .{0} ** 16;
+        pub const IN6ADDR_ANY_INIT: [16]u8 = @splat(0);
         pub const AF_INET = ws2.AF.INET;
         pub const AF_INET6 = ws2.AF.INET6;
         pub const sa_family_t = ws2.ADDRESS_FAMILY;
@@ -665,7 +665,7 @@ win: {
         pub const IN4ADDR_LOOPBACK = C.IN4ADDR_LOOPBACK;
         pub const INET6_ADDRSTRLEN = C.INET6_ADDRSTRLEN;
         // Make sure this is in line with IN6ADDR_ANY_INIT in `netinet/in.h` on all platforms.
-        pub const IN6ADDR_ANY_INIT: [16]u8 = .{0} ** 16;
+        pub const IN6ADDR_ANY_INIT: [16]u8 = @splat(0);
         pub const AF_INET = C.AF_INET;
         pub const AF_INET6 = C.AF_INET6;
         pub const sa_family_t = C.sa_family_t;
@@ -690,4 +690,4 @@ const CallFrame = jsc.CallFrame;
 const JSValue = jsc.JSValue;
 
 const std = @import("std");
-const net = std.net;
+const net = std.Io.net;

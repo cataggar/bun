@@ -58,7 +58,7 @@ pub const CSSWideKeyword = enum {
 };
 
 // pub fn DefineProperties(comptime properties: anytype) type {
-//     const input_fields: []const std.builtin.Type.StructField = std.meta.fields(@TypeOf(properties));
+//     const input_fields: []const std.builtin.Type.StructField = bun.meta.fields(@TypeOf(properties));
 //     const total_fields_len = input_fields.len + 2; // +2 for the custom property and the `all` property
 //     const TagSize = u16;
 //     const PropertyIdT, const max_enum_name_length: usize = brk: {
@@ -158,7 +158,7 @@ pub const CSSWideKeyword = enum {
 //         }
 
 //         pub fn propertyIdIsShorthand(id: PropertyId) bool {
-//             inline for (std.meta.fields(PropertyId)) |field| {
+//             inline for (bun.meta.fields(PropertyId)) |field| {
 //                 if (field.value == @intFromEnum(id)) {
 //                     const is_shorthand = if (@hasField(@TypeOf(@field(properties, field.name)), "shorthand"))
 //                         @field(@field(properties, field.name), "shorthand")
@@ -206,7 +206,7 @@ pub const CSSWideKeyword = enum {
 //                 return Error.InvalidPropertyName;
 //             }
 //             const lower = bun.strings.copyLowercase(name, buffer[0..name.len]);
-//             inline for (std.meta.fields(PropertyIdT)) |field_| {
+//             inline for (bun.meta.fields(PropertyIdT)) |field_| {
 //                 const field: std.builtin.Type.EnumField = field_;
 //                 // skip custom
 //                 if (bun.strings.eql(field.name, "custom")) continue;

@@ -54,7 +54,7 @@ pub fn installHoistedPackages(
     const node_modules_folder = brk: {
         // Attempt to open the existing node_modules folder
         switch (bun.sys.openatOSPath(cwd, bun.OSPathLiteral("node_modules"), bun.O.DIRECTORY | bun.O.RDONLY, 0o755)) {
-            .result => |fd| break :brk std.fs.Dir{ .fd = fd.cast() },
+            .result => |fd| break :brk std.Io.Dir{ .handle = fd.cast() },
             .err => {},
         }
 
@@ -179,7 +179,7 @@ pub fn installHoistedPackages(
                     const trees = bun.handleOom(this.allocator.alloc(TreeContext, this.lockfile.buffers.trees.items.len));
                     for (0..this.lockfile.buffers.trees.items.len) |i| {
                         trees[i] = .{
-                            .binaries = Bin.PriorityQueue.init(this.allocator, .{
+                            .binaries = Bin.PriorityQueue.initContext(.{
                                 .dependencies = &this.lockfile.buffers.dependencies,
                                 .string_buf = &this.lockfile.buffers.string_bytes,
                             }),

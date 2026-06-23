@@ -49,7 +49,7 @@ pub fn insert(self: *WorkspaceMap, key: string, value: Entry) !void {
 }
 
 pub fn sort(self: *WorkspaceMap, sort_ctx: anytype) void {
-    self.map.sort(sort_ctx);
+    self.map.unmanaged.sort(sort_ctx);
 }
 
 pub fn deinit(self: *WorkspaceMap) void {
@@ -172,12 +172,14 @@ pub fn processNamesArray(
                     ) catch {};
                 },
                 else => {
+                    var cwd_buf: bun.PathBuffer = undefined;
+                    const cwd = bun.getcwd(&cwd_buf) catch unreachable;
                     log.addErrorFmt(
                         source,
                         item.loc,
                         allocator,
                         "{s} reading package.json for workspace package \"{s}\" from \"{s}\"",
-                        .{ @errorName(err), input_path, bun.getcwd(allocator.alloc(u8, bun.MAX_PATH_BYTES) catch unreachable) catch unreachable },
+                        .{ @errorName(err), input_path, cwd },
                     ) catch {};
                 },
             }

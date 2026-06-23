@@ -565,13 +565,12 @@ pub fn toAST(
             return Expr.init(js_ast.E.Array, js_ast.E.Array{ .items = exprs }, logger.Loc.Empty);
         },
         .@"struct" => |Struct| {
-            const fields: []const std.builtin.Type.StructField = Struct.fields;
-            var properties = try BabyList(js_ast.G.Property).initCapacity(allocator, fields.len);
+            var properties = try BabyList(js_ast.G.Property).initCapacity(allocator, Struct.field_names.len);
 
-            inline for (fields) |field| {
+            inline for (Struct.field_names, Struct.field_types) |field_name, FieldType| {
                 properties.appendAssumeCapacity(G.Property{
-                    .key = Expr.init(E.String, E.String{ .data = field.name }, logger.Loc.Empty),
-                    .value = try toAST(allocator, field.type, @field(value, field.name)),
+                    .key = Expr.init(E.String, E.String{ .data = field_name }, logger.Loc.Empty),
+                    .value = try toAST(allocator, FieldType, @field(value, field_name)),
                 });
             }
 
@@ -595,7 +594,7 @@ pub fn toAST(
             }
         },
         .@"enum" => {
-            _ = std.meta.intToEnum(Type, @intFromEnum(value)) catch {
+            _ = std.enums.fromInt(Type, @intFromEnum(value)) orelse {
                 return Expr{ .data = .{ .e_null = .{} }, .loc = logger.Loc{} };
             };
 
@@ -605,34 +604,18 @@ pub fn toAST(
         .@"union" => |Union| {
             const info = Union;
             if (info.tag_type) |UnionTagType| {
-                inline for (info.fields) |u_field| {
-                    if (value == @field(UnionTagType, u_field.name)) {
-                        const StructType = @Type(
-                            .{
-                                .Struct = .{
-                                    .layout = .Auto,
-                                    .decls = &.{},
-                                    .is_tuple = false,
-                                    .fields = &.{
-                                        .{
-                                            .name = u_field.name,
-                                            .type = @TypeOf(
-                                                @field(value, u_field.name),
-                                            ),
-                                            .is_comptime = false,
-                                            .default_value_ptr = undefined,
-                                            .alignment = @alignOf(
-                                                @TypeOf(
-                                                    @field(value, u_field.name),
-                                                ),
-                                            ),
-                                        },
-                                    },
-                                },
-                            },
+                inline for (info.field_names) |fname| {
+                    if (value == @field(UnionTagType, fname)) {
+                        const FieldType = @TypeOf(@field(value, fname));
+                        const StructType = @Struct(
+                            .auto,
+                            null,
+                            &[_][]const u8{fname},
+                            &[_]type{FieldType},
+                            &[_]std.builtin.Type.Struct.FieldAttributes{.{}},
                         );
                         var struct_value: StructType = undefined;
-                        @field(struct_value, u_field.name) = value;
+                        @field(struct_value, fname) = value;
                         return try toAST(allocator, StructType, struct_value);
                     }
                 }

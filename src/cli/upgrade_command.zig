@@ -487,7 +487,7 @@ pub const UpgradeCommand = struct {
                 Global.exit(1);
             };
 
-            const save_dir_it = save_dir_.makeOpenPath(version_name, .{}) catch |err| {
+            const save_dir_it = bun.MakePath.makeOpenPath(save_dir_, version_name, .{}) catch |err| {
                 Output.errGeneric("Failed to open temporary directory: {s}", .{@errorName(err)});
                 Global.exit(1);
             };
@@ -505,28 +505,28 @@ pub const UpgradeCommand = struct {
             const exe =
                 if (use_profile) profile_exe_subpath else exe_subpath;
 
-            var zip_file = save_dir.createFileZ(tmpname, .{ .truncate = true }) catch |err| {
+            var zip_file = save_dir.createFile(bun.blockingIo(), tmpname, .{ .truncate = true }) catch |err| {
                 Output.prettyErrorln("<r><red>error:<r> Failed to open temp file {s}", .{@errorName(err)});
                 Global.exit(1);
             };
 
             {
-                _ = zip_file.writeAll(bytes) catch |err| {
-                    save_dir.deleteFileZ(tmpname) catch {};
+                _ = zip_file.writeStreamingAll(bun.blockingIo(), bytes) catch |err| {
+                    save_dir.deleteFile(bun.blockingIo(), tmpname) catch {};
                     Output.prettyErrorln("<r><red>error:<r> Failed to write to temp file {s}", .{@errorName(err)});
                     Global.exit(1);
                 };
-                zip_file.close();
+                zip_file.close(bun.blockingIo());
             }
 
             {
                 defer {
-                    save_dir.deleteFileZ(tmpname) catch {};
+                    save_dir.deleteFile(bun.blockingIo(), tmpname) catch {};
                 }
 
                 if (comptime Environment.isPosix) {
                     const unzip_exe = which(&unzip_path_buf, env_loader.map.get("PATH") orelse "", filesystem.top_level_dir, "unzip") orelse {
-                        save_dir.deleteFileZ(tmpname) catch {};
+                        save_dir.deleteFile(bun.blockingIo(), tmpname) catch {};
                         Output.prettyErrorln("<r><red>error:<r> Failed to locate \"unzip\" in PATH. bun upgrade needs \"unzip\" to work.", .{});
                         Global.exit(1);
                     };
@@ -542,21 +542,37 @@ pub const UpgradeCommand = struct {
                         tmpname,
                     };
 
-                    var unzip_process = std.process.Child.init(&unzip_argv, ctx.allocator);
-                    unzip_process.cwd = tmpdir_path;
-                    unzip_process.stdin_behavior = .Inherit;
-                    unzip_process.stdout_behavior = .Inherit;
-                    unzip_process.stderr_behavior = .Inherit;
-
-                    const unzip_result = unzip_process.spawnAndWait() catch |err| {
-                        save_dir.deleteFileZ(tmpname) catch {};
+                    const unzip_result = switch (bun.spawnSync(&.{
+                        .argv = &unzip_argv,
+                        .envp = null,
+                        .cwd = tmpdir_path,
+                        .stdin = .inherit,
+                        .stdout = .inherit,
+                        .stderr = .inherit,
+                        .windows = if (bun.Environment.isWindows) .{
+                            .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                        },
+                    }) catch |err| {
+                        save_dir.deleteFile(bun.blockingIo(), tmpname) catch {};
                         Output.prettyErrorln("<r><red>error:<r> Failed to spawn unzip due to {s}.", .{@errorName(err)});
                         Global.exit(1);
+                    }) {
+                        .err => |err| {
+                            save_dir.deleteFile(bun.blockingIo(), tmpname) catch {};
+                            Output.prettyErrorln("<r><red>error:<r> Failed to spawn unzip due to {f}.", .{err});
+                            Global.exit(1);
+                        },
+                        .result => |r| r,
                     };
+                    defer unzip_result.deinit();
 
-                    if (unzip_result.Exited != 0) {
-                        Output.prettyErrorln("<r><red>Unzip failed<r> (exit code: {d})", .{unzip_result.Exited});
-                        save_dir.deleteFileZ(tmpname) catch {};
+                    if (!unzip_result.isOK()) {
+                        const exit_code = switch (unzip_result.status) {
+                            .exited => |e| e.code,
+                            else => 1,
+                        };
+                        Output.prettyErrorln("<r><red>Unzip failed<r> (exit code: {d})", .{exit_code});
+                        save_dir.deleteFile(bun.blockingIo(), tmpname) catch {};
                         Global.exit(1);
                     }
                 } else if (comptime Environment.isWindows) {
@@ -620,62 +636,78 @@ pub const UpgradeCommand = struct {
                     if (use_canary) "--revision" else "--version",
                 };
 
-                const result = std.process.Child.run(.{
-                    .allocator = ctx.allocator,
+                const result = switch (bun.spawnSync(&.{
                     .argv = &verify_argv,
+                    .envp = null,
                     .cwd = tmpdir_path,
-                    .max_output_bytes = 512,
+                    .stdin = .ignore,
+                    .stdout = .buffer,
+                    .stderr = .buffer,
+                    .windows = if (bun.Environment.isWindows) .{
+                        .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                    },
                 }) catch |err| {
-                    defer save_dir_.deleteTree(version_name) catch {};
-
-                    if (err == error.FileNotFound) {
-                        if (std.fs.cwd().access(exe, .{})) {
-                            // On systems like NixOS, the FileNotFound is actually the system-wide linker,
-                            // as they do not have one (most systems have it at a known path). This is how
-                            // ChildProcess returns FileNotFound despite the actual
-                            //
-                            // In these cases, prebuilt binaries from GitHub will never work without
-                            // extra patching, so we will print a message deferring them to their system
-                            // package manager.
-                            Output.prettyErrorln(
-                                \\<r><red>error<r><d>:<r> 'bun upgrade' is unsupported on systems without ld
-                                \\
-                                \\You are likely on an immutable system such as NixOS, where dynamic
-                                \\libraries are stored in a global cache.
-                                \\
-                                \\Please use your system's package manager to properly upgrade bun.
-                                \\
-                            , .{});
-                            Global.exit(1);
-                            return;
-                        } else |_| {}
-                    }
-
+                    save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                     Output.prettyErrorln("<r><red>error<r><d>:<r> Failed to verify Bun (code: {s})<r>", .{@errorName(err)});
                     Global.exit(1);
+                }) {
+                    .err => |err| {
+                        defer save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
+
+                        if (err.getErrno() == .NOENT) {
+                            if (std.Io.Dir.cwd().access(bun.blockingIo(), exe, .{})) {
+                                // On systems like NixOS, the FileNotFound is actually the system-wide linker,
+                                // as they do not have one (most systems have it at a known path). This is how
+                                // ChildProcess returns FileNotFound despite the actual
+                                //
+                                // In these cases, prebuilt binaries from GitHub will never work without
+                                // extra patching, so we will print a message deferring them to their system
+                                // package manager.
+                                Output.prettyErrorln(
+                                    \\<r><red>error<r><d>:<r> 'bun upgrade' is unsupported on systems without ld
+                                    \\
+                                    \\You are likely on an immutable system such as NixOS, where dynamic
+                                    \\libraries are stored in a global cache.
+                                    \\
+                                    \\Please use your system's package manager to properly upgrade bun.
+                                    \\
+                                , .{});
+                                Global.exit(1);
+                                return;
+                            } else |_| {}
+                        }
+
+                        Output.prettyErrorln("<r><red>error<r><d>:<r> Failed to verify Bun (code: {f})<r>", .{err});
+                        Global.exit(1);
+                    },
+                    .result => |r| r,
                 };
 
-                if (result.term.Exited != 0) {
-                    save_dir_.deleteTree(version_name) catch {};
-                    Output.prettyErrorln("<r><red>error<r><d>:<r> failed to verify Bun<r> (exit code: {d})", .{result.term.Exited});
+                if (!result.isOK()) {
+                    save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
+                    const exit_code = switch (result.status) {
+                        .exited => |e| e.code,
+                        else => 1,
+                    };
+                    Output.prettyErrorln("<r><red>error<r><d>:<r> failed to verify Bun<r> (exit code: {d})", .{exit_code});
                     Global.exit(1);
                 }
 
                 // It should run successfully
                 // but we don't care about the version number if we're doing a canary build
                 if (use_canary) {
-                    var version_string = result.stdout;
+                    var version_string = result.stdout.items;
                     if (strings.indexOfChar(version_string, '+')) |i| {
                         version.tag = version_string[i + 1 .. version_string.len];
                     }
                 } else {
-                    var version_string = result.stdout;
+                    var version_string = result.stdout.items;
                     if (strings.indexOfChar(version_string, ' ')) |i| {
                         version_string = version_string[0..i];
                     }
 
                     if (!strings.eql(std.mem.trim(u8, version_string, " \n\r\t"), version_name)) {
-                        save_dir_.deleteTree(version_name) catch {};
+                        save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
 
                         Output.prettyErrorln(
                             "<r><red>error<r>: The downloaded version of Bun (<red>{s}<r>) doesn't match the expected version (<b>{s}<r>)<r>. Cancelled upgrade",
@@ -699,8 +731,8 @@ pub const UpgradeCommand = struct {
             // safe because the slash will no longer be in use
             current_executable_buf[target_dir_.len] = 0;
             const target_dirname = current_executable_buf[0..target_dir_.len :0];
-            const target_dir_it = std.fs.openDirAbsoluteZ(target_dirname, .{}) catch |err| {
-                save_dir_.deleteTree(version_name) catch {};
+            const target_dir_it = std.Io.Dir.openDirAbsolute(bun.blockingIo(), target_dirname, .{}) catch |err| {
+                save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                 Output.prettyErrorln("<r><red>error:<r> Failed to open Bun's install directory {s}", .{@errorName(err)});
                 Global.exit(1);
             };
@@ -709,14 +741,14 @@ pub const UpgradeCommand = struct {
             if (use_canary) {
 
                 // Check if the versions are the same
-                const target_stat = target_dir.statFile(target_filename) catch |err| {
-                    save_dir_.deleteTree(version_name) catch {};
+                const target_stat = target_dir.statFile(bun.blockingIo(), target_filename, .{}) catch |err| {
+                    save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                     Output.prettyErrorln("<r><red>error:<r> {s} while trying to stat target {s} ", .{ @errorName(err), target_filename });
                     Global.exit(1);
                 };
 
-                const dest_stat = save_dir.statFile(exe) catch |err| {
-                    save_dir_.deleteTree(version_name) catch {};
+                const dest_stat = save_dir.statFile(bun.blockingIo(), exe, .{}) catch |err| {
+                    save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                     Output.prettyErrorln("<r><red>error:<r> {s} while trying to stat source {s}", .{ @errorName(err), exe });
                     Global.exit(1);
                 };
@@ -724,20 +756,20 @@ pub const UpgradeCommand = struct {
                 if (target_stat.size == dest_stat.size and target_stat.size > 0) {
                     const input_buf = try ctx.allocator.alloc(u8, target_stat.size);
 
-                    const target_hash = bun.hash(target_dir.readFile(target_filename, input_buf) catch |err| {
-                        save_dir_.deleteTree(version_name) catch {};
+                    const target_hash = bun.hash(target_dir.readFile(bun.blockingIo(), target_filename, input_buf) catch |err| {
+                        save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                         Output.prettyErrorln("<r><red>error:<r> Failed to read target bun {s}", .{@errorName(err)});
                         Global.exit(1);
                     });
 
-                    const source_hash = bun.hash(save_dir.readFile(exe, input_buf) catch |err| {
-                        save_dir_.deleteTree(version_name) catch {};
+                    const source_hash = bun.hash(save_dir.readFile(bun.blockingIo(), exe, input_buf) catch |err| {
+                        save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                         Output.prettyErrorln("<r><red>error:<r> Failed to read source bun {s}", .{@errorName(err)});
                         Global.exit(1);
                     });
 
                     if (target_hash == source_hash) {
-                        save_dir_.deleteTree(version_name) catch {};
+                        save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                         Output.prettyErrorln(
                             \\<r><green>Congrats!<r> You're already on the latest <b>canary<r><green> build of Bun
                             \\
@@ -764,7 +796,7 @@ pub const UpgradeCommand = struct {
                         target_filename,
                     }, 0);
                     std.posix.rename(destination_executable, outdated_filename.?) catch |err| {
-                        save_dir_.deleteTree(version_name) catch {};
+                        save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
                         Output.prettyErrorln("<r><red>error:<r> Failed to rename current executable {s}", .{@errorName(err)});
                         Global.exit(1);
                     };
@@ -772,7 +804,7 @@ pub const UpgradeCommand = struct {
                 }
 
                 bun.sys.moveFileZ(.fromStdDir(save_dir), exe, .fromStdDir(target_dir), target_filename) catch |err| {
-                    defer save_dir_.deleteTree(version_name) catch {};
+                    defer save_dir_.deleteTree(bun.blockingIo(), version_name) catch {};
 
                     if (comptime Environment.isWindows) {
                         // Attempt to restore the old executable. If this fails, the user will be left without a working copy of bun.
@@ -823,18 +855,21 @@ pub const UpgradeCommand = struct {
                 };
 
                 bun.handleOom(env_loader.map.put("IS_BUN_AUTO_UPDATE", "true"));
-                var std_map = try env_loader.map.stdEnvMap(ctx.allocator);
-                defer std_map.deinit();
-                _ = std.process.Child.run(.{
-                    .allocator = ctx.allocator,
+                const completions_envp = try env_loader.map.createNullDelimitedEnvMap(ctx.allocator);
+                _ = bun.spawnSync(&.{
                     .argv = &completions_argv,
+                    .envp = completions_envp.ptr,
                     .cwd = target_dirname,
-                    .max_output_bytes = 4096,
-                    .env_map = std_map.get(),
+                    .stdin = .ignore,
+                    .stdout = .ignore,
+                    .stderr = .ignore,
+                    .windows = if (bun.Environment.isWindows) .{
+                        .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                    },
                 }) catch {};
             }
 
-            Output.printStartEnd(ctx.start_time, std.time.nanoTimestamp());
+            Output.printStartEnd(ctx.start_time, bun.SystemTimer.nanoTimestamp());
 
             if (use_canary) {
                 Output.prettyErrorln(

@@ -333,6 +333,7 @@ pub const Tag = enum(u8) {
 
 pub const Error = @import("./Error.zig");
 pub const PosixStat = @import("./PosixStat.zig").PosixStat;
+pub const Stat = if (Environment.isLinux) PosixStat else bun.Stat;
 
 pub fn Maybe(comptime ReturnTypeT: type) type {
     return bun.api.node.Maybe(ReturnTypeT, Error);
@@ -407,7 +408,10 @@ pub fn fchmodat(fd: bun.FD, path: [:0]const u8, mode: bun.Mode, flags: if (Envir
     if (comptime Environment.isWindows) @compileError("Use fchmod instead");
 
     while (true) {
-        const rc = syscall_or_c.fchmodat(fd.cast(), path.ptr, mode, flags);
+        const rc = if (comptime Environment.isLinux)
+            syscall_or_c.fchmodat2(fd.cast(), path.ptr, mode, flags)
+        else
+            syscall_or_c.fchmodat(fd.cast(), path.ptr, mode, @intCast(flags));
         if (Maybe(void).errnoSysFd(rc, .fchmodat, fd)) |err| {
             if (err.getErrno() == .INTR) continue;
             return err;
@@ -519,27 +523,25 @@ pub fn sendfile(src: bun.FD, dest: bun.FD, len: usize) Maybe(usize) {
     }
 }
 
-pub fn stat(path: [:0]const u8) Maybe(bun.Stat) {
+pub fn stat(path: [:0]const u8) Maybe(Stat) {
     if (Environment.isWindows) {
         return sys_uv.stat(path);
+    } else if (Environment.isLinux) {
+        return statx(path, &.{ .type, .mode, .nlink, .uid, .gid, .atime, .mtime, .ctime, .btime, .ino, .size, .blocks });
     } else {
         while (true) {
-            var stat_ = mem.zeroes(bun.Stat);
-            const rc = if (Environment.isLinux)
-                // aarch64 linux doesn't implement a "stat" syscall. It's all fstatat.
-                linux.fstatat(std.posix.AT.FDCWD, path, &stat_, 0)
-            else
-                workaround_symbols.stat(path, &stat_);
+            var stat_ = mem.zeroes(Stat);
+            const rc = workaround_symbols.stat(path, &stat_);
 
             if (comptime Environment.allow_assert)
                 log("stat({s}) = {d}", .{ bun.asByteSlice(path), rc });
 
-            if (Maybe(bun.Stat).errnoSysP(rc, .stat, path)) |err| {
+            if (Maybe(Stat).errnoSysP(rc, .stat, path)) |err| {
                 if (err.getErrno() == .INTR) continue;
                 return err;
             }
 
-            return Maybe(bun.Stat){ .result = stat_ };
+            return Maybe(Stat){ .result = stat_ };
         }
     }
 }
@@ -571,22 +573,24 @@ pub fn statfs(path: [:0]const u8) Maybe(bun.StatFS) {
     }
 }
 
-pub fn lstat(path: [:0]const u8) Maybe(bun.Stat) {
+pub fn lstat(path: [:0]const u8) Maybe(Stat) {
     if (Environment.isWindows) {
         return sys_uv.lstat(path);
+    } else if (Environment.isLinux) {
+        return lstatx(path, &.{ .type, .mode, .nlink, .uid, .gid, .atime, .mtime, .ctime, .btime, .ino, .size, .blocks });
     } else {
         while (true) {
-            var stat_buf = mem.zeroes(bun.Stat);
-            if (Maybe(bun.Stat).errnoSysP(workaround_symbols.lstat(path, &stat_buf), .lstat, path)) |err| {
+            var stat_buf = mem.zeroes(Stat);
+            if (Maybe(Stat).errnoSysP(workaround_symbols.lstat(path, &stat_buf), .lstat, path)) |err| {
                 if (err.getErrno() == .INTR) continue;
                 return err;
             }
-            return Maybe(bun.Stat){ .result = stat_buf };
+            return Maybe(Stat){ .result = stat_buf };
         }
     }
 }
 
-pub fn fstat(fd: bun.FD) Maybe(bun.Stat) {
+pub fn fstat(fd: bun.FD) Maybe(Stat) {
     if (Environment.isWindows) {
         // TODO: this is a bad usage of makeLibUVOwned
         const uvfd = fd.makeLibUVOwned() catch
@@ -594,36 +598,40 @@ pub fn fstat(fd: bun.FD) Maybe(bun.Stat) {
         return sys_uv.fstat(uvfd);
     }
 
+    if (Environment.isLinux) {
+        return fstatx(fd, &.{ .type, .mode, .nlink, .uid, .gid, .atime, .mtime, .ctime, .btime, .ino, .size, .blocks });
+    }
+
     while (true) {
-        var stat_ = mem.zeroes(bun.Stat);
+        var stat_ = mem.zeroes(Stat);
 
         const rc = workaround_symbols.fstat(fd.cast(), &stat_);
 
         if (comptime Environment.allow_assert)
             log("fstat({f}) = {d}", .{ fd, rc });
 
-        if (Maybe(bun.Stat).errnoSysFd(rc, .fstat, fd)) |err| {
+        if (Maybe(Stat).errnoSysFd(rc, .fstat, fd)) |err| {
             if (err.getErrno() == .INTR) continue;
             return err;
         }
 
-        return Maybe(bun.Stat){ .result = stat_ };
+        return Maybe(Stat){ .result = stat_ };
     }
 }
 
-pub const StatxField = enum(comptime_int) {
-    type = linux.STATX_TYPE,
-    mode = linux.STATX_MODE,
-    nlink = linux.STATX_NLINK,
-    uid = linux.STATX_UID,
-    gid = linux.STATX_GID,
-    atime = linux.STATX_ATIME,
-    mtime = linux.STATX_MTIME,
-    ctime = linux.STATX_CTIME,
-    btime = linux.STATX_BTIME,
-    ino = linux.STATX_INO,
-    size = linux.STATX_SIZE,
-    blocks = linux.STATX_BLOCKS,
+pub const StatxField = enum {
+    type,
+    mode,
+    nlink,
+    uid,
+    gid,
+    atime,
+    mtime,
+    ctime,
+    btime,
+    ino,
+    size,
+    blocks,
 };
 
 // Linux Kernel v4.11
@@ -678,22 +686,13 @@ inline fn makedev(major: u32, minor: u32) u64 {
 }
 
 fn statxFallback(fd: bun.FD, path: ?[*:0]const u8, flags: u32) Maybe(PosixStat) {
-    if (path) |p| {
-        const path_span = bun.span(p);
-        const fallback = if (flags & linux.AT.SYMLINK_NOFOLLOW != 0) lstat(path_span) else stat(path_span);
-        return switch (fallback) {
-            .result => |s| .{ .result = PosixStat.init(&s) },
-            .err => |e| .{ .err = e },
-        };
-    } else {
-        return switch (fstat(fd)) {
-            .result => |s| .{ .result = PosixStat.init(&s) },
-            .err => |e| .{ .err = e },
-        };
-    }
+    _ = fd;
+    _ = path;
+    _ = flags;
+    return .{ .err = Error.fromCode(.NOSYS, .statx) };
 }
 
-fn statxImpl(fd: bun.FD, path: ?[*:0]const u8, flags: u32, mask: u32) Maybe(PosixStat) {
+fn statxImpl(fd: bun.FD, path: ?[*:0]const u8, flags: u32, mask: linux.STATX) Maybe(PosixStat) {
     if (comptime !Environment.isLinux) {
         @compileError("statx is only supported on Linux");
     }
@@ -747,7 +746,7 @@ fn statxImpl(fd: bun.FD, path: ?[*:0]const u8, flags: u32, mask: u32) Maybe(Posi
             .atim = .{ .sec = buf.atime.sec, .nsec = buf.atime.nsec },
             .mtim = .{ .sec = buf.mtime.sec, .nsec = buf.mtime.nsec },
             .ctim = .{ .sec = buf.ctime.sec, .nsec = buf.ctime.nsec },
-            .birthtim = if (buf.mask & linux.STATX_BTIME != 0)
+            .birthtim = if (buf.mask.BTIME)
                 .{ .sec = buf.btime.sec, .nsec = buf.btime.nsec }
             else
                 .{ .sec = 0, .nsec = 0 },
@@ -757,36 +756,39 @@ fn statxImpl(fd: bun.FD, path: ?[*:0]const u8, flags: u32, mask: u32) Maybe(Posi
     }
 }
 
-pub fn fstatx(fd: bun.FD, comptime fields: []const StatxField) Maybe(PosixStat) {
-    const mask: u32 = comptime brk: {
-        var i: u32 = 0;
-        for (fields) |field| {
-            i |= @intFromEnum(field);
+fn statxMask(comptime fields: []const StatxField) linux.STATX {
+    var mask: linux.STATX = .{};
+    inline for (fields) |field| {
+        switch (field) {
+            .type => mask.TYPE = true,
+            .mode => mask.MODE = true,
+            .nlink => mask.NLINK = true,
+            .uid => mask.UID = true,
+            .gid => mask.GID = true,
+            .atime => mask.ATIME = true,
+            .mtime => mask.MTIME = true,
+            .ctime => mask.CTIME = true,
+            .btime => mask.BTIME = true,
+            .ino => mask.INO = true,
+            .size => mask.SIZE = true,
+            .blocks => mask.BLOCKS = true,
         }
-        break :brk i;
-    };
+    }
+    return mask;
+}
+
+pub fn fstatx(fd: bun.FD, comptime fields: []const StatxField) Maybe(PosixStat) {
+    const mask = comptime statxMask(fields);
     return statxImpl(fd, null, linux.AT.EMPTY_PATH, mask);
 }
 
 pub fn statx(path: [*:0]const u8, comptime fields: []const StatxField) Maybe(PosixStat) {
-    const mask: u32 = comptime brk: {
-        var i: u32 = 0;
-        for (fields) |field| {
-            i |= @intFromEnum(field);
-        }
-        break :brk i;
-    };
+    const mask = comptime statxMask(fields);
     return statxImpl(bun.FD.fromNative(std.posix.AT.FDCWD), path, 0, mask);
 }
 
 pub fn lstatx(path: [*:0]const u8, comptime fields: []const StatxField) Maybe(PosixStat) {
-    const mask: u32 = comptime brk: {
-        var i: u32 = 0;
-        for (fields) |field| {
-            i |= @intFromEnum(field);
-        }
-        break :brk i;
-    };
+    const mask = comptime statxMask(fields);
     return statxImpl(bun.FD.fromNative(std.posix.AT.FDCWD), path, linux.AT.SYMLINK_NOFOLLOW, mask);
 }
 
@@ -835,32 +837,35 @@ pub fn mkdiratW(dir_fd: bun.FD, file_path: [:0]const u16, _: i32) Maybe(void) {
     return .success;
 }
 
-pub fn fstatat(fd: bun.FD, path: [:0]const u8) Maybe(bun.Stat) {
+pub fn fstatat(fd: bun.FD, path: [:0]const u8) Maybe(Stat) {
     if (Environment.isWindows) {
         return switch (openatWindowsA(fd, path, 0, 0)) {
             .result => |file| {
                 defer file.close();
                 return fstat(file);
             },
-            .err => |err| Maybe(bun.Stat){ .err = err },
+            .err => |err| Maybe(Stat){ .err = err },
         };
     }
     const fd_valid = if (fd == bun.invalid_fd) std.posix.AT.FDCWD else fd.native();
+    if (comptime Environment.isLinux) {
+        return statxImpl(bun.FD.fromNative(fd_valid), path, 0, comptime statxMask(&.{ .type, .mode, .nlink, .uid, .gid, .atime, .mtime, .ctime, .btime, .ino, .size, .blocks }));
+    }
     while (true) {
-        var stat_buf = mem.zeroes(bun.Stat);
-        if (Maybe(bun.Stat).errnoSysFP(syscall.fstatat(fd_valid, path, &stat_buf, 0), .fstatat, fd, path)) |err| {
+        var stat_buf = mem.zeroes(Stat);
+        if (Maybe(Stat).errnoSysFP(syscall.fstatat(fd_valid, path, &stat_buf, 0), .fstatat, fd, path)) |err| {
             if (err.getErrno() == .INTR) continue;
             log("fstatat({f}, {s}) = {s}", .{ fd, path, @tagName(err.getErrno()) });
             return err;
         }
         log("fstatat({f}, {s}) = 0", .{ fd, path });
-        return Maybe(bun.Stat){ .result = stat_buf };
+        return Maybe(Stat){ .result = stat_buf };
     }
 }
 
 /// Like fstatat but does not follow symlinks (uses AT.SYMLINK_NOFOLLOW).
 /// This is the "at" equivalent of lstat.
-pub fn lstatat(fd: bun.FD, path: [:0]const u8) Maybe(bun.Stat) {
+pub fn lstatat(fd: bun.FD, path: [:0]const u8) Maybe(Stat) {
     if (Environment.isWindows) {
         // Use O.NOFOLLOW to not follow symlinks (FILE_OPEN_REPARSE_POINT on Windows)
         return switch (openatWindowsA(fd, path, O.NOFOLLOW, 0)) {
@@ -868,19 +873,22 @@ pub fn lstatat(fd: bun.FD, path: [:0]const u8) Maybe(bun.Stat) {
                 defer file.close();
                 return fstat(file);
             },
-            .err => |err| Maybe(bun.Stat){ .err = err },
+            .err => |err| Maybe(Stat){ .err = err },
         };
     }
     const fd_valid = if (fd == bun.invalid_fd) std.posix.AT.FDCWD else fd.native();
+    if (comptime Environment.isLinux) {
+        return statxImpl(bun.FD.fromNative(fd_valid), path, linux.AT.SYMLINK_NOFOLLOW, comptime statxMask(&.{ .type, .mode, .nlink, .uid, .gid, .atime, .mtime, .ctime, .btime, .ino, .size, .blocks }));
+    }
     while (true) {
-        var stat_buf = mem.zeroes(bun.Stat);
-        if (Maybe(bun.Stat).errnoSysFP(syscall.fstatat(fd_valid, path, &stat_buf, std.posix.AT.SYMLINK_NOFOLLOW), .fstatat, fd, path)) |err| {
+        var stat_buf = mem.zeroes(Stat);
+        if (Maybe(Stat).errnoSysFP(syscall.fstatat(fd_valid, path, &stat_buf, std.posix.AT.SYMLINK_NOFOLLOW), .fstatat, fd, path)) |err| {
             if (err.getErrno() == .INTR) continue;
             log("lstatat({f}, {s}) = {s}", .{ fd, path, @tagName(err.getErrno()) });
             return err;
         }
         log("lstatat({f}, {s}) = 0", .{ fd, path });
-        return Maybe(bun.Stat){ .result = stat_buf };
+        return Maybe(Stat){ .result = stat_buf };
     }
 }
 
@@ -1071,7 +1079,7 @@ pub fn normalizePathWindows(
     }
 
     const base_fd = if (dir_fd == bun.invalid_fd)
-        std.fs.cwd().fd
+        std.Io.Dir.cwd().handle
     else
         dir_fd.cast();
 
@@ -1140,7 +1148,7 @@ fn openDirAtWindowsNtPath(
         .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(path))
             null
         else if (dirFd == bun.invalid_fd)
-            std.fs.cwd().fd
+            std.Io.Dir.cwd().handle
         else
             dirFd.cast(),
         .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
@@ -1350,7 +1358,7 @@ pub fn openFileAtWindowsNtPath(
         .RootDirectory = if (bun.strings.hasPrefixComptimeType(u16, path, windows.nt_object_prefix))
             null
         else if (dir == bun.invalid_fd)
-            std.fs.cwd().fd
+            std.Io.Dir.cwd().handle
         else
             dir.cast(),
         .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
@@ -2275,7 +2283,7 @@ pub inline fn sigaddset(set: *sigset_t, sig: u8) void {
         set.* |= @as(c_ulong, 1) << @as(u6, @intCast(sig - 1));
         return;
     }
-    posix.sigaddset(set, sig);
+    posix.sigaddset(set, @enumFromInt(sig));
 }
 
 pub fn sigaction(sig: u8, noalias act: ?*const Sigaction, noalias oact: ?*Sigaction) void {
@@ -2289,7 +2297,11 @@ pub fn sigaction(sig: u8, noalias act: ?*const Sigaction, noalias oact: ?*Sigact
         *const fn (c_int, noalias ?*const Sigaction, noalias ?*Sigaction) callconv(.c) c_int,
         .{ .name = "sigaction" },
     ) else std.c.sigaction;
-    _ = libc_sigaction(sig, act, oact);
+    if (comptime Environment.isAndroid) {
+        _ = libc_sigaction(sig, act, oact);
+    } else {
+        _ = libc_sigaction(@enumFromInt(sig), act, oact);
+    }
 }
 
 pub fn ppoll(fds: []std.posix.pollfd, timeout: ?*std.posix.timespec, sigmask: ?*const std.posix.sigset_t) Maybe(usize) {
@@ -2588,9 +2600,9 @@ pub fn renameatConcurrentlyWithoutFallback(
         //  sad path: let's try to delete the folder and then rename it
         if (to_dir_fd.isValid()) {
             var to_dir = to_dir_fd.stdDir();
-            to_dir.deleteTree(to) catch {};
+            to_dir.deleteTree(bun.blockingIo(), to) catch {};
         } else {
-            std.fs.deleteTreeAbsolute(to) catch {};
+            bun.FD.cwd().stdDir().deleteTree(bun.blockingIo(), to) catch {};
         }
         switch (renameat(from_dir_fd, from, to_dir_fd, to)) {
             .err => |err| {
@@ -2619,7 +2631,10 @@ pub fn renameat2(from_dir: bun.FD, from: [:0]const u8, to_dir: bun.FD, to: [:0]c
 
     while (true) {
         const rc = switch (comptime Environment.os) {
-            .linux => std.os.linux.renameat2(@intCast(from_dir.cast()), from.ptr, @intCast(to_dir.cast()), to.ptr, flags.int()),
+            .linux => std.os.linux.renameat2(@intCast(from_dir.cast()), from.ptr, @intCast(to_dir.cast()), to.ptr, .{
+                .EXCHANGE = flags.exchange,
+                .NOREPLACE = flags.exclude,
+            }),
             .mac => bun.c.renameatx_np(@intCast(from_dir.cast()), from.ptr, @intCast(to_dir.cast()), to.ptr, flags.int()),
             .freebsd => unreachable, // returned above
             .windows, .wasm => @compileError("renameat2() is not implemented on this platform"),
@@ -2998,7 +3013,7 @@ pub fn unlinkat(dirfd: bun.FD, to: anytype) Maybe(void) {
 /// on host devfs, so readlink fails. Use fdescfs at /dev/fd instead.
 fn getFdPathFreeBSDLinuxulator(fd: bun.FD, out_buffer: *bun.PathBuffer) Maybe([]u8) {
     var buf: ["/dev/fd/-2147483648".len + 1:0]u8 = undefined;
-    const path = std.fmt.bufPrintZ(&buf, "/dev/fd/{d}", .{fd.cast()}) catch unreachable;
+    const path = bun.fmt.bufPrintZ(&buf, "/dev/fd/{d}", .{fd.cast()}) catch unreachable;
     return switch (readlink(path, out_buffer)) {
         .result => |r| .{ .result = r },
         .err => |err| .{ .err = err },
@@ -3033,7 +3048,7 @@ pub fn getFdPath(fd: bun.FD, out_buffer: *bun.PathBuffer) Maybe([]u8) {
                 return getFdPathFreeBSDLinuxulator(fd, out_buffer);
             }
             var buf: ["/proc/self/fd/-2147483648".len + 1:0]u8 = undefined;
-            const path = std.fmt.bufPrintZ(&buf, "/proc/self/fd/{d}", .{fd.cast()}) catch unreachable;
+            const path = bun.fmt.bufPrintZ(&buf, "/proc/self/fd/{d}", .{fd.cast()}) catch unreachable;
             return switch (readlink(path, out_buffer)) {
                 .result => |r| .{ .result = r },
                 .err => |err| {
@@ -3080,7 +3095,7 @@ pub fn mmap(
     offset: u64,
 ) Maybe([]align(page_size_min) u8) {
     const ioffset = @as(i64, @bitCast(offset)); // the OS treats this as unsigned
-    const rc = std.c.mmap(ptr, length, prot, flags, fd.cast(), ioffset);
+    const rc = std.c.mmap(ptr, length, @bitCast(prot), flags, fd.cast(), ioffset);
     const fail = std.c.MAP_FAILED;
     if (rc == fail) {
         return .initErr(.{
@@ -3108,7 +3123,7 @@ pub fn mmapFile(path: [:0]const u8, flags: std.c.MAP, wanted_size: ?usize, offse
 
     if (wanted_size) |size_| size = @min(size, size_);
 
-    const map = switch (mmap(null, size, posix.PROT.READ | posix.PROT.WRITE, flags, fd, offset)) {
+    const map = switch (mmap(null, size, @bitCast(posix.PROT{ .READ = true, .WRITE = true }), flags, fd, offset)) {
         .result => |map| map,
 
         .err => |err| {
@@ -3210,8 +3225,13 @@ pub fn socketpairImpl(domain: socketpair_t, socktype: socketpair_t, protocol: so
 
     if (comptime Environment.isLinux) {
         while (true) {
-            const nonblock_flag: i32 = if (nonblocking_status == .nonblocking) linux.SOCK.NONBLOCK else 0;
-            const rc = std.os.linux.socketpair(domain, socktype | linux.SOCK.CLOEXEC | nonblock_flag, protocol, &fds_i);
+            const nonblock_flag: u32 = if (nonblocking_status == .nonblocking) linux.SOCK.NONBLOCK else 0;
+            const rc = std.os.linux.socketpair(
+                @intCast(domain),
+                @as(u32, @intCast(socktype)) | linux.SOCK.CLOEXEC | nonblock_flag,
+                @intCast(protocol),
+                &fds_i,
+            );
             if (Maybe([2]bun.FD).errnoSys(rc, .socketpair)) |err| {
                 if (err.getErrno() == .INTR) continue;
 
@@ -3642,14 +3662,14 @@ fn utimensWithFlags(path: bun.OSPathSliceZ, atime: jsc.Node.TimeLike, mtime: jsc
             .{ .sec = @intCast(mtime.sec), .nsec = mtime.nsec },
         };
         const rc = syscall.utimensat(
-            std.fs.cwd().fd,
+            std.Io.Dir.cwd().handle,
             path,
             // this var should be a const, the zig type definition is wrong.
             &times,
             flags,
         );
 
-        log("utimensat({d}, atime=({d}, {d}), mtime=({d}, {d})) = {d}", .{ std.fs.cwd().fd, atime.sec, atime.nsec, mtime.sec, mtime.nsec, rc });
+        log("utimensat({d}, atime=({d}, {d}), mtime=({d}, {d})) = {d}", .{ std.Io.Dir.cwd().handle, atime.sec, atime.nsec, mtime.sec, mtime.nsec, rc });
 
         if (rc == 0) {
             return .success;
@@ -3731,7 +3751,7 @@ pub fn existsAtType(fd: bun.FD, subpath: anytype) Maybe(ExistsAtType) {
             .RootDirectory = if (std.fs.path.isAbsoluteWindowsWTF16(path))
                 null
             else if (fd == bun.invalid_fd)
-                std.fs.cwd().fd
+                std.Io.Dir.cwd().handle
             else
                 fd.cast(),
             .Attributes = 0, // Note we do not use OBJ_CASE_INSENSITIVE here.
@@ -3779,7 +3799,7 @@ pub fn existsAtType(fd: bun.FD, subpath: anytype) Maybe(ExistsAtType) {
 
     return switch (fstatat(fd, subpath)) {
         .err => |err| .{ .err = err },
-        .result => |result| if (S.ISDIR(result.mode)) .{ .result = .directory } else .{ .result = .file },
+        .result => |result| if (S.ISDIR(@intCast(result.mode))) .{ .result = .directory } else .{ .result = .file },
     };
 }
 
@@ -4064,7 +4084,7 @@ pub fn linkatTmpfile(tmpfd: bun.FD, dirfd: bun.FD, name: [:0]const u8) Maybe(voi
             //        AT_SYMLINK_FOLLOW);
             //
             var procfs_buf: ["/proc/self/fd/-2147483648".len + 1:0]u8 = undefined;
-            const path = std.fmt.bufPrintZ(&procfs_buf, "/proc/self/fd/{d}", .{tmpfd.cast()}) catch unreachable;
+            const path = bun.fmt.bufPrintZ(&procfs_buf, "/proc/self/fd/{d}", .{tmpfd.cast()}) catch unreachable;
 
             break :brk std.os.linux.linkat(
                 posix.AT.FDCWD,
@@ -4258,7 +4278,7 @@ export fn Bun__unlink(ptr: [*:0]const u8, len: usize) void {
 
 // TODO: this is wrong on Windows
 
-pub fn lstat_absolute(path: [:0]const u8) !Stat {
+pub fn lstat_absolute(path: [:0]const u8) !FileStat {
     if (builtin.os.tag == .windows) {
         @compileError("Not implemented yet, consider using lstat()");
     }
@@ -4277,11 +4297,12 @@ pub fn lstat_absolute(path: [:0]const u8) !Stat {
     const atime = st.atime();
     const mtime = st.mtime();
     const ctime = st.ctime();
-    const Kind = std.fs.File.Kind;
-    return Stat{
+    const Kind = std.Io.File.Kind;
+    return FileStat{
         .inode = st.ino,
-        .size = @as(u64, @bitCast(st.size)),
-        .mode = st.mode,
+        .nlink = @intCast(st.nlink),
+        .size = @intCast(@max(st.size, 0)),
+        .permissions = .fromMode(@intCast(st.mode)),
         .kind = switch (builtin.os.tag) {
             .wasi => switch (st.filetype) {
                 posix.FILETYPE_BLOCK_DEVICE => Kind.block_device,
@@ -4292,7 +4313,7 @@ pub fn lstat_absolute(path: [:0]const u8) !Stat {
                 posix.FILETYPE_SOCKET_STREAM, posix.FILETYPE_SOCKET_DGRAM => Kind.unix_domain_socket,
                 else => Kind.unknown,
             },
-            else => switch (st.mode & posix.S.IFMT) {
+            else => switch (@as(u32, @intCast(st.mode)) & posix.S.IFMT) {
                 posix.S.IFBLK => Kind.block_device,
                 posix.S.IFCHR => Kind.character_device,
                 posix.S.IFDIR => Kind.directory,
@@ -4303,9 +4324,10 @@ pub fn lstat_absolute(path: [:0]const u8) !Stat {
                 else => Kind.unknown,
             },
         },
-        .atime = @as(i128, atime.sec) * std.time.ns_per_s + atime.nsec,
-        .mtime = @as(i128, mtime.sec) * std.time.ns_per_s + mtime.nsec,
-        .ctime = @as(i128, ctime.sec) * std.time.ns_per_s + ctime.nsec,
+        .atime = .{ .nanoseconds = @intCast(@as(i128, atime.sec) * std.time.ns_per_s + atime.nsec) },
+        .mtime = .{ .nanoseconds = @intCast(@as(i128, mtime.sec) * std.time.ns_per_s + mtime.nsec) },
+        .ctime = .{ .nanoseconds = @intCast(@as(i128, ctime.sec) * std.time.ns_per_s + ctime.nsec) },
+        .block_size = @intCast(st.blksize),
     };
 }
 
@@ -4424,23 +4446,23 @@ pub fn copyFileZSlowWithHandle(in_handle: bun.FD, to_dir: bun.FD, destination: [
         }
 
         if (comptime Environment.isPosix) {
-            _ = bun.c.fchmod(out_handle.cast(), stat_.mode);
-            _ = bun.c.fchown(out_handle.cast(), stat_.uid, stat_.gid);
+            _ = bun.c.fchmod(out_handle.cast(), @intCast(stat_.mode));
+            _ = bun.sys.fchown(out_handle, @intCast(stat_.uid), @intCast(stat_.gid));
         }
 
         return .success;
     }
 }
 
-pub fn kindFromMode(mode: mode_t) std.fs.File.Kind {
+pub fn kindFromMode(mode: mode_t) std.Io.File.Kind {
     return switch (mode & bun.S.IFMT) {
-        bun.S.IFBLK => std.fs.File.Kind.block_device,
-        bun.S.IFCHR => std.fs.File.Kind.character_device,
-        bun.S.IFDIR => std.fs.File.Kind.directory,
-        bun.S.IFIFO => std.fs.File.Kind.named_pipe,
-        bun.S.IFLNK => std.fs.File.Kind.sym_link,
-        bun.S.IFREG => std.fs.File.Kind.file,
-        bun.S.IFSOCK => std.fs.File.Kind.unix_domain_socket,
+        bun.S.IFBLK => std.Io.File.Kind.block_device,
+        bun.S.IFCHR => std.Io.File.Kind.character_device,
+        bun.S.IFDIR => std.Io.File.Kind.directory,
+        bun.S.IFIFO => std.Io.File.Kind.named_pipe,
+        bun.S.IFLNK => std.Io.File.Kind.sym_link,
+        bun.S.IFREG => std.Io.File.Kind.file,
+        bun.S.IFSOCK => std.Io.File.Kind.unix_domain_socket,
         else => .unknown,
     };
 }
@@ -4468,7 +4490,7 @@ pub fn getSelfExeSharedLibPaths(allocator: std.mem.Allocator) error{OutOfMemory}
                     _ = size;
                     const name = info.dlpi_name orelse return;
                     if (name[0] == '/') {
-                        const item = try list.allocator.dupeZ(u8, mem.sliceTo(name, 0));
+                        const item = try bun.dupeZ(list.allocator, u8, mem.sliceTo(name, 0));
                         errdefer list.allocator.free(item);
                         try list.append(item);
                     }
@@ -4488,7 +4510,7 @@ pub fn getSelfExeSharedLibPaths(allocator: std.mem.Allocator) error{OutOfMemory}
             const img_count = std.c._dyld_image_count();
             for (0..img_count) |i| {
                 const name = std.c._dyld_get_image_name(i);
-                const item = try allocator.dupeZ(u8, mem.sliceTo(name, 0));
+                const item = try bun.dupeZ(allocator, u8, mem.sliceTo(name, 0));
                 errdefer allocator.free(item);
                 try paths.append(item);
             }
@@ -4506,7 +4528,7 @@ pub fn getSelfExeSharedLibPaths(allocator: std.mem.Allocator) error{OutOfMemory}
             }
 
             const b = "/boot/system/runtime_loader";
-            const item = try allocator.dupeZ(u8, mem.sliceTo(b, 0));
+            const item = try bun.dupeZ(allocator, u8, mem.sliceTo(b, 0));
             errdefer allocator.free(item);
             try paths.append(item);
 
@@ -4648,7 +4670,7 @@ pub fn dlsymWithHandle(comptime Type: type, comptime name: [:0]const u8, comptim
     const Wrapper = struct {
         pub var function: Type = undefined;
         var failed = false;
-        pub var once = std.once(loadOnce);
+        pub var once = bun.once(loadOnce);
         fn loadOnce() void {
             function = bun.cast(Type, dlsymImpl(@call(bun.callmod_inline, handle_getter, .{}), name) orelse {
                 failed = true;
@@ -4656,7 +4678,7 @@ pub fn dlsymWithHandle(comptime Type: type, comptime name: [:0]const u8, comptim
             });
         }
     };
-    Wrapper.once.call();
+    Wrapper.once.call(.{});
     if (Wrapper.failed) {
         return null;
     }
@@ -4682,7 +4704,7 @@ const Environment = bun.Environment;
 const FD = bun.FD;
 const MAX_PATH_BYTES = bun.MAX_PATH_BYTES;
 const jsc = bun.jsc;
-const libc_stat = bun.Stat;
+const libc_stat = if (Environment.isLinux) PosixStat else bun.Stat;
 const darwin_nocancel = bun.darwin.nocancel;
 
 const c = bun.c; // translated c headers
@@ -4696,7 +4718,7 @@ const std = @import("std");
 const mem = std.mem;
 const page_size_min = std.heap.page_size_min;
 const w = std.os.windows;
-const Stat = std.fs.File.Stat;
+const FileStat = std.Io.File.Stat;
 
 const posix = std.posix;
 const libc = std.posix.system;

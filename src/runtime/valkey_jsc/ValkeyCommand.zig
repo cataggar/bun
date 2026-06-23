@@ -46,7 +46,12 @@ pub fn byteLength(this: *const Command) usize {
 pub fn serialize(this: *const Command, allocator: std.mem.Allocator) ![]u8 {
     var buf = try std.array_list.Managed(u8).initCapacity(allocator, this.byteLength());
     errdefer buf.deinit();
-    try this.write(buf.writer());
+    var unmanaged = buf.moveToUnmanaged();
+    var writer = std.Io.Writer.Allocating.fromArrayList(allocator, &unmanaged);
+    errdefer writer.deinit();
+    try this.write(&writer.writer);
+    unmanaged = writer.toArrayList();
+    buf = unmanaged.toManaged(allocator);
     return buf.items;
 }
 

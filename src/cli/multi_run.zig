@@ -59,8 +59,8 @@ pub const ProcessHandle = struct {
     } = null,
     options: bun.spawn.SpawnOptions,
 
-    start_time: ?std.time.Instant = null,
-    end_time: ?std.time.Instant = null,
+    start_time: ?std.Io.Timestamp = null,
+    end_time: ?std.Io.Timestamp = null,
 
     remaining_dependencies: usize = 0,
     /// Dependents within the same script group (pre->main->post chain).
@@ -80,7 +80,7 @@ pub const ProcessHandle = struct {
             null,
         };
 
-        this.start_time = std.time.Instant.now() catch null;
+        this.start_time = std.Io.Timestamp.now(bun.blockingIo(), .awake);
         var spawned: bun.spawn.process.SpawnProcessResult = brk: {
             var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
             defer arena.deinit();
@@ -130,7 +130,7 @@ pub const ProcessHandle = struct {
 
     pub fn onProcessExit(this: *This, proc: *bun.spawn.Process, status: bun.spawn.Status, _: *const bun.spawn.Rusage) void {
         this.process.?.status = status;
-        this.end_time = std.time.Instant.now() catch null;
+        this.end_time = std.Io.Timestamp.now(bun.blockingIo(), .awake);
         _ = proc;
         this.state.processExit(this) catch {};
     }
@@ -245,8 +245,8 @@ const State = struct {
                     try writer.print("Exited with code {d}\n", .{exited.code});
                 } else {
                     if (handle.start_time != null and handle.end_time != null) {
-                        const duration = handle.end_time.?.since(handle.start_time.?);
-                        const ms = @as(f64, @floatFromInt(duration)) / 1_000_000.0;
+                        const duration = handle.start_time.?.durationTo(handle.end_time.?).toNanoseconds();
+                        const ms = @as(f64, @floatFromInt(@max(duration, 0))) / 1_000_000.0;
                         if (ms > 1000.0) {
                             try writer.print("Done in {d:.2}s\n", .{ms / 1000.0});
                         } else {
@@ -326,7 +326,7 @@ const State = struct {
         for (this.handles) |*handle| {
             if (handle.process) |*proc| {
                 if (proc.status == .running) {
-                    _ = proc.ptr.kill(std.posix.SIG.INT);
+                    _ = proc.ptr.kill(@as(u8, @intCast(@intFromEnum(std.posix.SIG.INT))));
                 }
             }
         }
@@ -351,7 +351,7 @@ const State = struct {
 const AbortHandler = struct {
     var should_abort = false;
 
-    fn posixSignalHandler(sig: i32, info: *const std.posix.siginfo_t, _: ?*const anyopaque) callconv(.c) void {
+    fn posixSignalHandler(sig: std.posix.SIG, info: *const std.posix.siginfo_t, _: ?*anyopaque) callconv(.c) void {
         _ = sig;
         _ = info;
         should_abort = true;
@@ -372,7 +372,7 @@ const AbortHandler = struct {
                 .mask = bun.sys.sigemptyset(),
                 .flags = std.posix.SA.SIGINFO | std.posix.SA.RESTART | std.posix.SA.RESETHAND,
             };
-            bun.sys.sigaction(std.posix.SIG.INT, &action, null);
+            bun.sys.sigaction(@intFromEnum(std.posix.SIG.INT), &action, null);
         } else {
             const res = bun.c.SetConsoleCtrlHandler(windowsCtrlHandler, std.os.windows.TRUE);
             if (res == 0) {
@@ -495,7 +495,7 @@ fn addScriptConfigs(
             // interpreted as escape characters by `bun exec` (Bun's shell).
             const cmd_str = try std.fmt.allocPrint(allocator, "\"{s}\" {s}" ++ "\x00", .{ bun_path, raw_name });
             break :brk cmd_str[0 .. cmd_str.len - 1 :0];
-        } else try allocator.dupeZ(u8, raw_name);
+        } else try bun.dupeZ(allocator, u8, raw_name);
         try configs.append(.{
             .label = label,
             .command = command_z,

@@ -216,8 +216,8 @@ pub fn NewHotReloader(comptime Ctx: type, comptime EventLoopType: type, comptime
                 return .{
                     .reloader = reloader,
 
-                    .hashes = [_]u32{0} ** 8,
-                    .paths = if (Ctx == bun.bake.DevServer) [_][]const u8{&.{}} ** 8,
+                    .hashes = @splat(0),
+                    .paths = if (Ctx == bun.bake.DevServer) @as([8][]const u8, @splat(&.{})),
                     .count = 0,
                     .concurrent_task = undefined,
                 };
@@ -567,7 +567,7 @@ pub fn NewHotReloader(comptime Ctx: type, comptime EventLoopType: type, comptime
 
                                             break :brk path_string.slice();
                                         } else {
-                                            const file_path_without_trailing_slash = std.mem.trimRight(u8, file_path, std.fs.path.sep_str);
+                                            const file_path_without_trailing_slash = std.mem.trimEnd(u8, file_path, std.fs.path.sep_str);
                                             @memcpy(_on_file_update_path_buf[0..file_path_without_trailing_slash.len], file_path_without_trailing_slash);
                                             _on_file_update_path_buf[file_path_without_trailing_slash.len] = std.fs.path.sep;
 

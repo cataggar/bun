@@ -6,7 +6,7 @@ pub var default_arena: Arena = undefined;
 pub var http_thread: HTTPThread = undefined;
 
 //TODO: this needs to be freed when Worker Threads are implemented
-pub var socket_async_http_abort_tracker = std.AutoArrayHashMap(u32, uws.AnySocket).init(bun.default_allocator);
+pub var socket_async_http_abort_tracker: std.AutoArrayHashMapUnmanaged(u32, uws.AnySocket) = .empty;
 pub var async_http_id_monotonic: std.atomic.Value(u32) = std.atomic.Value(u32).init(0);
 
 /// Set once at startup from `--experimental-http2-fetch` (before the HTTP
@@ -124,8 +124,8 @@ pub fn checkServerIdentity(
                         .hostname = bun.handleOom(bun.default_allocator.dupe(u8, hostname)),
                         .cert_error = .{
                             .error_no = certError.error_no,
-                            .code = bun.handleOom(bun.default_allocator.dupeZ(u8, certError.code)),
-                            .reason = bun.handleOom(bun.default_allocator.dupeZ(u8, certError.reason)),
+                            .code = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, certError.code)),
+                            .reason = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, certError.reason)),
                         },
                     };
 
@@ -157,8 +157,8 @@ pub fn registerAbortTracker(
 ) void {
     if (client.signals.aborted != null) {
         switch (is_ssl) {
-            true => socket_async_http_abort_tracker.put(client.async_http_id, .{ .SocketTLS = socket }) catch unreachable,
-            false => socket_async_http_abort_tracker.put(client.async_http_id, .{ .SocketTCP = socket }) catch unreachable,
+            true => socket_async_http_abort_tracker.put(bun.default_allocator, client.async_http_id, .{ .SocketTLS = socket }) catch unreachable,
+            false => socket_async_http_abort_tracker.put(bun.default_allocator, client.async_http_id, .{ .SocketTCP = socket }) catch unreachable,
         }
     }
 }
@@ -238,7 +238,7 @@ pub fn onOpen(
                     temp_hostname[_hostname.len] = 0;
                     hostname = temp_hostname[0.._hostname.len :0];
                 } else {
-                    hostname = bun.default_allocator.dupeZ(u8, _hostname) catch unreachable;
+                    hostname = bun.dupeZ(bun.default_allocator, u8, _hostname) catch unreachable;
                     hostname_needs_free = true;
                 }
             }
@@ -1427,7 +1427,15 @@ noinline fn sendInitialRequestPayload(this: *HTTPClient, comptime is_first_call:
     var temporary_send_buffer = request_body_buffer.toArrayList();
     defer temporary_send_buffer.deinit();
 
-    const writer = &temporary_send_buffer.writer();
+    const temporary_send_buffer_allocator = temporary_send_buffer.allocator;
+    var temporary_send_buffer_unmanaged = temporary_send_buffer.moveToUnmanaged();
+    var temporary_send_writer = std.Io.Writer.Allocating.fromArrayList(temporary_send_buffer_allocator, &temporary_send_buffer_unmanaged);
+    const writer = &temporary_send_writer.writer;
+    var temporary_send_writer_restored = false;
+    defer if (!temporary_send_writer_restored) {
+        temporary_send_buffer_unmanaged = temporary_send_writer.toArrayList();
+        temporary_send_buffer = temporary_send_buffer_unmanaged.toManaged(temporary_send_buffer_allocator);
+    };
 
     const request = this.buildRequest(this.state.original_request_body.len());
 
@@ -1456,8 +1464,12 @@ noinline fn sendInitialRequestPayload(this: *HTTPClient, comptime is_first_call:
         );
     }
 
+    const written_len = writer.end;
+    temporary_send_buffer_unmanaged = temporary_send_writer.toArrayList();
+    temporary_send_buffer = temporary_send_buffer_unmanaged.toManaged(temporary_send_buffer_allocator);
+    temporary_send_writer_restored = true;
     const headers_len = temporary_send_buffer.items.len;
-    assert(temporary_send_buffer.items.len == writer.context.items.len);
+    assert(temporary_send_buffer.items.len == written_len);
     if (this.state.request_body.len > 0 and temporary_send_buffer.capacity - temporary_send_buffer.items.len > 0 and !this.flags.proxy_tunneling) {
         var remain = temporary_send_buffer.items.ptr[temporary_send_buffer.items.len..temporary_send_buffer.capacity];
         const wrote = @min(remain.len, this.state.request_body.len);
@@ -1772,12 +1784,20 @@ pub fn onWritable(this: *HTTPClient, comptime is_first_call: bool, comptime is_s
             log("send proxy headers", .{});
             if (this.proxy_tunnel) |proxy| {
                 this.setTimeout(socket);
-                var stack_buffer = std.heap.stackFallback(1024 * 16, bun.default_allocator);
+                var stack_buffer = bun.stackFallback(1024 * 16, bun.default_allocator);
                 const allocator = stack_buffer.get();
                 var temporary_send_buffer = std.array_list.Managed(u8).fromOwnedSlice(allocator, &stack_buffer.buffer);
                 temporary_send_buffer.items.len = 0;
                 defer temporary_send_buffer.deinit();
-                const writer = &temporary_send_buffer.writer();
+                const temporary_send_buffer_allocator = temporary_send_buffer.allocator;
+                var temporary_send_buffer_unmanaged = temporary_send_buffer.moveToUnmanaged();
+                var temporary_send_writer = std.Io.Writer.Allocating.fromArrayList(temporary_send_buffer_allocator, &temporary_send_buffer_unmanaged);
+                const writer = &temporary_send_writer.writer;
+                var temporary_send_writer_restored = false;
+                defer if (!temporary_send_writer_restored) {
+                    temporary_send_buffer_unmanaged = temporary_send_writer.toArrayList();
+                    temporary_send_buffer = temporary_send_buffer_unmanaged.toManaged(temporary_send_buffer_allocator);
+                };
 
                 const request = this.buildRequest(this.state.request_body.len);
                 writeRequest(
@@ -1789,8 +1809,12 @@ pub fn onWritable(this: *HTTPClient, comptime is_first_call: bool, comptime is_s
                     return;
                 };
 
+                const written_len = writer.end;
+                temporary_send_buffer_unmanaged = temporary_send_writer.toArrayList();
+                temporary_send_buffer = temporary_send_buffer_unmanaged.toManaged(temporary_send_buffer_allocator);
+                temporary_send_writer_restored = true;
                 const headers_len = temporary_send_buffer.items.len;
-                assert(temporary_send_buffer.items.len == writer.context.items.len);
+                assert(temporary_send_buffer.items.len == written_len);
                 if (this.state.request_body.len > 0 and temporary_send_buffer.capacity - temporary_send_buffer.items.len > 0) {
                     var remain = temporary_send_buffer.items.ptr[temporary_send_buffer.items.len..temporary_send_buffer.capacity];
                     const wrote = @min(remain.len, this.state.request_body.len);
@@ -3004,7 +3028,7 @@ pub fn handleResponseMetadata(
                     {
                         var url_arena = std.heap.ArenaAllocator.init(bun.default_allocator);
                         defer url_arena.deinit();
-                        var fba = std.heap.stackFallback(4096, url_arena.allocator());
+                        var fba = bun.stackFallback(4096, url_arena.allocator());
                         const url_allocator = fba.get();
                         if (strings.indexOf(location, "://")) |i| {
                             var string_builder = bun.StringBuilder{};

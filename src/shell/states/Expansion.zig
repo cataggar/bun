@@ -241,7 +241,7 @@ pub fn next(this: *Expansion) Yield {
                 comptime {
                     assert(@sizeOf([]std.array_list.Managed(u8)) * stack_max <= 256);
                 }
-                var maybe_stack_alloc = std.heap.stackFallback(@sizeOf([]std.array_list.Managed(u8)) * stack_max, arena_allocator);
+                var maybe_stack_alloc = bun.stackFallback(@sizeOf([]std.array_list.Managed(u8)) * stack_max, arena_allocator);
                 const stack_alloc = maybe_stack_alloc.get();
                 const expanded_strings = bun.handleOom(stack_alloc.alloc(std.array_list.Managed(u8), expansion_count));
 
@@ -523,7 +523,7 @@ pub fn childDone(this: *Expansion, child: ChildPtr, exit_code: ExitCode) Yield {
         if (!this.child_state.cmd_subst.quoted) {
             this.postSubshellExpansion(stdout);
         } else {
-            const trimmed = std.mem.trimRight(u8, stdout, " \n\t\r");
+            const trimmed = std.mem.trimEnd(u8, stdout, " \n\t\r");
             bun.handleOom(this.current_out.appendSlice(trimmed));
         }
 
@@ -578,7 +578,7 @@ fn onGlobWalkDone(this: *Expansion, task: *ShellGlobTask) Yield {
 
     for (task.result.items) |sentinel_str| {
         // The string is allocated in the glob walker arena and will be freed, so needs to be duped here
-        const duped = bun.handleOom(this.base.allocator().dupeZ(u8, sentinel_str[0..sentinel_str.len]));
+        const duped = bun.handleOom(bun.dupeZ(this.base.allocator(), u8, sentinel_str[0..sentinel_str.len]));
         switch (this.out.pushResultSliceOwned(duped)) {
             .copied => {
                 this.base.allocator().free(duped);

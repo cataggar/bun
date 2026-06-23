@@ -8,7 +8,7 @@ pub const LifecycleScriptTimeLog = struct {
     };
 
     mutex: bun.Mutex = .{},
-    list: std.ArrayListUnmanaged(Entry) = .{},
+    list: std.ArrayListUnmanaged(Entry) = .empty,
 
     pub fn appendConcurrent(log: *LifecycleScriptTimeLog, allocator: std.mem.Allocator, entry: Entry) void {
         log.mutex.lock();
@@ -90,7 +90,7 @@ pub fn determinePreinstallState(
 
             const patch_hash: ?u64 = brk: {
                 if (manager.lockfile.patched_dependencies.entries.len == 0) break :brk null;
-                var sfb = std.heap.stackFallback(1024, manager.lockfile.allocator);
+                var sfb = bun.stackFallback(1024, manager.lockfile.allocator);
                 const name_and_version = std.fmt.allocPrint(
                     sfb.get(),
                     "{s}@{f}",
@@ -139,7 +139,7 @@ pub fn determinePreinstallState(
             // 4. rename temp dir to `folder_path`
             if (patch_hash != null) {
                 const non_patched_path_ = folder_path[0 .. std.mem.indexOf(u8, folder_path, "_patch_hash=") orelse @panic("Expected folder path to contain `patch_hash=`, this is a bug in Bun. Please file a GitHub issue.")];
-                const non_patched_path = bun.handleOom(manager.lockfile.allocator.dupeZ(u8, non_patched_path_));
+                const non_patched_path = bun.handleOom(bun.dupeZ(manager.lockfile.allocator, u8, non_patched_path_));
                 defer manager.lockfile.allocator.free(non_patched_path);
                 if (manager.isFolderInCache(non_patched_path)) {
                     manager.setPreinstallState(pkg.meta.id, manager.lockfile, .apply_patch);

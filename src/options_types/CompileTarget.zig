@@ -215,7 +215,7 @@ pub fn downloadToPath(this: *const CompileTarget, env: *bun.DotEnv.Loader, alloc
             }
         }
 
-        var tarball_bytes = std.ArrayListUnmanaged(u8){};
+        var tarball_bytes = std.ArrayListUnmanaged(u8).empty;
         {
             refresher.refresh();
             defer compressed_archive_bytes.list.deinit(allocator);
@@ -249,9 +249,9 @@ pub fn downloadToPath(this: *const CompileTarget, env: *bun.DotEnv.Loader, alloc
                 const libarchive = bun.libarchive;
                 var tmpname_buf: [1024]u8 = undefined;
                 const tempdir_name = try bun.fs.FileSystem.tmpname("tmp", &tmpname_buf, bun.fastRandom());
-                var tmpdir = try std.fs.cwd().makeOpenPath(tempdir_name, .{});
-                defer tmpdir.close();
-                defer std.fs.cwd().deleteTree(tempdir_name) catch {};
+                var tmpdir = try bun.MakePath.makeOpenPath(std.Io.Dir.cwd(), tempdir_name, .{});
+                defer tmpdir.close(bun.blockingIo());
+                defer std.Io.Dir.cwd().deleteTree(bun.blockingIo(), tempdir_name) catch {};
                 _ = libarchive.Archiver.extractToDir(
                     tarball_bytes.items,
                     tmpdir,
@@ -275,7 +275,7 @@ pub fn downloadToPath(this: *const CompileTarget, env: *bun.DotEnv.Loader, alloc
                             did_retry = true;
                             const dirname = bun.path.dirname(dest_z, .loose);
                             if (dirname.len > 0) {
-                                std.fs.cwd().makePath(dirname) catch {};
+                                bun.makePath(std.Io.Dir.cwd(), dirname) catch {};
                                 continue;
                             }
 

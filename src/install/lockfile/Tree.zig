@@ -239,6 +239,9 @@ pub const BuilderMethod = enum {
 
 pub fn Builder(comptime method: BuilderMethod) type {
     return struct {
+        const PendingOptionalPeerSet = bun.ArrayHashMapManaged(DependencyID, void, std.array_hash_map.AutoContext(DependencyID), false);
+        const PendingOptionalPeerMap = bun.ArrayHashMapManaged(PackageNameHash, PendingOptionalPeerSet, std.array_hash_map.AutoContext(PackageNameHash), false);
+
         allocator: Allocator,
         list: bun.MultiArrayList(Entry) = .{},
         resolutions: []PackageID,
@@ -251,9 +254,9 @@ pub fn Builder(comptime method: BuilderMethod) type {
         // builder.resolutions[peer.dep_id] to the resolved pkg_id. A dependency ID set is used because there
         // can be multiple instances of the same package in the tree, so the same unresolved dependency ID
         // could be visited multiple times before it's resolved.
-        pending_optional_peers: std.AutoArrayHashMap(PackageNameHash, std.AutoArrayHashMap(DependencyID, void)),
+        pending_optional_peers: PendingOptionalPeerMap,
         manager: if (method == .filter) *const PackageManager else void,
-        sort_buf: std.ArrayListUnmanaged(DependencyID) = .{},
+        sort_buf: std.ArrayListUnmanaged(DependencyID) = .empty,
         workspace_filters: if (method == .filter) []const WorkspaceFilter else void = if (method == .filter) &.{},
         install_root_dependencies: if (method == .filter) bool else void,
         packages_to_install: if (method == .filter) ?[]const PackageID else void,
@@ -470,7 +473,7 @@ pub fn processSubtree(
             .id = @as(Id, @truncate(builder.list.len)),
             .dependency_id = dependency_id,
         },
-        .dependencies = .{},
+        .dependencies = .empty,
     });
 
     const list_slice = builder.list.slice();

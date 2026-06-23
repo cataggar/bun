@@ -18,7 +18,7 @@ pub const FallbackHandler = struct {
     // @"caret-color": ?usize = null,
     // caret: ?usize = null,
 
-    const field_count = @typeInfo(FallbackHandler).Struct.fields.len;
+    const field_count = @typeInfo(FallbackHandler).@"struct".field_names.len;
 
     pub fn handleProperty(
         this: *FallbackHandler,
@@ -26,7 +26,7 @@ pub const FallbackHandler = struct {
         dest: *css.DeclarationList,
         context: *css.PropertyHandlerContext,
     ) bool {
-        inline for (std.meta.fields(FallbackHandler)) |field| {
+        inline for (comptime bun.meta.fields(FallbackHandler)) |field| {
             if (@intFromEnum(@field(PropertyIdTag, field.name)) == @intFromEnum(@as(PropertyIdTag, property.*))) {
                 const has_vendor_prefix = comptime PropertyIdTag.hasVendorPrefix(@field(PropertyIdTag, field.name));
                 var val = if (comptime has_vendor_prefix)
@@ -94,7 +94,7 @@ pub const FallbackHandler = struct {
         if (@as(PropertyIdTag, property.*) == .unparsed) {
             const val: *const UnparsedProperty = &property.unparsed;
             var unparsed, const index = unparsed_and_index: {
-                inline for (std.meta.fields(FallbackHandler)) |field| {
+                inline for (comptime bun.meta.fields(FallbackHandler)) |field| {
                     if (@intFromEnum(@field(PropertyIdTag, field.name)) == @intFromEnum(val.property_id)) {
                         const has_vendor_prefix = comptime PropertyIdTag.hasVendorPrefix(@field(PropertyIdTag, field.name));
                         const newval = newval: {
@@ -125,7 +125,7 @@ pub const FallbackHandler = struct {
     }
 
     pub fn finalize(this: *FallbackHandler, _: *css.DeclarationList, _: *css.PropertyHandlerContext) void {
-        inline for (std.meta.fields(FallbackHandler)) |field| {
+        inline for (comptime bun.meta.fields(FallbackHandler)) |field| {
             @field(this, field.name) = null;
         }
     }

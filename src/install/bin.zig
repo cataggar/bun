@@ -5,7 +5,7 @@
 /// - map where keys are names of the binaries and values are file paths to the binaries
 pub const Bin = extern struct {
     tag: Tag = Tag.none,
-    _padding_tag: [3]u8 = .{0} ** 3,
+    _padding_tag: [3]u8 = @splat(0),
 
     // Largest member must be zero initialized
     value: Value = Value{ .map = ExternalStringList{} },
@@ -393,9 +393,9 @@ pub const Bin = extern struct {
         bin: Bin,
         i: usize = 0,
         done: bool = false,
-        dir_iterator: ?std.fs.Dir.Iterator = null,
+        dir_iterator: ?std.Io.Dir.Iterator = null,
         package_name: String,
-        destination_node_modules: std.fs.Dir = bun.invalid_fd.stdDir(),
+        destination_node_modules: std.Io.Dir = bun.invalid_fd.stdDir(),
         buf: bun.PathBuffer = undefined,
         string_buffer: []const u8,
         extern_string_buf: []const ExternalString,
@@ -419,12 +419,12 @@ pub const Bin = extern struct {
             }
 
             var iter = &this.dir_iterator.?;
-            if (iter.next() catch null) |entry| {
+            if (iter.next(bun.blockingIo()) catch null) |entry| {
                 this.i += 1;
                 return entry.name;
             } else {
                 this.done = true;
-                this.dir_iterator.?.dir.close();
+                this.dir_iterator.?.reader.dir.close(bun.blockingIo());
                 this.dir_iterator = null;
                 return null;
             }
@@ -724,7 +724,7 @@ pub const Bin = extern struct {
 
                 const node_modules_path_save = this.node_modules_path.save();
                 this.node_modules_path.append(".bin");
-                bun.makePath(std.fs.cwd(), this.node_modules_path.slice()) catch {};
+                bun.makePath(std.Io.Dir.cwd(), this.node_modules_path.slice()) catch {};
                 node_modules_path_save.restore();
 
                 break :bunx_file bun.sys.File.openatOSPath(bun.invalid_fd, abs_bunx_file, bun.O.WRONLY | bun.O.CREAT | bun.O.TRUNC, 0o664).unwrap() catch |real_err| {
@@ -741,7 +741,7 @@ pub const Bin = extern struct {
 
             const shebang = shebang: {
                 const first_content_chunk = contents: {
-                    var reader = target.stdFile().readerStreaming(&.{});
+                    var reader = target.stdFile().readerStreaming(bun.blockingIo(), &.{});
                     var readvec_buf: []u8 = &read_in_buf;
                     const read = reader.interface.readVec((&readvec_buf)[0..1]) catch break :contents null;
                     if (read == 0) break :contents null;
@@ -822,7 +822,7 @@ pub const Bin = extern struct {
 
                         const node_modules_path_save = this.node_modules_path.save();
                         this.node_modules_path.append(".bin");
-                        bun.makePath(std.fs.cwd(), this.node_modules_path.slice()) catch {};
+                        bun.makePath(std.Io.Dir.cwd(), this.node_modules_path.slice()) catch {};
                         node_modules_path_save.restore();
 
                         switch (bun.sys.symlinkRunningExecutable(rel_target, abs_dest)) {
@@ -846,7 +846,7 @@ pub const Bin = extern struct {
             }
 
             // delete and try again
-            std.fs.deleteTreeAbsolute(abs_dest) catch {};
+            std.Io.Dir.cwd().deleteTree(bun.blockingIo(), abs_dest) catch {};
             bun.sys.symlinkRunningExecutable(rel_target, abs_dest).unwrap() catch |err| {
                 this.err = err;
             };
@@ -1025,12 +1025,12 @@ pub const Bin = extern struct {
                         this.err = err;
                         return;
                     };
-                    defer target_dir.close();
+                    defer target_dir.close(bun.blockingIo());
 
                     const abs_dest_dir_end = abs_dest_buf_remain;
 
                     var iter = target_dir.iterate();
-                    while (iter.next() catch null) |entry| {
+                    while (iter.next(bun.blockingIo()) catch null) |entry| {
                         switch (entry.kind) {
                             .sym_link, .file => {
                                 // `this.abs_target_buf` is available now because `path.joinAbsStringZ` copied everything into `parse_join_input_buffer`
@@ -1114,12 +1114,12 @@ pub const Bin = extern struct {
                         this.err = err;
                         return;
                     };
-                    defer target_dir.close();
+                    defer target_dir.close(bun.blockingIo());
 
                     const abs_dest_dir_end = abs_dest_buf_remain;
 
                     var iter = target_dir.iterate();
-                    while (iter.next() catch null) |entry| {
+                    while (iter.next(bun.blockingIo()) catch null) |entry| {
                         switch (entry.kind) {
                             .sym_link, .file => {
                                 abs_dest_buf_remain = abs_dest_dir_end;

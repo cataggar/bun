@@ -137,14 +137,14 @@ fn split(
     allocator: Allocator,
     str: *const bun.String,
 ) bun.JSError!jsc.JSValue {
-    var fallback = std.heap.stackFallback(1024, allocator);
+    var fallback = bun.stackFallback(1024, allocator);
     const alloc = fallback.get();
     const Char = switch (encoding) {
         .utf8, .latin1 => u8,
         .utf16 => u16,
     };
 
-    var lines: std.ArrayListUnmanaged(bun.String) = .{};
+    var lines: std.ArrayListUnmanaged(bun.String) = .empty;
     defer {
         for (lines.items) |out| {
             out.deref();

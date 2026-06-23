@@ -2,7 +2,7 @@ const TextDecoder = @This();
 
 // used for utf8 decoding
 buffered: struct {
-    buf: [3]u8 = .{0} ** 3,
+    buf: [3]u8 = @splat(0),
     len: u2 = 0,
 
     pub fn slice(this: *@This()) []const u8 {
@@ -106,7 +106,7 @@ pub fn decodeUTF16(
     comptime big_endian: bool,
     comptime flush: bool,
 ) error{OutOfMemory}!struct { std.ArrayListUnmanaged(u16), bool } {
-    var output: std.ArrayListUnmanaged(u16) = .{};
+    var output: std.ArrayListUnmanaged(u16) = .empty;
     try output.ensureTotalCapacity(bun.default_allocator, @divFloor(bytes.len, 2));
 
     var remain = bytes;

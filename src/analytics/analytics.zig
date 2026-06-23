@@ -28,7 +28,7 @@ pub fn isEnabled() bool {
 
 /// This answers, "What parts of bun are people actually using?"
 pub const Features = struct {
-    pub var builtin_modules = std.enums.EnumSet(bun.jsc.ModuleLoader.HardcodedModule).initEmpty();
+    pub var builtin_modules = std.enums.EnumSet(bun.jsc.ModuleLoader.HardcodedModule).empty;
 
     pub var @"Bun.stderr": usize = 0;
     pub var @"Bun.stdin": usize = 0;
@@ -110,15 +110,15 @@ pub const Features = struct {
         pub fn format(_: Formatter, writer: *std.Io.Writer) !void {
             const fields = comptime brk: {
                 const info: std.builtin.Type = @typeInfo(Features);
-                var buffer: [info.@"struct".decls.len][]const u8 = .{""} ** info.@"struct".decls.len;
+                var buffer: [info.@"struct".decl_names.len][]const u8 = @splat("");
                 var count: usize = 0;
-                for (info.@"struct".decls) |decl| {
-                    var f = &@field(Features, decl.name);
+                for (info.@"struct".decl_names) |decl_name| {
+                    var f = &@field(Features, decl_name);
                     _ = &f;
                     const Field = @TypeOf(f);
                     const FieldT: std.builtin.Type = @typeInfo(Field);
                     if (FieldT.pointer.child != usize) continue;
-                    buffer[count] = decl.name;
+                    buffer[count] = decl_name;
                     count += 1;
                 }
 
@@ -178,47 +178,32 @@ pub const packed_features_list = brk: {
     var names: [decls.len][:0]const u8 = undefined;
     var i = 0;
     for (decls) |decl| {
-        if (@TypeOf(@field(Features, decl.name)) == usize) {
-            validateFeatureName(decl.name);
-            names[i] = decl.name;
+        if (@TypeOf(@field(Features, decl)) == usize) {
+            validateFeatureName(decl);
+            names[i] = decl;
             i += 1;
         }
     }
     break :brk names[0..i].*;
 };
 
-pub const PackedFeatures = @Type(.{
-    .@"struct" = .{
-        .layout = .@"packed",
-        .backing_integer = u64,
-        .fields = brk: {
-            var fields: [64]std.builtin.Type.StructField = undefined;
-            var i: usize = 0;
-            for (packed_features_list) |name| {
-                fields[i] = .{
-                    .name = name,
-                    .type = bool,
-                    .default_value_ptr = &false,
-                    .is_comptime = false,
-                    .alignment = 0,
-                };
-                i += 1;
-            }
-            while (i < fields.len) : (i += 1) {
-                fields[i] = .{
-                    .name = std.fmt.comptimePrint("_{d}", .{i}),
-                    .type = bool,
-                    .default_value_ptr = &false,
-                    .is_comptime = false,
-                    .alignment = 0,
-                };
-            }
-            break :brk &fields;
-        },
-        .decls = &.{},
-        .is_tuple = false,
-    },
-});
+pub const PackedFeatures = brk: {
+    var names: [64][:0]const u8 = undefined;
+    var i: usize = 0;
+    for (packed_features_list) |name| {
+        names[i] = name;
+        i += 1;
+    }
+    while (i < names.len) : (i += 1) {
+        names[i] = std.fmt.comptimePrint("_{d}", .{i});
+    }
+    const field_names = names;
+    var types: [64]type = undefined;
+    for (&types) |*ty| ty.* = bool;
+    const field_types = types;
+    const field_attrs: [64]std.builtin.Type.Struct.FieldAttributes = @splat(.{ .default_value_ptr = &false });
+    break :brk @Struct(.@"packed", u64, &field_names, &field_types, &field_attrs);
+};
 
 pub fn packedFeatures() PackedFeatures {
     var bits = PackedFeatures{};
@@ -265,7 +250,7 @@ pub const GenerateHeader = struct {
         var platform_: analytics.Platform = undefined;
         pub const Platform = analytics.Platform;
         var linux_kernel_version: Semver.Version = undefined;
-        var run_once = std.once(struct {
+        var run_once = bun.once(struct {
             fn run() void {
                 if (comptime Environment.isMac) {
                     platform_ = forMac();
@@ -289,13 +274,13 @@ pub const GenerateHeader = struct {
         }.run);
 
         pub fn forOS() analytics.Platform {
-            run_once.call();
+            run_once.call(.{});
             return platform_;
         }
 
         // On macOS 13, tests that use sendmsg_x or recvmsg_x hang.
         var use_msgx_on_macos_14_or_later: bool = undefined;
-        var detectUseMsgXOnMacOS14OrLater_once = std.once(detectUseMsgXOnMacOS14OrLater);
+        var detectUseMsgXOnMacOS14OrLater_once = bun.once(detectUseMsgXOnMacOS14OrLater);
         fn detectUseMsgXOnMacOS14OrLater() void {
             const version = Semver.Version.parseUTF8(forOS().version);
             use_msgx_on_macos_14_or_later = version.valid and version.version.max().major >= 14;
@@ -306,7 +291,7 @@ pub const GenerateHeader = struct {
                 return 0;
             }
 
-            detectUseMsgXOnMacOS14OrLater_once.call();
+            detectUseMsgXOnMacOS14OrLater_once.call(.{});
             return @intFromBool(use_msgx_on_macos_14_or_later);
         }
 

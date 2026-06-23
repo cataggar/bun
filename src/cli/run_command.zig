@@ -479,7 +479,7 @@ pub const RunCommand = struct {
                     if (comptime Environment.isPosix) {
                         switch (bun.sys.stat(executable[0.. :0])) {
                             .result => |stat| {
-                                if (bun.S.ISDIR(stat.mode)) {
+                                if (bun.S.ISDIR(@intCast(stat.mode))) {
                                     Output.prettyErrorln("<r><red>error<r>: Failed to run directory \"<b>{s}<r>\"\n", .{basenameOrBun(executable)});
                                     break :print_error;
                                 }
@@ -637,13 +637,13 @@ pub const RunCommand = struct {
 
         target_path_buffer[converted.len + file_name.len] = 0;
 
-        return try allocator.dupeZ(u8, target_path_buffer[0 .. converted.len + file_name.len :0]);
+        return try bun.dupeZ(allocator, u8, target_path_buffer[0 .. converted.len + file_name.len :0]);
     }
 
     pub fn createFakeTemporaryNodeExecutable(
         PATH: *std.array_list.Managed(u8),
         optional_bun_path: *string,
-    ) (OOM || std.fs.SelfExePathError)!void {
+    ) anyerror!void {
         // If we are already running as "node", the path should exist
         if (CLI.pretend_to_be_node) return;
 
@@ -669,23 +669,26 @@ pub const RunCommand = struct {
             }
 
             if (Environment.isDebug) {
-                std.fs.deleteTreeAbsolute(bun_node_dir) catch {};
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), bun_node_dir) catch {};
             }
             const paths = .{ bun_node_dir ++ "/node", bun_node_dir ++ "/bun" };
             inline for (paths) |path| {
                 var retried = false;
                 while (true) {
                     inner: {
-                        std.posix.symlinkZ(argv0, path) catch |err| {
-                            if (err == error.PathAlreadyExists) break :inner;
-                            if (retried)
-                                return;
+                        switch (bun.sys.symlink(std.mem.span(argv0), path)) {
+                            .result => {},
+                            .err => |err| {
+                                if (err.getErrno() == .EXIST) break :inner;
+                                if (retried)
+                                    return;
 
-                            std.fs.makeDirAbsoluteZ(bun_node_dir) catch {};
+                                std.Io.Dir.cwd().createDir(bun.blockingIo(), bun_node_dir, .default_dir) catch {};
 
-                            retried = true;
-                            continue;
-                        };
+                                retried = true;
+                                continue;
+                            },
+                        }
                     }
                     break;
                 }
@@ -1301,7 +1304,7 @@ pub const RunCommand = struct {
         // HTTP worker or allocate any Download structs.
         var seen = bun.StringHashMapUnmanaged(void){};
         defer seen.deinit(allocator);
-        var remote_urls = std.ArrayListUnmanaged([]const u8){};
+        var remote_urls: std.ArrayListUnmanaged([]const u8) = .empty;
         defer remote_urls.deinit(allocator);
         for (collector.urls.items) |u| {
             if (!bun.strings.hasPrefixComptime(u, "http://") and
@@ -1317,7 +1320,7 @@ pub const RunCommand = struct {
 
         // Heap-allocate each Download so AsyncHTTP.task has a stable
         // address (see RemoteImageDownload doc comment).
-        var downloads = std.ArrayListUnmanaged(*RemoteImageDownload){};
+        var downloads: std.ArrayListUnmanaged(*RemoteImageDownload) = .empty;
         defer {
             for (downloads.items) |d| {
                 d.response_buffer.deinit();
@@ -1718,17 +1721,20 @@ pub const RunCommand = struct {
             log("Executing from stdin", .{});
 
             // read from stdin
-            var stack_fallback = std.heap.stackFallback(2048, bun.default_allocator);
+            var stack_fallback = bun.stackFallback(2048, bun.default_allocator);
             var list = std.Io.Writer.Allocating.init(stack_fallback.get());
             errdefer list.deinit();
 
-            var file_reader = std.fs.File.stdin().readerStreaming(&.{});
+            var file_reader = std.Io.File.stdin().readerStreaming(bun.blockingIo(), &.{});
             _ = file_reader.interface.streamRemaining(&list.writer) catch return false;
             ctx.runtime_options.eval.script = list.written();
 
             const trigger = bun.pathLiteral("/[stdin]");
             var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-            const cwd = try std.posix.getcwd(&entry_point_buf);
+            var cwd_buf: bun.PathBuffer = undefined;
+            const cwd_slice = try bun.getcwd(&cwd_buf);
+            @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+            const cwd = entry_point_buf[0..cwd_slice.len];
             @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
             const entry_path = entry_point_buf[0 .. cwd.len + trigger.len];
 
@@ -1952,7 +1958,10 @@ pub const RunCommand = struct {
         if (ctx.runtime_options.eval.script.len > 0) {
             const trigger = bun.pathLiteral("/[eval]");
             var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-            const cwd = try std.posix.getcwd(&entry_point_buf);
+            var cwd_buf: bun.PathBuffer = undefined;
+            const cwd_slice = try bun.getcwd(&cwd_buf);
+            @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+            const cwd = entry_point_buf[0..cwd_slice.len];
             @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
             try Run.boot(ctx, entry_point_buf[0 .. cwd.len + trigger.len], null);
             return;
@@ -1995,7 +2004,10 @@ pub const RunCommand = struct {
     fn @"bun feedback"(ctx: Command.Context) !noreturn {
         const trigger = bun.pathLiteral("/[eval]");
         var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-        const cwd = try std.posix.getcwd(&entry_point_buf);
+        var cwd_buf: bun.PathBuffer = undefined;
+            const cwd_slice = try bun.getcwd(&cwd_buf);
+            @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+            const cwd = entry_point_buf[0..cwd_slice.len];
         @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
         ctx.runtime_options.eval.script = if (bun.Environment.codegen_embed)
             @embedFile("eval/feedback.ts")

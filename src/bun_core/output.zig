@@ -23,7 +23,7 @@ pub const Source = struct {
             break :brk std.io.FixedBufferStream([]u8);
         } else {
             break :brk File;
-            // var stdout = std.fs.File.stdout();
+            // var stdout = std.Io.File.stdout();
             // return @TypeOf(bun.deprecated.bufferedWriter(stdout.writer()));
         }
     };
@@ -241,8 +241,8 @@ pub const Source = struct {
                 WindowsStdio.init();
             }
 
-            const stdout = bun.sys.File.from(std.fs.File.stdout());
-            const stderr = bun.sys.File.from(std.fs.File.stderr());
+            const stdout = bun.sys.File.from(std.Io.File.stdout());
+            const stderr = bun.sys.File.from(std.Io.File.stderr());
 
             Source.setInit(stdout, stderr);
 
@@ -268,7 +268,7 @@ pub const Source = struct {
         @"16m",
     };
     var lazy_color_depth: ColorDepth = .none;
-    var color_depth_once = std.once(getColorDepthOnce);
+    var color_depth_once = bun.once(getColorDepthOnce);
     fn getColorDepthOnce() void {
         if (getForceColorDepth()) |depth| {
             lazy_color_depth = depth;
@@ -374,7 +374,7 @@ pub const Source = struct {
         lazy_color_depth = .none;
     }
     pub fn colorDepth() ColorDepth {
-        color_depth_once.call();
+        color_depth_once.call(.{});
         return lazy_color_depth;
     }
 
@@ -489,10 +489,10 @@ pub fn isAIAgent() bool {
             value = evaluate();
         }
 
-        var once = std.once(setValue);
+        var once = bun.once(setValue);
 
         pub fn isEnabled() bool {
-            once.call();
+            once.call(.{});
             return value;
         }
     };
@@ -704,7 +704,7 @@ pub fn printStartEndStdout(start: i128, end: i128) void {
     printElapsedStdout(@as(f64, @floatFromInt(elapsed)));
 }
 
-pub fn printTimer(timer: *SystemTimer) void {
+pub fn printTimer(timer: anytype) void {
     if (comptime Environment.isWasm) return;
     const elapsed = @divTrunc(timer.read(), @as(u64, std.time.ns_per_ms));
     printElapsed(@as(f64, @floatFromInt(elapsed)));
@@ -742,7 +742,7 @@ noinline fn writeBytes(dest: Destination, bytes: []const u8) void {
 }
 
 inline fn hasNoArgs(comptime Args: type) bool {
-    return @typeInfo(Args).@"struct".fields.len == 0;
+    return @typeInfo(Args).@"struct".field_names.len == 0;
 }
 
 inline fn printTo(dest: Destination, comptime fmt: string, args: anytype) void {
@@ -824,7 +824,7 @@ pub const Visibility = enum {
 pub fn Scoped(comptime tag: anytype, comptime visibility: Visibility) type {
     const tagname = comptime if (!Environment.enable_logs) .{} else brk: {
         const input = switch (@TypeOf(tag)) {
-            @Type(.enum_literal) => @tagName(tag),
+            @TypeOf(.enum_literal) => @tagName(tag),
             else => tag,
         };
         var ascii_slice: [input.len]u8 = undefined;
@@ -856,7 +856,7 @@ fn ScopedLogger(comptime tagname: []const u8, comptime visibility: Visibility) t
 
         var lock = bun.Mutex{};
 
-        var is_visible_once = std.once(evaluateIsVisible);
+        var is_visible_once = bun.once(evaluateIsVisible);
 
         fn evaluateIsVisible() void {
             if (bun.getenvZAnyCase("BUN_DEBUG_" ++ tagname)) |val| {
@@ -879,7 +879,7 @@ fn ScopedLogger(comptime tagname: []const u8, comptime visibility: Visibility) t
         }
 
         pub fn isVisible() bool {
-            is_visible_once.call();
+            is_visible_once.call(.{});
             return !really_disable.load(.monotonic);
         }
 
@@ -1153,12 +1153,12 @@ pub inline fn printError(comptime fmt: string, args: anytype) void {
 }
 
 pub const DebugTimer = struct {
-    timer: bun.DebugOnly(std.time.Timer) = undefined,
+    timer: bun.DebugOnly(Timer) = undefined,
 
     pub inline fn start() DebugTimer {
         if (comptime Environment.isDebug) {
             return DebugTimer{
-                .timer = std.time.Timer.start() catch unreachable,
+                .timer = Timer.start() catch unreachable,
             };
         } else {
             return .{};
@@ -1217,7 +1217,7 @@ pub inline fn err(error_name: anytype, comptime fmt: []const u8, args: anytype) 
     const display_name, const is_comptime_name = display_name: {
         // Zig string literals are of type *const [n:0]u8
         // we assume that no one will pass this type from not using a string literal.
-        if (info == .pointer and info.pointer.size == .one and info.pointer.is_const) {
+        if (info == .pointer and info.pointer.size == .one and info.pointer.attrs.@"const") {
             const child_info = @typeInfo(info.pointer.child);
             if (child_info == .array and child_info.array.child == u8) {
                 if (child_info.array.len == 0) @compileError("Output.err should not be passed an empty string (use errGeneric)");
@@ -1232,13 +1232,13 @@ pub inline fn err(error_name: anytype, comptime fmt: []const u8, args: anytype) 
 
         // error unions
         if (info == .error_set) {
-            if (info.error_set) |errors| {
+            if (info.error_set.error_names) |errors| {
                 if (errors.len == 0) {
                     @compileError("Output.err was given an empty error set");
                 }
 
                 // TODO: convert zig errors to errno for better searchability?
-                if (errors.len == 1) break :display_name .{ errors[0].name, true };
+                if (errors.len == 1) break :display_name .{ errors[0], true };
             }
 
             break :display_name .{ @errorName(error_name), false };
@@ -1293,7 +1293,7 @@ pub fn initScopedDebugWriterAtStartup() void {
     if (bun.env_var.BUN_DEBUG.get()) |path| {
         if (path.len > 0 and !strings.eql(path, "0") and !strings.eql(path, "false")) {
             if (std.fs.path.dirname(path)) |dir| {
-                std.fs.cwd().makePath(dir) catch {};
+                bun.makePath(std.Io.Dir.cwd(), dir) catch {};
             }
 
             // do not use libuv through this code path, since it might not be initialized yet.
@@ -1303,8 +1303,8 @@ pub fn initScopedDebugWriterAtStartup() void {
             const path_fmt = std.mem.replaceOwned(u8, bun.default_allocator, path, "{pid}", pid) catch @panic("failed to allocate path");
             defer bun.default_allocator.free(path_fmt);
 
-            const fd: bun.FD = .fromStdFile(std.fs.cwd().createFile(path_fmt, .{
-                .mode = if (Environment.isPosix) 0o644 else 0,
+            const fd: bun.FD = .fromStdFile(std.Io.Dir.cwd().createFile(bun.blockingIo(), path_fmt, .{
+                .permissions = @enumFromInt(if (Environment.isPosix) 0o644 else 0),
             }) catch |open_err| {
                 panic("Failed to open file for debug output: {s} ({s})", .{ @errorName(open_err), path });
             });
@@ -1369,7 +1369,6 @@ pub const Synchronized = struct {
 const Environment = @import("./env.zig");
 const root = @import("root");
 const std = @import("std");
-const SystemTimer = @import("../perf/system_timer.zig").Timer;
 
 const bun = @import("bun");
 const ComptimeStringMap = bun.ComptimeStringMap;
@@ -1378,3 +1377,15 @@ const c = bun.c;
 const strings = bun.strings;
 const use_mimalloc = bun.use_mimalloc;
 const File = bun.sys.File;
+
+const Timer = struct {
+    start_time: u64,
+
+    pub fn start() !Timer {
+        return .{ .start_time = bun.hw_timer.nowNs() };
+    }
+
+    pub fn read(this: *const Timer) u64 {
+        return bun.hw_timer.nowNs() -| this.start_time;
+    }
+};

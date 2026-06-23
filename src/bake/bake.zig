@@ -108,7 +108,7 @@ pub const UserOptions = struct {
         return .{
             .arena = arena,
             .allocations = allocations,
-            .root = try alloc.dupeZ(u8, root),
+            .root = try bun.dupeZ(alloc, u8, root),
             .framework = framework,
             .bundler_options = bundler_options,
         };
@@ -119,7 +119,7 @@ pub const UserOptions = struct {
 pub const StringRefList = struct {
     strings: std.ArrayListUnmanaged(ZigString.Slice),
 
-    pub const empty: StringRefList = .{ .strings = .{} };
+    pub const empty: StringRefList = .{ .strings = .empty };
 
     pub fn track(al: *StringRefList, str: ZigString.Slice) []const u8 {
         bun.handleOom(al.strings.append(bun.default_allocator, str));

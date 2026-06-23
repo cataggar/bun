@@ -10,9 +10,61 @@ pub const linux = struct {
         return if (signed > -4096 and signed < 0) -1 else int;
     }
 
-    pub export fn stat(path: [*:0]const u8, buf: *std.os.linux.Stat) c_int {
+    const statx_mask: std.os.linux.STATX = .{
+        .TYPE = true,
+        .MODE = true,
+        .NLINK = true,
+        .UID = true,
+        .GID = true,
+        .ATIME = true,
+        .MTIME = true,
+        .CTIME = true,
+        .INO = true,
+        .SIZE = true,
+        .BLOCKS = true,
+        .BTIME = true,
+    };
+
+    inline fn makedev(major: u32, minor: u32) u64 {
+        const maj: u64 = major & 0xFFF;
+        const min: u64 = minor & 0xFFFFF;
+        return (maj << 8) | (min & 0xFF) | ((min & 0xFFF00) << 12);
+    }
+
+    fn statxToPosix(stx: *const std.os.linux.Statx) PosixStat {
+        return .{
+            .dev = makedev(stx.dev_major, stx.dev_minor),
+            .ino = stx.ino,
+            .mode = stx.mode,
+            .nlink = stx.nlink,
+            .uid = stx.uid,
+            .gid = stx.gid,
+            .rdev = makedev(stx.rdev_major, stx.rdev_minor),
+            .size = stx.size,
+            .blksize = stx.blksize,
+            .blocks = stx.blocks,
+            .atim = .{ .sec = stx.atime.sec, .nsec = stx.atime.nsec },
+            .mtim = .{ .sec = stx.mtime.sec, .nsec = stx.mtime.nsec },
+            .ctim = .{ .sec = stx.ctime.sec, .nsec = stx.ctime.nsec },
+            .birthtim = if (stx.mask.BTIME)
+                .{ .sec = stx.btime.sec, .nsec = stx.btime.nsec }
+            else
+                .epoch,
+        };
+    }
+
+    fn statxAsPosix(dirfd: i32, path: [*:0]const u8, flags: u32, buf: *PosixStat) usize {
+        var stx = std.mem.zeroes(std.os.linux.Statx);
+        const rc = std.os.linux.statx(dirfd, path, flags, statx_mask, &stx);
+        if (rc == 0) {
+            buf.* = statxToPosix(&stx);
+        }
+        return rc;
+    }
+
+    pub export fn stat(path: [*:0]const u8, buf: *PosixStat) c_int {
         // https://git.musl-libc.org/cgit/musl/tree/src/stat/stat.c
-        const rc = std.os.linux.fstatat(std.os.linux.AT.FDCWD, path, buf, 0);
+        const rc = statxAsPosix(std.os.linux.AT.FDCWD, path, 0, buf);
         return simulateLibcErrno(rc);
     }
 
@@ -21,24 +73,24 @@ pub const linux = struct {
     pub const fstat64 = fstat;
     pub const fstatat64 = fstatat;
 
-    pub export fn lstat(path: [*:0]const u8, buf: *std.os.linux.Stat) c_int {
+    pub export fn lstat(path: [*:0]const u8, buf: *PosixStat) c_int {
         // https://git.musl-libc.org/cgit/musl/tree/src/stat/lstat.c
-        const rc = std.os.linux.fstatat(std.os.linux.AT.FDCWD, path, buf, std.os.linux.AT.SYMLINK_NOFOLLOW);
+        const rc = statxAsPosix(std.os.linux.AT.FDCWD, path, std.os.linux.AT.SYMLINK_NOFOLLOW, buf);
         return simulateLibcErrno(rc);
     }
 
-    pub export fn fstat(fd: c_int, buf: *std.os.linux.Stat) c_int {
-        const rc = std.os.linux.fstat(fd, buf);
+    pub export fn fstat(fd: c_int, buf: *PosixStat) c_int {
+        const rc = statxAsPosix(fd, "", std.os.linux.AT.EMPTY_PATH, buf);
         return simulateLibcErrno(rc);
     }
 
-    pub export fn fstatat(dirfd: i32, path: [*:0]const u8, buf: *std.os.linux.Stat, flags: u32) c_int {
-        const rc = std.os.linux.fstatat(dirfd, path, buf, flags);
+    pub export fn fstatat(dirfd: i32, path: [*:0]const u8, buf: *PosixStat, flags: u32) c_int {
+        const rc = statxAsPosix(dirfd, path, flags, buf);
         return simulateLibcErrno(rc);
     }
 
     pub export fn statx(dirfd: i32, path: [*:0]const u8, flags: u32, mask: u32, buf: *std.os.linux.Statx) c_int {
-        const rc = std.os.linux.statx(dirfd, path, flags, mask, buf);
+        const rc = std.os.linux.statx(dirfd, path, flags, @bitCast(mask), buf);
         return simulateLibcErrno(rc);
     }
 
@@ -133,4 +185,5 @@ pub const current = switch (bun.Environment.os) {
 };
 
 const bun = @import("bun");
+const PosixStat = @import("./sys/PosixStat.zig").PosixStat;
 const std = @import("std");

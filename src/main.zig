@@ -1,10 +1,6 @@
 pub const panic = _bun.crash_handler.panic;
 pub const std_options = std.Options{
     .enable_segfault_handler = false,
-    // Use BoringSSL's RAND_bytes instead of the default getrandom() syscall.
-    // BoringSSL falls back to /dev/urandom on older kernels (< 3.17) where
-    // the getrandom syscall doesn't exist, avoiding a panic on ENOSYS.
-    .cryptoRandomSeed = _bun.csprng,
 };
 
 pub const io_mode = .blocking;
@@ -27,8 +23,8 @@ pub fn main() void {
             .mask = _bun.sys.sigemptyset(),
             .flags = 0,
         };
-        _bun.sys.sigaction(std.posix.SIG.PIPE, &act, null);
-        _bun.sys.sigaction(std.posix.SIG.XFSZ, &act, null);
+        _bun.sys.sigaction(@intFromEnum(std.posix.SIG.PIPE), &act, null);
+        _bun.sys.sigaction(@intFromEnum(std.posix.SIG.XFSZ), &act, null);
     }
 
     if (Environment.isDebug) {
@@ -45,11 +41,11 @@ pub fn main() void {
             &_bun.mimalloc.mi_free,
         );
         _bun.handleOom(_bun.windows.env.convertEnvToWTF8());
-        environ = @ptrCast(std.os.environ.ptr);
-        _environ = @ptrCast(std.os.environ.ptr);
+        environ = @ptrCast(std.c.environ);
+        _environ = @ptrCast(std.c.environ);
     }
 
-    _bun.start_time = std.time.nanoTimestamp();
+    _bun.start_time = _bun.SystemTimer.nanoTimestamp();
     _bun.initArgv() catch |err| {
         Output.panic("Failed to initialize argv: {s}\n", .{@errorName(err)});
     };

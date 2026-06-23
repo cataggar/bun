@@ -119,9 +119,9 @@ pub const MultiPartUpload = struct {
     content_disposition: ?[]const u8 = null,
     content_encoding: ?[]const u8 = null,
     upload_id: []const u8 = "",
-    uploadid_buffer: bun.MutableString = .{ .allocator = bun.default_allocator, .list = .{} },
+    uploadid_buffer: bun.MutableString = .{ .allocator = bun.default_allocator, .list = .empty },
 
-    multipart_etags: std.ArrayListUnmanaged(UploadPart.UploadPartResult) = .{},
+    multipart_etags: std.ArrayListUnmanaged(UploadPart.UploadPartResult) = .empty,
     multipart_upload_list: bun.ByteList = .{},
 
     state: enum {
@@ -465,7 +465,7 @@ pub const MultiPartUpload = struct {
                 bun.default_allocator.free(tag.etag);
             }
             this.multipart_etags.deinit(bun.default_allocator);
-            this.multipart_etags = .{};
+            this.multipart_etags = .empty;
             bun.handleOom(this.multipart_upload_list.appendSlice(
                 bun.default_allocator,
                 "</CompleteMultipartUpload>",
@@ -720,7 +720,7 @@ pub const MultiPartUpload = struct {
     }
 
     pub fn isQueueEmpty(this: *@This()) bool {
-        return this.available.mask == std.bit_set.IntegerBitSet(MAX_QUEUE_SIZE).initFull().mask;
+        return this.available.mask == std.bit_set.IntegerBitSet(MAX_QUEUE_SIZE).full.mask;
     }
 
     pub const WriteEncoding = enum {

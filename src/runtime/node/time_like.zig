@@ -67,7 +67,7 @@ fn fromMilliseconds(milliseconds: f64) TimeLike {
 
 fn fromNow() TimeLike {
     if (Environment.isWindows) {
-        const nanos = std.time.nanoTimestamp();
+        const nanos = bun.SystemTimer.nanoTimestamp();
         return @as(TimeLike, @floatFromInt(nanos)) / std.time.ns_per_s;
     }
 
@@ -92,7 +92,7 @@ fn fromNow() TimeLike {
     //        timestamps are not modified, but other error conditions may still
     return .{
         .sec = 0,
-        .nsec = if (Environment.isLinux) std.os.linux.UTIME.NOW else bun.c.UTIME_NOW,
+        .nsec = if (Environment.isLinux) std.os.linux.UTIME.NOW.nsec else bun.c.UTIME_NOW,
     };
 }
 

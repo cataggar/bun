@@ -312,7 +312,7 @@ pub const UDPSocket = struct {
 
         const hostname_slice = this.config.hostname.toUTF8(bun.default_allocator);
         defer hostname_slice.deinit();
-        const hostname_z = bun.handleOom(bun.default_allocator.dupeZ(u8, hostname_slice.slice()));
+        const hostname_z = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, hostname_slice.slice()));
         defer bun.default_allocator.free(hostname_z);
 
         this.socket = uws.udp.Socket.create(
@@ -347,7 +347,7 @@ pub const UDPSocket = struct {
         if (this.config.connect) |*connect| {
             const address_slice = connect.address.toUTF8(bun.default_allocator);
             defer address_slice.deinit();
-            const address_z = bun.handleOom(bun.default_allocator.dupeZ(u8, address_slice.slice()));
+            const address_z = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, address_slice.slice()));
             defer bun.default_allocator.free(address_z);
             const ret = this.socket.?.connect(address_z, connect.port);
             if (ret != 0) {
@@ -960,7 +960,7 @@ pub const UDPSocket = struct {
 
     pub fn getAddress(this: *This, globalThis: *JSGlobalObject) JSValue {
         if (this.closed) return .js_undefined;
-        var buf: [64]u8 = [_]u8{0} ** 64;
+        var buf: [64]u8 = @splat(0);
         var length: i32 = 64;
         this.socket.?.boundIp(&buf, &length);
 
@@ -972,7 +972,7 @@ pub const UDPSocket = struct {
     pub fn getRemoteAddress(this: *This, globalThis: *jsc.JSGlobalObject) jsc.JSValue {
         if (this.closed) return .js_undefined;
         const connect_info = this.connect_info orelse return .js_undefined;
-        var buf: [64]u8 = [_]u8{0} ** 64;
+        var buf: [64]u8 = @splat(0);
         var length: i32 = 64;
         this.socket.?.remoteIp(&buf, &length);
 

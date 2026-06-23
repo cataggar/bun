@@ -34,8 +34,8 @@ pub fn canPrintWithoutEscape(comptime CodePointType: type, c: CodePointType, com
     }
 }
 
-const indentation_space_buf = [_]u8{' '} ** 128;
-const indentation_tab_buf = [_]u8{'\t'} ** 128;
+const indentation_space_buf = @as([128]u8, @splat(' '));
+const indentation_tab_buf = @as([128]u8, @splat('\t'));
 
 pub fn bestQuoteCharForString(comptime Type: type, str: []const Type, allow_backtick: bool) u8 {
     var single_cost: usize = 0;
@@ -628,7 +628,7 @@ fn NewPrinter(
 
         symbol_counter: u32 = 0,
 
-        temporary_bindings: std.ArrayListUnmanaged(B.Property) = .{},
+        temporary_bindings: std.ArrayListUnmanaged(B.Property) = .empty,
 
         binary_expression_stack: std.array_list.Managed(BinaryExpressionVisitor) = undefined,
 
@@ -1247,7 +1247,7 @@ fn NewPrinter(
                     {
                         // Reset the temporary bindings array early on
                         var temp_bindings = p.temporary_bindings;
-                        p.temporary_bindings = .{};
+                        p.temporary_bindings = .empty;
                         defer {
                             if (p.temporary_bindings.capacity > 0) {
                                 temp_bindings.deinit(bun.default_allocator);
@@ -1582,24 +1582,24 @@ fn NewPrinter(
         }
 
         pub fn printStringCharactersUTF8(e: *Printer, text: []const u8, quote: u8) void {
-            const writer = e.writer.stdWriter();
+            const writer = e.writer;
             (switch (quote) {
                 '\'' => writePreQuotedString(text, @TypeOf(writer), writer, '\'', ascii_only, false, .utf8),
                 '"' => writePreQuotedString(text, @TypeOf(writer), writer, '"', ascii_only, false, .utf8),
                 '`' => writePreQuotedString(text, @TypeOf(writer), writer, '`', ascii_only, false, .utf8),
                 else => unreachable,
-            }) catch |err| switch (err) {};
+            }) catch unreachable;
         }
         pub fn printStringCharactersUTF16(e: *Printer, text: []const u16, quote: u8) void {
             const slice = std.mem.sliceAsBytes(text);
 
-            const writer = e.writer.stdWriter();
+            const writer = e.writer;
             (switch (quote) {
                 '\'' => writePreQuotedString(slice, @TypeOf(writer), writer, '\'', ascii_only, false, .utf16),
                 '"' => writePreQuotedString(slice, @TypeOf(writer), writer, '"', ascii_only, false, .utf16),
                 '`' => writePreQuotedString(slice, @TypeOf(writer), writer, '`', ascii_only, false, .utf16),
                 else => unreachable,
-            }) catch |err| switch (err) {};
+            }) catch unreachable;
         }
 
         pub fn isUnboundEvalIdentifier(p: *Printer, value: Expr) bool {
@@ -1930,7 +1930,7 @@ fn NewPrinter(
             return printClauseItemAs(p, item, .export_from);
         }
 
-        fn printClauseItemAs(p: *Printer, item: js_ast.ClauseItem, comptime as: @Type(.enum_literal)) void {
+        fn printClauseItemAs(p: *Printer, item: js_ast.ClauseItem, comptime as: @TypeOf(.enum_literal)) void {
             const name = p.renamer.nameForSymbol(item.name.ref.?);
 
             if (comptime as == .import) {
@@ -5634,14 +5634,6 @@ pub fn NewWriter(
             };
         }
 
-        pub fn stdWriter(self: *Self) std.Io.GenericWriter(*Self, error{}, stdWriterWrite) {
-            return .{ .context = self };
-        }
-        pub fn stdWriterWrite(self: *Self, bytes: []const u8) error{}!usize {
-            self.print([]const u8, bytes);
-            return bytes.len;
-        }
-
         pub fn isCopyFileRangeSupported() bool {
             return comptime std.meta.hasFn(ContextType, "copyFileRange");
         }
@@ -5695,10 +5687,8 @@ pub fn NewWriter(
 
         pub const Error = error{FormatError};
 
-        pub fn writeAll(writer: *Self, bytes: anytype) Error!usize {
-            const written = @max(writer.written, 0);
+        pub fn writeAll(writer: *Self, bytes: anytype) Error!void {
             writer.print(@TypeOf(bytes), bytes);
-            return @as(usize, @intCast(writer.written)) - @as(usize, @intCast(written));
         }
 
         pub inline fn print(writer: *Self, comptime ValueType: type, str: ValueType) void {
@@ -5782,7 +5772,7 @@ pub const BufferWriter = struct {
     }
 
     pub fn print(ctx: *BufferWriter, comptime fmt: string, args: anytype) anyerror!void {
-        try ctx.buffer.list.writer(ctx.buffer.allocator).print(fmt, args);
+        try ctx.buffer.writer().print(fmt, args);
     }
 
     pub fn writeByteNTimes(ctx: *BufferWriter, byte: u8, n: usize) anyerror!void {
@@ -6044,7 +6034,7 @@ pub fn printAst(
     if (PrinterType.may_have_module_info) {
         printer.module_info = opts.module_info;
     }
-    var bin_stack_heap = std.heap.stackFallback(1024, bun.default_allocator);
+    var bin_stack_heap = bun.stackFallback(1024, bun.default_allocator);
     printer.binary_expression_stack = std.array_list.Managed(PrinterType.BinaryExpressionVisitor).init(bin_stack_heap.get());
     defer printer.binary_expression_stack.clearAndFree();
 
@@ -6099,9 +6089,12 @@ pub fn printAst(
     defer if (source_maps_chunk) |*chunk| chunk.deinit();
 
     if (opts.runtime_transpiler_cache) |cache| {
-        var srlz_res = std.array_list.Managed(u8).init(bun.default_allocator);
-        defer srlz_res.deinit();
-        if (have_module_info) try opts.module_info.?.asDeserialized().serialize(srlz_res.writer());
+        var srlz_res: std.ArrayList(u8) = .empty;
+        defer srlz_res.deinit(bun.default_allocator);
+        var srlz_writer = ArrayListSerializer.init(bun.default_allocator, &srlz_res);
+        errdefer srlz_writer.deinit();
+        if (have_module_info) try opts.module_info.?.asDeserialized().serialize(&srlz_writer);
+        srlz_res = srlz_writer.toArrayList();
         cache.put(printer.writer.ctx.getWritten(), if (source_maps_chunk) |chunk| chunk.buffer.list.items else "", srlz_res.items);
     }
 
@@ -6143,7 +6136,7 @@ pub fn printJSON(
         renamer.toRenamer(),
         undefined,
     );
-    var bin_stack_heap = std.heap.stackFallback(1024, bun.default_allocator);
+    var bin_stack_heap = bun.stackFallback(1024, bun.default_allocator);
     printer.binary_expression_stack = std.array_list.Managed(PrinterType.BinaryExpressionVisitor).init(bin_stack_heap.get());
     defer printer.binary_expression_stack.clearAndFree();
 
@@ -6252,7 +6245,7 @@ pub fn printWithWriterAndPlatform(
     if (PrinterType.may_have_module_info) {
         printer.module_info = opts.module_info;
     }
-    var bin_stack_heap = std.heap.stackFallback(1024, bun.default_allocator);
+    var bin_stack_heap = bun.stackFallback(1024, bun.default_allocator);
     printer.binary_expression_stack = std.array_list.Managed(PrinterType.BinaryExpressionVisitor).init(bin_stack_heap.get());
     defer printer.binary_expression_stack.clearAndFree();
 
@@ -6334,7 +6327,7 @@ pub fn printCommonJS(
         renamer.toRenamer(),
         getSourceMapBuilder(if (generate_source_map) .lazy else .disable, false, opts, source, &tree),
     );
-    var bin_stack_heap = std.heap.stackFallback(1024, bun.default_allocator);
+    var bin_stack_heap = bun.stackFallback(1024, bun.default_allocator);
     printer.binary_expression_stack = std.array_list.Managed(PrinterType.BinaryExpressionVisitor).init(bin_stack_heap.get());
     defer printer.binary_expression_stack.clearAndFree();
 
@@ -6374,9 +6367,49 @@ pub fn serializeModuleInfo(module_info: ?*analyze_transpiled_module.ModuleInfo) 
     const deserialized = mi.asDeserialized();
     var buf: std.ArrayList(u8) = .empty;
     defer buf.deinit(bun.default_allocator);
-    deserialized.serialize(buf.writer(bun.default_allocator)) catch return null;
+    var writer = ArrayListSerializer.init(bun.default_allocator, &buf);
+    errdefer writer.deinit();
+    deserialized.serialize(&writer) catch {
+        writer.deinit();
+        return null;
+    };
+    buf = writer.toArrayList();
     return buf.toOwnedSlice(bun.default_allocator) catch null;
 }
+
+const ArrayListSerializer = struct {
+    allocating: std.Io.Writer.Allocating,
+
+    pub fn init(allocator: std.mem.Allocator, list: *std.ArrayList(u8)) ArrayListSerializer {
+        return .{ .allocating = std.Io.Writer.Allocating.fromArrayList(allocator, list) };
+    }
+
+    pub fn deinit(this: *ArrayListSerializer) void {
+        this.allocating.deinit();
+    }
+
+    pub fn toArrayList(this: *ArrayListSerializer) std.ArrayList(u8) {
+        return this.allocating.toArrayList();
+    }
+
+    pub fn writeAll(this: *ArrayListSerializer, bytes: []const u8) error{OutOfMemory}!void {
+        this.allocating.writer.writeAll(bytes) catch return error.OutOfMemory;
+    }
+
+    pub fn writeByte(this: *ArrayListSerializer, byte: u8) error{OutOfMemory}!void {
+        this.allocating.writer.writeByte(byte) catch return error.OutOfMemory;
+    }
+
+    pub fn writeByteNTimes(this: *ArrayListSerializer, byte: u8, n: usize) error{OutOfMemory}!void {
+        this.allocating.writer.splatByteAll(byte, n) catch return error.OutOfMemory;
+    }
+
+    pub fn writeInt(this: *ArrayListSerializer, comptime T: type, value: T, endian: std.builtin.Endian) error{OutOfMemory}!void {
+        var bytes: [@divExact(@typeInfo(T).int.bits, 8)]u8 = undefined;
+        std.mem.writeInt(T, &bytes, value, endian);
+        try this.writeAll(&bytes);
+    }
+};
 
 const string = []const u8;
 

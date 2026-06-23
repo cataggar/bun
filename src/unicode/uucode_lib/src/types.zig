@@ -545,7 +545,7 @@ pub fn Data(comptime c: config.Table) type {
 
 pub fn writeDataItems(comptime D: type, writer: *std.Io.Writer, data_items: []const D) !void {
     if (@typeInfo(D).@"struct".layout == .@"packed") {
-        const IntEquivalent = std.meta.Int(.unsigned, @bitSizeOf(D));
+        const IntEquivalent = @Int(.unsigned, @bitSizeOf(D));
 
         try writer.print("@bitCast([_]{s}{{\n", .{@typeName(IntEquivalent)});
 
@@ -940,7 +940,7 @@ pub fn SliceTracking(comptime T: type, comptime max_len: usize) type {
         max_offset: usize = 0,
         max_len: usize = 0,
         offset_map: SliceMap(T, usize) = .empty,
-        len_counts: [max_len]usize = [_]usize{0} ** max_len,
+        len_counts: [max_len]usize = @as([max_len]usize, @splat(0)),
         shift: ShiftTracking = .{},
 
         const Self = @This();
@@ -1286,7 +1286,7 @@ pub fn Union(comptime c: config.Field, comptime packing: config.Table.Packing) t
     const info = @typeInfo(c.type).@"union";
     const Tag = info.tag_type.?;
     const Int = @typeInfo(Tag).@"enum".tag_type;
-    std.debug.assert(Int == std.meta.Int(.unsigned, @bitSizeOf(Tag)));
+    std.debug.assert(Int == @Int(.unsigned, @bitSizeOf(Tag)));
 
     const ShiftMember = if (c.cp_packing == .shift) Shift(c, packing) else void;
 
@@ -1484,7 +1484,7 @@ pub fn fieldInit(
     }
     const Tracking = @typeInfo(@TypeOf(tracking)).pointer.child;
     if (@hasField(Tracking, field)) {
-        if (@typeInfo(@TypeOf(@FieldType(Tracking, field).track)).@"fn".params.len == 3) {
+        if (@typeInfo(@TypeOf(@FieldType(Tracking, field).track)).@"fn".param_types.len == 3) {
             @field(tracking, field).track(cp, d);
         } else {
             @field(tracking, field).track(d);

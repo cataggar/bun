@@ -71,7 +71,7 @@ pub fn writeTestStatusLine(comptime status: bun_test.Execution.Result, writer: a
 // - Add stdout/stderr to the JUnit report
 // - Add timestamp field to the JUnit report
 pub const JunitReporter = struct {
-    contents: std.ArrayListUnmanaged(u8) = .{},
+    contents: std.ArrayListUnmanaged(u8) = .empty,
     total_metrics: Metrics = .{},
     testcases_metrics: Metrics = .{},
     offset_of_testsuites_value: usize = 0,
@@ -79,7 +79,7 @@ pub const JunitReporter = struct {
     current_file: string = "",
     properties_list_to_repeat_in_every_test_suite: ?[]const u8 = null,
 
-    suite_stack: std.ArrayListUnmanaged(SuiteInfo) = .{},
+    suite_stack: std.ArrayListUnmanaged(SuiteInfo) = .empty,
     current_depth: u32 = 0,
 
     hostname_value: ?string = null,
@@ -97,10 +97,14 @@ pub const JunitReporter = struct {
             };
 
             var arraylist_writer = std.array_list.Managed(u8).init(bun.default_allocator);
-            escapeXml(hostname, arraylist_writer.writer()) catch {
+            var unmanaged = arraylist_writer.moveToUnmanaged();
+            var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &unmanaged);
+            escapeXml(hostname, &writer.writer) catch {
                 this.hostname_value = "";
                 return null;
             };
+            var owned = writer.toArrayList();
+            arraylist_writer = owned.toManaged(bun.default_allocator);
             this.hostname_value = arraylist_writer.items;
         }
 
@@ -143,7 +147,7 @@ pub const JunitReporter = struct {
 
     pub fn init() *JunitReporter {
         return JunitReporter.new(
-            .{ .contents = .{}, .total_metrics = .{}, .suite_stack = .{} },
+            .{ .contents = .empty, .total_metrics = .{}, .suite_stack = .empty },
         );
     }
 
@@ -177,7 +181,7 @@ pub const JunitReporter = struct {
         };
         var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
         defer arena.deinit();
-        var stack = std.heap.stackFallback(1024, arena.allocator());
+        var stack = bun.stackFallback(1024, arena.allocator());
         const allocator = stack.get();
 
         const properties: PropertiesList = .{
@@ -229,30 +233,33 @@ pub const JunitReporter = struct {
         }
 
         var buffer = std.array_list.Managed(u8).init(bun.default_allocator);
-        var writer = buffer.writer();
+        var unmanaged = buffer.moveToUnmanaged();
+        var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &unmanaged);
 
-        try writer.writeAll(
+        try writer.writer.writeAll(
             \\    <properties>
             \\
         );
 
         if (properties.ci.len > 0) {
-            try writer.writeAll(
+            try writer.writer.writeAll(
                 \\      <property name="ci" value="
             );
-            try escapeXml(properties.ci, writer);
-            try writer.writeAll("\" />\n");
+            try escapeXml(properties.ci, &writer.writer);
+            try writer.writer.writeAll("\" />\n");
         }
         if (properties.commit.len > 0) {
-            try writer.writeAll(
+            try writer.writer.writeAll(
                 \\      <property name="commit" value="
             );
-            try escapeXml(properties.commit, writer);
-            try writer.writeAll("\" />\n");
+            try escapeXml(properties.commit, &writer.writer);
+            try writer.writer.writeAll("\" />\n");
         }
 
-        try writer.writeAll("    </properties>\n");
+        try writer.writer.writeAll("    </properties>\n");
 
+        var owned = writer.toArrayList();
+        buffer = owned.toManaged(bun.default_allocator);
         this.properties_list_to_repeat_in_every_test_suite = buffer.items;
     }
 
@@ -282,21 +289,33 @@ pub const JunitReporter = struct {
         const indent = getIndent(this.current_depth);
         try this.contents.appendSlice(bun.default_allocator, indent);
         try this.contents.appendSlice(bun.default_allocator, "<testsuite name=\"");
-        try escapeXml(name, this.contents.writer(bun.default_allocator));
+        {
+            var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
+            try escapeXml(name, &writer.writer);
+            this.contents = writer.toArrayList();
+        }
         try this.contents.appendSlice(bun.default_allocator, "\"");
 
         if (is_file_suite) {
             try this.contents.appendSlice(bun.default_allocator, " file=\"");
-            try escapeXml(name, this.contents.writer(bun.default_allocator));
+            {
+                var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
+                try escapeXml(name, &writer.writer);
+                this.contents = writer.toArrayList();
+            }
             try this.contents.appendSlice(bun.default_allocator, "\"");
         } else if (this.current_file.len > 0) {
             try this.contents.appendSlice(bun.default_allocator, " file=\"");
-            try escapeXml(this.current_file, this.contents.writer(bun.default_allocator));
+            {
+                var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
+                try escapeXml(this.current_file, &writer.writer);
+                this.contents = writer.toArrayList();
+            }
             try this.contents.appendSlice(bun.default_allocator, "\"");
         }
 
         if (line_number > 0) {
-            try this.contents.writer(bun.default_allocator).print(" line=\"{d}\"", .{line_number});
+            try this.contents.print(bun.default_allocator, " line=\"{d}\"", .{line_number});
         }
 
         try this.contents.appendSlice(bun.default_allocator, " ");
@@ -337,7 +356,7 @@ pub const JunitReporter = struct {
 
         var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
         defer arena.deinit();
-        var stack_fallback_allocator = std.heap.stackFallback(4096, arena.allocator());
+        var stack_fallback_allocator = bun.stackFallback(4096, arena.allocator());
         const allocator = stack_fallback_allocator.get();
 
         const elapsed_time_ms = suite_info.metrics.elapsed_time;
@@ -393,23 +412,35 @@ pub const JunitReporter = struct {
         try this.contents.appendSlice(bun.default_allocator, indent);
         try this.contents.appendSlice(bun.default_allocator, "<testcase");
         try this.contents.appendSlice(bun.default_allocator, " name=\"");
-        try escapeXml(name, this.contents.writer(bun.default_allocator));
+        {
+            var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
+            escapeXml(name, &writer.writer) catch return error.OutOfMemory;
+            this.contents = writer.toArrayList();
+        }
         try this.contents.appendSlice(bun.default_allocator, "\" classname=\"");
-        try escapeXml(class_name, this.contents.writer(bun.default_allocator));
+        {
+            var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
+            escapeXml(class_name, &writer.writer) catch return error.OutOfMemory;
+            this.contents = writer.toArrayList();
+        }
         try this.contents.appendSlice(bun.default_allocator, "\"");
 
         const elapsed_seconds = elapsed_ms / std.time.ms_per_s;
-        try this.contents.writer(bun.default_allocator).print(" time=\"{f}\"", .{bun.fmt.trimmedPrecision(elapsed_seconds, 6)});
+        try this.contents.print(bun.default_allocator, " time=\"{f}\"", .{bun.fmt.trimmedPrecision(elapsed_seconds, 6)});
 
         try this.contents.appendSlice(bun.default_allocator, " file=\"");
-        try escapeXml(file, this.contents.writer(bun.default_allocator));
+        {
+            var writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.contents);
+            escapeXml(file, &writer.writer) catch return error.OutOfMemory;
+            this.contents = writer.toArrayList();
+        }
         try this.contents.appendSlice(bun.default_allocator, "\"");
 
         if (line_number > 0) {
-            try this.contents.writer(bun.default_allocator).print(" line=\"{d}\"", .{line_number});
+            try this.contents.print(bun.default_allocator, " line=\"{d}\"", .{line_number});
         }
 
-        try this.contents.writer(bun.default_allocator).print(" assertions=\"{d}\"", .{assertions});
+        try this.contents.print(bun.default_allocator, " assertions=\"{d}\"", .{assertions});
 
         switch (status) {
             .pass => {
@@ -437,7 +468,7 @@ pub const JunitReporter = struct {
                 }
                 try this.contents.appendSlice(bun.default_allocator, ">\n");
                 try this.contents.appendSlice(bun.default_allocator, indent);
-                try this.contents.writer(bun.default_allocator).print(
+                try this.contents.print(bun.default_allocator,
                     \\  <failure message="test marked with .failing() did not throw" type="AssertionError"/>
                     \\
                 , .{});
@@ -450,7 +481,7 @@ pub const JunitReporter = struct {
                 }
                 try this.contents.appendSlice(bun.default_allocator, ">\n");
                 try this.contents.appendSlice(bun.default_allocator, indent);
-                try this.contents.writer(bun.default_allocator).print(
+                try this.contents.print(bun.default_allocator,
                     \\  <failure message="Expected more assertions, but only received {d}" type="AssertionError"/>
                     \\
                 , .{assertions});
@@ -463,7 +494,7 @@ pub const JunitReporter = struct {
                 }
                 try this.contents.appendSlice(bun.default_allocator, ">\n");
                 try this.contents.appendSlice(bun.default_allocator, indent);
-                try this.contents.writer(bun.default_allocator).print(
+                try this.contents.print(bun.default_allocator,
                     \\  <failure message="TODO passed" type="AssertionError"/>
                     \\
                 , .{});
@@ -476,7 +507,7 @@ pub const JunitReporter = struct {
                 }
                 try this.contents.appendSlice(bun.default_allocator, ">\n");
                 try this.contents.appendSlice(bun.default_allocator, indent);
-                try this.contents.writer(bun.default_allocator).print(
+                try this.contents.print(bun.default_allocator,
                     \\  <failure message="Expected to have assertions, but none were run" type="AssertionError"/>
                     \\
                 , .{});
@@ -527,10 +558,10 @@ pub const JunitReporter = struct {
         {
             var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
             defer arena.deinit();
-            var stack_fallback_allocator = std.heap.stackFallback(4096, arena.allocator());
+            var stack_fallback_allocator = bun.stackFallback(4096, arena.allocator());
             const allocator = stack_fallback_allocator.get();
             const metrics = this.total_metrics;
-            const elapsed_time = @as(f64, @floatFromInt(std.time.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
+            const elapsed_time = @as(f64, @floatFromInt(SystemTimer.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
             const summary = try std.fmt.allocPrint(allocator,
                 \\tests="{d}" assertions="{d}" failures="{d}" skipped="{d}" time="{d}"
             , .{
@@ -579,9 +610,9 @@ pub const CommandLineReporter = struct {
     /// the terminal.
     worker_ipc_file_idx: ?u32 = null,
 
-    failures_to_repeat_buf: std.ArrayListUnmanaged(u8) = .{},
-    skips_to_repeat_buf: std.ArrayListUnmanaged(u8) = .{},
-    todos_to_repeat_buf: std.ArrayListUnmanaged(u8) = .{},
+    failures_to_repeat_buf: std.ArrayListUnmanaged(u8) = .empty,
+    skips_to_repeat_buf: std.ArrayListUnmanaged(u8) = .empty,
+    todos_to_repeat_buf: std.ArrayListUnmanaged(u8) = .empty,
 
     reporters: struct {
         dots: bool = false,
@@ -633,7 +664,7 @@ pub const CommandLineReporter = struct {
             };
 
             switch (Output.enable_ansi_colors_stderr) {
-                inline else => |_| switch (status) {
+                inline else => switch (status) {
                     .fail_because_expected_assertion_count => {
                         // not sent to writer so it doesn't get printed twice
                         const expected_count = if (sequence.expect_assertions == .exact) sequence.expect_assertions.exact else 12345;
@@ -766,7 +797,9 @@ pub const CommandLineReporter = struct {
                             bun.handleOom(junit.endTestSuite());
                         }
 
-                        bun.handleOom(junit.beginTestSuite(filename));
+                        junit.beginTestSuite(filename) catch |err| switch (err) {
+                            error.OutOfMemory, error.WriteFailed => bun.outOfMemory(),
+                        };
                     }
 
                     // To make the juint reporter generate nested suites, we need to find the needed suites and create/print them.
@@ -837,13 +870,15 @@ pub const CommandLineReporter = struct {
 
                     while (describe_suite_index < needed_suites.items.len) {
                         const scope = needed_suites.items[describe_suite_index];
-                        bun.handleOom(junit.beginTestSuiteWithLine(scope.base.name orelse "", scope.base.line_no, false));
+                        junit.beginTestSuiteWithLine(scope.base.name orelse "", scope.base.line_no, false) catch |err| switch (err) {
+                            error.OutOfMemory, error.WriteFailed => bun.outOfMemory(),
+                        };
                         describe_suite_index += 1;
                     }
 
                     var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
                     defer arena.deinit();
-                    var stack_fallback = std.heap.stackFallback(4096, arena.allocator());
+                    var stack_fallback = bun.stackFallback(4096, arena.allocator());
                     const allocator = stack_fallback.get();
                     var concatenated_describe_scopes = std.array_list.Managed(u8).init(allocator);
 
@@ -855,7 +890,11 @@ pub const CommandLineReporter = struct {
                                     bun.handleOom(concatenated_describe_scopes.appendSlice(" &gt; "));
                                 }
 
-                                bun.handleOom(escapeXml(name, concatenated_describe_scopes.writer()));
+                                var unmanaged = concatenated_describe_scopes.moveToUnmanaged();
+                                var writer = std.Io.Writer.Allocating.fromArrayList(allocator, &unmanaged);
+                                escapeXml(name, &writer.writer) catch bun.outOfMemory();
+                                var owned = writer.toArrayList();
+                                concatenated_describe_scopes = owned.toManaged(allocator);
                             };
                         }
                     }
@@ -878,8 +917,8 @@ pub const CommandLineReporter = struct {
         defer output_buf.deinit(buntest.gpa);
 
         const initial_length = output_buf.items.len;
-        const base_writer = output_buf.writer(buntest.gpa);
-        var writer = base_writer;
+        var output_writer = std.Io.Writer.Allocating.fromArrayList(buntest.gpa, &output_buf);
+        const writer = &output_writer.writer;
 
         switch (sequence.result) {
             inline else => |result| {
@@ -903,14 +942,14 @@ pub const CommandLineReporter = struct {
                     } else {
                         buntest.bun_test_root.onBeforePrint();
 
-                        writeTestStatusLine(result, &writer);
+                        writeTestStatusLine(result, writer);
                         const dim = switch (comptime result.basicResult()) {
                             .todo => if (bun.jsc.Jest.Jest.runner) |runner| !runner.run_todo else true,
                             .skip, .pending => true,
                             .pass, .fail => false,
                         };
                         switch (dim) {
-                            inline else => |dim_comptime| printTestLine(result, sequence, test_entry, elapsed_ns, &writer, dim_comptime),
+                            inline else => |dim_comptime| printTestLine(result, sequence, test_entry, elapsed_ns, writer, dim_comptime),
                         }
                     }
                 }
@@ -919,6 +958,7 @@ pub const CommandLineReporter = struct {
             },
         }
 
+        output_buf = output_writer.toArrayList();
         const formatted_line = output_buf.items[initial_length..];
         if (buntest.reporter != null and buntest.reporter.?.worker_ipc_file_idx != null) {
             ParallelRunner.workerEmitTestDone(buntest.reporter.?.worker_ipc_file_idx.?, formatted_line);
@@ -978,7 +1018,7 @@ pub const CommandLineReporter = struct {
             if (files == 1) "" else "s",
         });
 
-        Output.printStartEnd(bun.start_time, std.time.nanoTimestamp());
+        Output.printStartEnd(bun.start_time, SystemTimer.nanoTimestamp());
     }
 
     /// Writes the JUnit reporter output file if a JUnit reporter is active and
@@ -1170,7 +1210,7 @@ pub const CommandLineReporter = struct {
             var base64_bytes: [8]u8 = undefined;
             var shortname_buf: [512]u8 = undefined;
             bun.csprng(&base64_bytes);
-            const tmpname = std.fmt.bufPrintZ(&shortname_buf, ".lcov.info.{x}.tmp", .{&base64_bytes}) catch unreachable;
+            const tmpname = bun.fmt.bufPrintZ(&shortname_buf, ".lcov.info.{x}.tmp", .{&base64_bytes}) catch unreachable;
             const path = bun.path.joinAbsStringBufZ(relative_dir, &lcov_name_buf, &.{ opts.reports_directory, tmpname }, .auto);
             const file = bun.sys.File.openat(
                 .cwd(),
@@ -1409,7 +1449,7 @@ pub const TestCommand = struct {
         var snapshot_file_buf = std.array_list.Managed(u8).init(ctx.allocator);
         var snapshot_values = Snapshots.ValuesHashMap.init(ctx.allocator);
         var snapshot_counts = bun.StringHashMap(usize).init(ctx.allocator);
-        var inline_snapshots_to_write = std.AutoArrayHashMap(TestRunner.File.ID, std.array_list.Managed(Snapshots.InlineSnapshotToWrite)).init(ctx.allocator);
+        var inline_snapshots_to_write: std.AutoArrayHashMapUnmanaged(TestRunner.File.ID, std.array_list.Managed(Snapshots.InlineSnapshotToWrite)) = .empty;
         jsc.VirtualMachine.isBunTest = true;
 
         var reporter = try ctx.allocator.create(CommandLineReporter);
@@ -1851,7 +1891,7 @@ pub const TestCommand = struct {
                 }
                 if (search_count > 0) {
                     Output.prettyError("\n{d} files were searched ", .{search_count});
-                    Output.printStartEnd(ctx.start_time, std.time.nanoTimestamp());
+                    Output.printStartEnd(ctx.start_time, SystemTimer.nanoTimestamp());
                 }
 
                 Output.prettyErrorln(
@@ -1992,7 +2032,7 @@ pub const TestCommand = struct {
                     summary.skipped_because_label,
                     if (summary.skipped_because_label == 1) "" else "s",
                 });
-                Output.printStartEnd(ctx.start_time, std.time.nanoTimestamp());
+                Output.printStartEnd(ctx.start_time, SystemTimer.nanoTimestamp());
             }
         }
 
@@ -2250,6 +2290,7 @@ const bun_test = @import("../test_runner/bun_test.zig");
 const options = @import("../bundler/options.zig");
 const resolve_path = @import("../paths/resolve_path.zig");
 const std = @import("std");
+const SystemTimer = @import("../perf/system_timer.zig");
 const Command = @import("./cli.zig").Command;
 const FileSystem = @import("../resolver/fs.zig").FileSystem;
 const which = @import("../which/which.zig").which;

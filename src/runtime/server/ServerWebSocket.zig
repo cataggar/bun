@@ -1252,17 +1252,11 @@ pub fn getRemoteAddress(
         return .js_undefined;
     }
 
-    var buf: [64]u8 = [_]u8{0} ** 64;
+    var buf: [64]u8 = @as([64]u8, @splat(0));
     var text_buf: [512]u8 = undefined;
 
     const address_bytes = this.websocket().getRemoteAddress(&buf);
-    const address: std.net.Address = switch (address_bytes.len) {
-        4 => std.net.Address.initIp4(address_bytes[0..4].*, 0),
-        16 => std.net.Address.initIp6(address_bytes[0..16].*, 0, 0, 0),
-        else => return .js_undefined,
-    };
-
-    const text = bun.fmt.formatIp(address, &text_buf) catch unreachable;
+    const text = formatAddressBytes(address_bytes, &text_buf) orelse return .js_undefined;
     return bun.String.createUTF8ForJS(globalThis, text);
 }
 
@@ -1282,6 +1276,27 @@ const Corker = struct {
         ) catch |err| this.globalObject.takeException(err);
     }
 };
+
+fn formatAddressBytes(address_bytes: []const u8, text_buf: []u8) ?[]const u8 {
+    return switch (address_bytes.len) {
+        4 => std.fmt.bufPrint(text_buf, "{d}.{d}.{d}.{d}", .{
+            address_bytes[0],
+            address_bytes[1],
+            address_bytes[2],
+            address_bytes[3],
+        }) catch unreachable,
+        16 => brk: {
+            var writer = std.Io.Writer.fixed(text_buf);
+            const address = std.Io.net.Ip6Address{ .bytes = address_bytes[0..16].*, .port = 0 };
+            address.format(&writer) catch unreachable;
+            var text = writer.buffered();
+            if (std.mem.lastIndexOfScalar(u8, text, ':')) |colon| text = text[0..colon];
+            if (text.len >= 2 and text[0] == '[' and text[text.len - 1] == ']') text = text[1 .. text.len - 1];
+            break :brk text;
+        },
+        else => null,
+    };
+}
 
 const string = []const u8;
 

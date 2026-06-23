@@ -570,9 +570,13 @@ pub const Loader = struct {
     pub fn loadProcess(this: *Loader) OOM!void {
         if (this.did_load_process) return;
 
-        try this.map.map.ensureTotalCapacity(std.os.environ.len);
-        for (std.os.environ) |_env| {
-            var env = bun.span(_env);
+        var env_count: usize = 0;
+        while (std.c.environ[env_count] != null) : (env_count += 1) {}
+
+        try this.map.map.ensureTotalCapacity(env_count);
+        var env_i: usize = 0;
+        while (std.c.environ[env_i]) |_env| : (env_i += 1) {
+            var env = bun.sliceTo(_env, 0);
             if (strings.indexOfChar(env, '=')) |i| {
                 const key = env[0..i];
                 const value = env[i + 1 ..];
@@ -604,10 +608,10 @@ pub const Loader = struct {
         comptime suffix: DotEnvFileSuffix,
         skip_default_env: bool,
     ) !void {
-        const start = std.time.nanoTimestamp();
+        const start = bun.SystemTimer.nanoTimestamp();
 
         // Create a reusable buffer with stack fallback for parsing multiple files
-        var stack_fallback = std.heap.stackFallback(4096, this.allocator);
+        var stack_fallback = bun.stackFallback(4096, this.allocator);
         var value_buffer = std.array_list.Managed(u8).init(stack_fallback.get());
         defer value_buffer.deinit();
 
@@ -659,7 +663,7 @@ pub const Loader = struct {
         comptime suffix: DotEnvFileSuffix,
         value_buffer: *std.array_list.Managed(u8),
     ) !void {
-        const dir_handle: std.fs.Dir = std.fs.cwd();
+        const dir_handle: std.Io.Dir = bun.FD.cwd().stdDir();
 
         switch (comptime suffix) {
             .development => {
@@ -729,7 +733,7 @@ pub const Loader = struct {
             this.custom_files_loaded.count();
 
         if (count == 0) return;
-        const elapsed = @as(f64, @floatFromInt((std.time.nanoTimestamp() - start))) / std.time.ns_per_ms;
+        const elapsed = @as(f64, @floatFromInt((bun.SystemTimer.nanoTimestamp() - start))) / std.time.ns_per_ms;
 
         const all = [_]string{
             ".env.development.local",
@@ -783,7 +787,7 @@ pub const Loader = struct {
 
     pub fn loadEnvFile(
         this: *Loader,
-        dir: std.fs.Dir,
+        dir: std.Io.Dir,
         comptime base: string,
         comptime override: bool,
         value_buffer: *std.array_list.Managed(u8),
@@ -792,7 +796,7 @@ pub const Loader = struct {
             return;
         }
 
-        var file = dir.openFile(base, .{ .mode = .read_only }) catch |err| {
+        var file = dir.openFile(bun.blockingIo(), base, .{ .mode = .read_only }) catch |err| {
             switch (err) {
                 error.IsDir, error.FileNotFound => {
                     // prevent retrying
@@ -813,33 +817,24 @@ pub const Loader = struct {
                 },
             }
         };
-        defer file.close();
+        const io = bun.blockingIo();
+        defer file.close(io);
 
-        const end = brk: {
-            if (comptime Environment.isWindows) {
-                const pos = try file.getEndPos();
-                if (pos == 0) {
-                    @field(this, base) = logger.Source.initPathString(base, "");
-                    return;
-                }
-
-                break :brk pos;
-            }
-
-            const stat = try file.stat();
+        const end: usize = brk: {
+            const stat = try file.stat(io);
 
             if (stat.size == 0 or stat.kind != .file) {
                 @field(this, base) = logger.Source.initPathString(base, "");
                 return;
             }
 
-            break :brk stat.size;
+            break :brk @intCast(stat.size);
         };
 
         var buf = try this.allocator.alloc(u8, end + 1);
         errdefer this.allocator.free(buf);
-        const amount_read = file.readAll(buf[0..end]) catch |err| switch (err) {
-            error.Unexpected, error.SystemResources, error.OperationAborted, error.BrokenPipe, error.AccessDenied, error.IsDir => {
+        const amount_read = file.readPositionalAll(io, buf[0..end], 0) catch |err| switch (err) {
+            error.Unexpected, error.SystemResources, error.Canceled, error.InputOutput, error.AccessDenied, error.IsDir => {
                 if (!this.quiet) {
                     Output.prettyErrorln("<r><red>{s}<r> error loading {s} file", .{ @errorName(err), base });
                 }
@@ -886,33 +881,24 @@ pub const Loader = struct {
             try this.custom_files_loaded.put(file_path, logger.Source.initPathString(file_path, ""));
             return;
         };
-        defer file.close();
+        const io = bun.blockingIo();
+        defer file.close(io);
 
-        const end = brk: {
-            if (comptime Environment.isWindows) {
-                const pos = try file.getEndPos();
-                if (pos == 0) {
-                    try this.custom_files_loaded.put(file_path, logger.Source.initPathString(file_path, ""));
-                    return;
-                }
-
-                break :brk pos;
-            }
-
-            const stat = try file.stat();
+        const end: usize = brk: {
+            const stat = try file.stat(io);
 
             if (stat.size == 0 or stat.kind != .file) {
                 try this.custom_files_loaded.put(file_path, logger.Source.initPathString(file_path, ""));
                 return;
             }
 
-            break :brk stat.size;
+            break :brk @intCast(stat.size);
         };
 
         var buf = try this.allocator.alloc(u8, end + 1);
         errdefer this.allocator.free(buf);
-        const amount_read = file.readAll(buf[0..end]) catch |err| switch (err) {
-            error.Unexpected, error.SystemResources, error.OperationAborted, error.BrokenPipe, error.AccessDenied, error.IsDir => {
+        const amount_read = file.readPositionalAll(io, buf[0..end], 0) catch |err| switch (err) {
+            error.Unexpected, error.SystemResources, error.Canceled, error.InputOutput, error.AccessDenied, error.IsDir => {
                 if (!this.quiet) {
                     Output.prettyErrorln("<r><red>{s}<r> error loading {s} file", .{ @errorName(err), file_path });
                 }
@@ -1248,25 +1234,25 @@ pub const Map = struct {
     ///
     /// To prevent
     pub fn stdEnvMap(this: *Map, allocator: std.mem.Allocator) OOM!StdEnvMapWrapper {
-        var env_map = std.process.EnvMap.init(allocator);
+        var env_map = std.process.Environ.Map.init(allocator);
 
         var iter = this.map.iterator();
         while (iter.next()) |entry| {
-            try env_map.hash_map.put(entry.key_ptr.*, entry.value_ptr.value);
+            try env_map.array_hash_map.put(allocator, entry.key_ptr.*, entry.value_ptr.value);
         }
 
         return .{ .unsafe_map = env_map };
     }
 
     pub const StdEnvMapWrapper = struct {
-        unsafe_map: std.process.EnvMap,
+        unsafe_map: std.process.Environ.Map,
 
-        pub fn get(this: *const StdEnvMapWrapper) *const std.process.EnvMap {
+        pub fn get(this: *const StdEnvMapWrapper) *const std.process.Environ.Map {
             return &this.unsafe_map;
         }
 
         pub fn deinit(this: *StdEnvMapWrapper) void {
-            this.unsafe_map.hash_map.deinit();
+            this.unsafe_map.array_hash_map.deinit(this.unsafe_map.allocator);
         }
     };
 
@@ -1409,7 +1395,13 @@ pub const Map = struct {
     }
 
     pub fn cloneWithAllocator(this: *const Map, new_allocator: std.mem.Allocator) OOM!Map {
-        return .{ .map = try this.map.cloneWithAllocator(new_allocator) };
+        var cloned = Map.init(new_allocator);
+        try cloned.map.ensureTotalCapacity(this.map.count());
+        var iter = this.map.iterator();
+        while (iter.next()) |entry| {
+            cloned.map.putAssumeCapacity(entry.key_ptr.*, entry.value_ptr.*);
+        }
+        return cloned;
     }
 };
 

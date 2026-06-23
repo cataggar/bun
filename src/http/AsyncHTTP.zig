@@ -139,7 +139,7 @@ pub fn preconnect(
 
     var this = Preconnect.new(.{
         .async_http = undefined,
-        .response_buffer = MutableString{ .allocator = bun.http.default_allocator, .list = .{} },
+        .response_buffer = MutableString{ .allocator = bun.http.default_allocator, .list = .empty },
         .url = url,
         .is_url_owned = is_url_owned,
     });
@@ -215,7 +215,7 @@ pub fn init(
     if (options.http_proxy) |proxy| {
         if (proxy.username.len > 0) {
             // Use stack fallback allocator - stack for small credentials, heap for large ones
-            var username_sfb = std.heap.stackFallback(4096, allocator);
+            var username_sfb = bun.stackFallback(4096, allocator);
             const username_alloc = username_sfb.get();
             const username = PercentEncoding.decodeAlloc(username_alloc, proxy.username) catch |err| {
                 log("failed to decode proxy username: {}", .{err});
@@ -224,7 +224,7 @@ pub fn init(
             defer username_alloc.free(username);
 
             if (proxy.password.len > 0) {
-                var password_sfb = std.heap.stackFallback(4096, allocator);
+                var password_sfb = bun.stackFallback(4096, allocator);
                 const password_alloc = password_sfb.get();
                 const password = PercentEncoding.decodeAlloc(password_alloc, proxy.password) catch |err| {
                     log("failed to decode proxy password: {}", .{err});
@@ -292,7 +292,7 @@ fn reset(this: *AsyncHTTP) !void {
         this.client.flags.disable_keepalive = this.url.isHTTPS();
         if (proxy.username.len > 0) {
             // Use stack fallback allocator - stack for small credentials, heap for large ones
-            var username_sfb = std.heap.stackFallback(4096, this.allocator);
+            var username_sfb = bun.stackFallback(4096, this.allocator);
             const username_alloc = username_sfb.get();
             const username = PercentEncoding.decodeAlloc(username_alloc, proxy.username) catch |err| {
                 log("failed to decode proxy username: {}", .{err});
@@ -301,7 +301,7 @@ fn reset(this: *AsyncHTTP) !void {
             defer username_alloc.free(username);
 
             if (proxy.password.len > 0) {
-                var password_sfb = std.heap.stackFallback(4096, this.allocator);
+                var password_sfb = bun.stackFallback(4096, this.allocator);
                 const password_alloc = password_sfb.get();
                 const password = PercentEncoding.decodeAlloc(password_alloc, proxy.password) catch |err| {
                     log("failed to decode proxy password: {}", .{err});
@@ -390,7 +390,7 @@ pub fn onAsyncHTTPCallback(this: *AsyncHTTP, async_http: *AsyncHTTP, result: HTT
     }
 
     if (bun.http.socket_async_http_abort_tracker.capacity() > 10_000 and bun.http.socket_async_http_abort_tracker.count() < 100) {
-        bun.http.socket_async_http_abort_tracker.shrinkAndFree(bun.http.socket_async_http_abort_tracker.count());
+        bun.http.socket_async_http_abort_tracker.shrinkAndFree(bun.default_allocator, bun.http.socket_async_http_abort_tracker.count());
     }
 
     if (result.has_more) {
@@ -400,7 +400,7 @@ pub fn onAsyncHTTPCallback(this: *AsyncHTTP, async_http: *AsyncHTTP, result: HTT
             this.client.deinit();
             var threadlocal_http: *bun.http.ThreadlocalAsyncHTTP = @fieldParentPtr("async_http", async_http);
             defer threadlocal_http.deinit();
-            log("onAsyncHTTPCallback: {D}", .{this.elapsed});
+            log("onAsyncHTTPCallback: {f}", .{bun.fmt.fmtDurationOneDecimal(this.elapsed)});
             callback.function(callback.ctx, async_http, result);
         }
 

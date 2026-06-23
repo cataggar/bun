@@ -300,7 +300,7 @@ pub const Lookup = struct {
                 .loose,
             );
             switch (bun.sys.File.readFrom(
-                std.fs.cwd(),
+                bun.FD.cwd(),
                 normalized,
                 bun.default_allocator,
             )) {
@@ -378,7 +378,7 @@ pub fn parse(
 
             while (strings.hasPrefixComptime(
                 remain,
-                comptime [_]u8{';'} ** (@sizeOf(usize) / 2),
+                comptime @as([(@sizeOf(usize) / 2)]u8, @splat(';')),
             )) {
                 generated.lines = generated.lines.addScalar(@sizeOf(usize) / 2);
                 remain = remain[@sizeOf(usize) / 2 ..];

@@ -98,14 +98,14 @@ pub const UpdateInteractiveCommand = struct {
         const new_package_json_source = try manager.allocator.dupe(u8, package_json_writer.ctx.writtenWithoutTrailingZero());
 
         // Write the updated package.json
-        const write_file = std.fs.cwd().createFile(package_json_path, .{}) catch |err| {
+        const write_file = std.Io.Dir.cwd().createFile(bun.blockingIo(), package_json_path, .{}) catch |err| {
             manager.allocator.free(new_package_json_source);
             Output.errGeneric("Failed to write package.json at {s}: {s}", .{ package_json_path, @errorName(err) });
             return err;
         };
-        defer write_file.close();
+        defer write_file.close(bun.blockingIo());
 
-        write_file.writeAll(new_package_json_source) catch |err| {
+        write_file.writeStreamingAll(bun.blockingIo(), new_package_json_source) catch |err| {
             manager.allocator.free(new_package_json_source);
             Output.errGeneric("Failed to write package.json at {s}: {s}", .{ package_json_path, @errorName(err) });
             return err;
@@ -529,7 +529,7 @@ pub const UpdateInteractiveCommand = struct {
 
                 // Reset the timer to show actual install time instead of total command time
                 var install_ctx = ctx;
-                install_ctx.start_time = std.time.nanoTimestamp();
+                install_ctx.start_time = bun.SystemTimer.nanoTimestamp();
 
                 try PackageManager.installWithManager(manager, install_ctx, PackageManager.root_package_json_path, manager.root_dir.dir);
             }
@@ -544,7 +544,7 @@ pub const UpdateInteractiveCommand = struct {
         const packages = lockfile.packages.slice();
         const pkg_resolutions = packages.items(.resolution);
 
-        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .{};
+        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .empty;
         for (pkg_resolutions, 0..) |resolution, pkg_id| {
             if (resolution.tag != .workspace and resolution.tag != .root) continue;
             try workspace_pkg_ids.append(allocator, @intCast(pkg_id));
@@ -565,7 +565,7 @@ pub const UpdateInteractiveCommand = struct {
         const pkg_resolutions = packages.items(.resolution);
         const string_buf = lockfile.buffers.string_bytes.items;
 
-        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .{};
+        var workspace_pkg_ids: std.ArrayListUnmanaged(PackageID) = .empty;
         for (pkg_resolutions, 0..) |resolution, pkg_id| {
             if (resolution.tag != .workspace and resolution.tag != .root) continue;
             try workspace_pkg_ids.append(allocator, @intCast(pkg_id));
@@ -731,7 +731,6 @@ pub const UpdateInteractiveCommand = struct {
 
         var version_buf = std.array_list.Managed(u8).init(allocator);
         defer version_buf.deinit();
-        const version_writer = version_buf.writer();
 
         for (workspace_pkg_ids) |workspace_pkg_id| {
             const pkg_deps = pkg_dependencies[workspace_pkg_id];
@@ -787,15 +786,15 @@ pub const UpdateInteractiveCommand = struct {
                 }
 
                 version_buf.clearRetainingCapacity();
-                try version_writer.print("{f}", .{resolution.value.npm.version.fmt(string_buf)});
+                try version_buf.print("{f}", .{resolution.value.npm.version.fmt(string_buf)});
                 const current_version_buf = try allocator.dupe(u8, version_buf.items);
 
                 version_buf.clearRetainingCapacity();
-                try version_writer.print("{f}", .{update_version.version.fmt(manifest.string_buf)});
+                try version_buf.print("{f}", .{update_version.version.fmt(manifest.string_buf)});
                 const update_version_buf = try allocator.dupe(u8, version_buf.items);
 
                 version_buf.clearRetainingCapacity();
-                try version_writer.print("{f}", .{latest.version.fmt(manifest.string_buf)});
+                try version_buf.print("{f}", .{latest.version.fmt(manifest.string_buf)});
                 const latest_version_buf = try allocator.dupe(u8, version_buf.items);
 
                 // Already filtered by version.order check above
@@ -1644,7 +1643,7 @@ pub const UpdateInteractiveCommand = struct {
 
             // Read input
             var reader_buffer: [1]u8 = undefined;
-            var reader_file = std.fs.File.stdin().readerStreaming(&reader_buffer);
+            var reader_file = std.Io.File.stdin().readerStreaming(bun.blockingIo(), &reader_buffer);
             const reader = &reader_file.interface;
             const byte = reader.takeByte() catch return state.selected;
 

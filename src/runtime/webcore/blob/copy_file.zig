@@ -416,7 +416,7 @@ pub const CopyFile = struct {
         if (Environment.isWindows) return; //why
         // defer task.onFinish();
 
-        var stat_: ?bun.Stat = null;
+        var stat_: ?bun.sys.Stat = null;
 
         if (this.destination_file_store.pathlike == .fd) {
             this.destination_fd = this.destination_file_store.pathlike.fd;
@@ -442,12 +442,12 @@ pub const CopyFile = struct {
                             .result => |result| {
                                 stat_ = result;
 
-                                if (posix.S.ISDIR(result.mode)) {
+                                if (posix.S.ISDIR(@intCast(result.mode))) {
                                     this.system_error = unsupported_directory_error;
                                     return;
                                 }
 
-                                if (!posix.S.ISREG(result.mode))
+                                if (!posix.S.ISREG(@intCast(result.mode)))
                                     break :do_clonefile;
                             },
                             .err => |err| {
@@ -513,7 +513,7 @@ pub const CopyFile = struct {
 
         if (this.destination_file_store.pathlike == .fd) {}
 
-        const stat: bun.Stat = stat_ orelse switch (bun.sys.fstat(this.source_fd)) {
+        const stat: bun.sys.Stat = stat_ orelse switch (bun.sys.fstat(this.source_fd)) {
             .result => |result| result,
             .err => |err| {
                 this.doClose();
@@ -522,7 +522,7 @@ pub const CopyFile = struct {
             },
         };
 
-        if (posix.S.ISDIR(stat.mode)) {
+        if (posix.S.ISDIR(@intCast(stat.mode))) {
             this.system_error = unsupported_directory_error;
             this.doClose();
             return;
@@ -536,7 +536,7 @@ pub const CopyFile = struct {
             }
 
             if (bun.sys.preallocate_supported and
-                posix.S.ISREG(stat.mode) and
+                posix.S.ISREG(@intCast(stat.mode)) and
                 this.max_length > bun.sys.preallocate_length and
                 this.max_length != Blob.max_size)
             {
@@ -547,7 +547,7 @@ pub const CopyFile = struct {
         if (comptime Environment.isLinux) {
 
             // Bun.write(Bun.file("a"), Bun.file("b"))
-            if (posix.S.ISREG(stat.mode) and (posix.S.ISREG(this.destination_file_store.mode) or this.destination_file_store.mode == 0)) {
+            if (posix.S.ISREG(@intCast(stat.mode)) and (posix.S.ISREG(this.destination_file_store.mode) or this.destination_file_store.mode == 0)) {
                 if (this.destination_file_store.is_atty orelse false) {
                     this.doCopyFileRange(.copy_file_range, true) catch {};
                 } else {
@@ -559,7 +559,7 @@ pub const CopyFile = struct {
             }
 
             // $ bun run foo.js | bun run bar.js
-            if (posix.S.ISFIFO(stat.mode) and posix.S.ISFIFO(this.destination_file_store.mode)) {
+            if (posix.S.ISFIFO(@intCast(stat.mode)) and posix.S.ISFIFO(this.destination_file_store.mode)) {
                 if (this.destination_file_store.is_atty orelse false) {
                     this.doCopyFileRange(.splice, true) catch {};
                 } else {
@@ -570,7 +570,7 @@ pub const CopyFile = struct {
                 return;
             }
 
-            if (posix.S.ISREG(stat.mode) or posix.S.ISCHR(stat.mode) or posix.S.ISSOCK(stat.mode)) {
+            if (posix.S.ISREG(@intCast(stat.mode)) or posix.S.ISCHR(@intCast(stat.mode)) or posix.S.ISSOCK(@intCast(stat.mode))) {
                 if (this.destination_file_store.is_atty orelse false) {
                     this.doCopyFileRange(.sendfile, true) catch {};
                 } else {

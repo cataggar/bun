@@ -390,7 +390,7 @@ pub const PackageJSON = struct {
 
         if (framework_object.expr.asProperty("assetPrefix")) |asset_prefix| {
             if (asset_prefix.expr.asString(allocator)) |_str| {
-                const str = std.mem.trimRight(u8, _str, " ");
+                const str = std.mem.trimEnd(u8, _str, " ");
                 if (str.len > 0) {
                     pair.router.asset_prefix_path = str;
                 }
@@ -800,8 +800,8 @@ pub const PackageJSON = struct {
                 // Handle arrays, including empty arrays
                 if (side_effects_field.asArray()) |array_| {
                     var array = array_;
-                    var map = SideEffects.Map{};
-                    var glob_list = SideEffects.GlobList{};
+                    var map = SideEffects.Map.empty;
+                    var glob_list = SideEffects.GlobList.empty;
                     var has_globs = false;
                     var has_exact = false;
 
@@ -1555,15 +1555,14 @@ pub const ESModule = struct {
         // respectively), then throw an Invalid Module Specifier error.
         const PercentEncoding = @import("../url/url.zig").PercentEncoding;
         const resolved_path_buf_percent = &module_bufs.get().resolved_path_buf_percent;
-        var fbs = std.io.fixedBufferStream(resolved_path_buf_percent);
-        var writer = fbs.writer();
+        var writer = std.Io.Writer.fixed(resolved_path_buf_percent);
         const len = PercentEncoding.decode(@TypeOf(&writer), &writer, result.path) catch return Resolution{
             .status = .InvalidModuleSpecifier,
             .path = result.path,
             .debug = result.debug,
         };
 
-        const resolved_path = resolved_path_buf_percent[0..len];
+        const resolved_path = resolved_path_buf_percent[0..@as(usize, @intCast(len))];
 
         var found: string = "";
         if (strings.contains(resolved_path, invalid_percent_chars[0])) {
@@ -2058,7 +2057,7 @@ pub const ESModule = struct {
                         }
                     },
                     .pattern => {
-                        const key_without_trailing_star = std.mem.trimRight(u8, key, "*");
+                        const key_without_trailing_star = std.mem.trimEnd(u8, key, "*");
 
                         const star = strings.indexOfChar(str, '*') orelse {
                             // Handle the case of no "*"

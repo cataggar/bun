@@ -683,7 +683,7 @@ terminal_height: u16 = 24,
 ctrl_c_pressed: bool = false,
 
 // Buffered stdin
-stdin_buf: [256]u8 = .{0} ** 256,
+stdin_buf: [256]u8 = @splat(0),
 stdin_buf_start: usize = 0,
 stdin_buf_end: usize = 0,
 
@@ -777,7 +777,7 @@ fn restoreTerminal(self: *Repl) void {
 /// Global pointer for signal handler to access the VM
 var sigint_vm: ?*jsc.VM = null;
 
-fn sigintHandler(_: c_int) callconv(.c) void {
+fn sigintHandler(_: std.posix.SIG) callconv(.c) void {
     if (sigint_vm) |vm| {
         vm.setExecutionForbidden(true);
     }
@@ -799,7 +799,7 @@ fn enableSignalsDuringWait(self: *Repl) void {
             .mask = bun.sys.sigemptyset(),
             .flags = 0,
         };
-        bun.sys.sigaction(std.posix.SIG.INT, &act, null);
+        bun.sys.sigaction(@intFromEnum(std.posix.SIG.INT), &act, null);
     }
     // On Windows, ENABLE_PROCESSED_INPUT is already set so Ctrl+C works
 }
@@ -819,7 +819,7 @@ fn disableSignalsDuringWait(self: *Repl) void {
             .mask = bun.sys.sigemptyset(),
             .flags = 0,
         };
-        bun.sys.sigaction(std.posix.SIG.INT, &act, null);
+        bun.sys.sigaction(@intFromEnum(std.posix.SIG.INT), &act, null);
     }
 }
 

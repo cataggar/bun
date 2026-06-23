@@ -53,7 +53,7 @@ pub const ReadFile = struct {
     read_off: SizeType = 0,
     read_eof: bool = false,
     size: SizeType = 0,
-    buffer: std.ArrayListUnmanaged(u8) = .{},
+    buffer: std.ArrayListUnmanaged(u8) = .empty,
     task: bun.ThreadPool.Task = undefined,
     system_error: ?jsc.SystemError = null,
     errno: ?anyerror = null,
@@ -313,7 +313,7 @@ pub const ReadFile = struct {
     }
 
     fn resolveSizeAndLastModified(this: *ReadFile, fd: bun.FD) void {
-        const stat: bun.Stat = switch (bun.sys.fstat(fd)) {
+        const stat: bun.sys.Stat = switch (bun.sys.fstat(fd)) {
             .result => |result| result,
             .err => |err| {
                 this.errno = bun.errnoToZigErr(err.errno);
@@ -375,7 +375,7 @@ pub const ReadFile = struct {
         // Special files might report a size of > 0, and be wrong.
         // so we should check specifically that its a regular file before trusting the size.
         if (this.size == 0 and bun.isRegularFile(this.file_store.mode)) {
-            this.buffer = .{};
+            this.buffer = .empty;
             this.byte_store = ByteStore.init(this.buffer.items, bun.default_allocator);
 
             this.onFinish();
@@ -536,7 +536,7 @@ pub const ReadFileUV = struct {
     read_off: SizeType = 0,
     read_eof: bool = false,
     size: SizeType = 0,
-    buffer: std.ArrayListUnmanaged(u8) = .{},
+    buffer: std.ArrayListUnmanaged(u8) = .empty,
     system_error: ?jsc.SystemError = null,
     errno: ?anyerror = null,
     on_complete_data: *anyopaque = undefined,

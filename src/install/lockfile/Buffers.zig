@@ -1,16 +1,16 @@
 const Buffers = @This();
 
-trees: Tree.List = .{},
-hoisted_dependencies: DependencyIDList = .{},
+trees: Tree.List = .empty,
+hoisted_dependencies: DependencyIDList = .empty,
 /// This is the underlying buffer used for the `resolutions` external slices inside of `Package`
 /// Should be the same length as `dependencies`
-resolutions: PackageIDList = .{},
+resolutions: PackageIDList = .empty,
 /// This is the underlying buffer used for the `dependencies` external slices inside of `Package`
-dependencies: DependencyList = .{},
+dependencies: DependencyList = .empty,
 /// This is the underlying buffer used for any `Semver.ExternalString` instance in the lockfile
-extern_strings: ExternalStringBuffer = .{},
+extern_strings: ExternalStringBuffer = .empty,
 /// This is where all non-inlinable `Semver.String`s are stored.
-string_bytes: StringBuffer = .{},
+string_bytes: StringBuffer = .empty,
 
 pub fn deinit(this: *Buffers, allocator: Allocator) void {
     this.trees.deinit(allocator);
@@ -29,7 +29,7 @@ pub fn preallocate(this: *Buffers, that: Buffers, allocator: Allocator) !void {
 }
 
 const sizes = blk: {
-    const fields = std.meta.fields(Lockfile.Buffers);
+    const fields = bun.meta.fields(Lockfile.Buffers);
     const Data = struct {
         size: usize,
         name: []const u8,
@@ -289,14 +289,14 @@ pub fn legacyPackageToDependencyID(this: Buffers, dependency_visited: ?*Bitset, 
 
 pub fn load(stream: *Stream, allocator: Allocator, log: *logger.Log, pm_: ?*PackageManager) !Buffers {
     var this = Buffers{};
-    var external_dependency_list_: std.ArrayListUnmanaged(Dependency.External) = std.ArrayListUnmanaged(Dependency.External){};
+    var external_dependency_list_: std.ArrayListUnmanaged(Dependency.External) = .empty;
 
     inline for (sizes.names) |name| {
         const Type = @TypeOf(@field(this, name));
 
         var pos: usize = 0;
         if (comptime Environment.isDebug) {
-            pos = try stream.getPos();
+            pos = stream.pos;
         }
 
         if (comptime Type == @TypeOf(this.dependencies)) {

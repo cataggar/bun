@@ -3,6 +3,40 @@ const strings = @This();
 /// memmem is provided by libc on posix, but implemented in zig for windows.
 pub const memmem = bun.sys.workaround_symbols.memmem;
 
+/// Comptime sequence repetition, replacing Zig's removed `seq ** n` operator
+/// (ziglang/zig#24738) for repeating a multi-element sequence. To repeat a
+/// single scalar into an array, use `@splat` instead.
+pub fn repeatComptime(comptime T: type, comptime seq: []const T, comptime n: usize) [seq.len * n]T {
+    var out: [seq.len * n]T = undefined;
+    for (0..n) |i| @memcpy(out[i * seq.len ..][0..seq.len], seq);
+    return out;
+}
+
+test repeatComptime {
+    try std.testing.expectEqualSlices(u8, "abcabcabc", &repeatComptime(u8, "abc", 3));
+    try std.testing.expectEqualSlices(u8, "======", &repeatComptime(u8, "=", 6));
+    try std.testing.expectEqualSlices(u32, &.{ 1, 2, 1, 2 }, &repeatComptime(u32, &.{ 1, 2 }, 2));
+}
+
+test "@splat replaces scalar array-multiplication" {
+    // The migration from the removed `[_]T{x} ** N` operator to `@splat(x)`
+    // (ziglang/zig#24738) must preserve the exact array contents.
+    const zeros: [64]u8 = @splat(0);
+    try std.testing.expect(zeros.len == 64);
+    for (zeros) |b| try std.testing.expect(b == 0);
+
+    const flags: [3]bool = @splat(true);
+    try std.testing.expect(flags[0] and flags[1] and flags[2]);
+
+    // nested-value element (e.g. `.{.{ 0, 0, 0, 255 }} ** 256`)
+    const palette: [2][4]u8 = @splat(.{ 0, 0, 0, 255 });
+    try std.testing.expectEqualSlices(u8, &.{ 0, 0, 0, 255 }, &palette[1]);
+
+    // single-char string repeat via `&@splat` (e.g. clap's space buffer)
+    const spaces: *const [5]u8 = &@splat(' ');
+    try std.testing.expectEqualSlices(u8, "     ", spaces);
+}
+
 pub const Encoding = enum {
     ascii,
     utf8,
@@ -61,7 +95,7 @@ pub fn containsCaseInsensitiveASCII(self: string, str: string) callconv(bun.call
     return false;
 }
 
-pub const OptionalUsize = std.meta.Int(.unsigned, @bitSizeOf(usize) - 1);
+pub const OptionalUsize = @Int(.unsigned, @bitSizeOf(usize) - 1);
 pub fn indexOfAny(slice: string, comptime str: []const u8) ?OptionalUsize {
     return switch (comptime str.len) {
         0 => @compileError("str cannot be empty"),
@@ -96,7 +130,7 @@ pub fn containsComptime(self: string, comptime str: string) callconv(bun.callcon
 
     const start = std.mem.indexOfScalar(u8, self, str[0]) orelse return false;
     var remain = self[start..];
-    const Int = std.meta.Int(.unsigned, str.len * 8);
+    const Int = @Int(.unsigned, str.len * 8);
 
     while (remain.len >= comptime str.len) {
         if (@as(Int, @bitCast(remain.ptr[0..str.len].*)) == @as(Int, @bitCast(str.ptr[0..str.len].*))) {
@@ -1149,8 +1183,8 @@ pub fn substring(self: anytype, start: ?usize, stop: ?usize) @TypeOf(self) {
 
 pub const ascii_vector_size = if (Environment.isWasm) 8 else 16;
 pub const ascii_u16_vector_size = if (Environment.isWasm) 4 else 8;
-pub const AsciiVectorInt = std.meta.Int(.unsigned, ascii_vector_size);
-pub const AsciiVectorIntU16 = std.meta.Int(.unsigned, ascii_u16_vector_size);
+pub const AsciiVectorInt = @Int(.unsigned, ascii_vector_size);
+pub const AsciiVectorIntU16 = @Int(.unsigned, ascii_u16_vector_size);
 pub const max_16_ascii: @Vector(ascii_vector_size, u8) = @splat(@as(u8, 127));
 pub const min_16_ascii: @Vector(ascii_vector_size, u8) = @splat(@as(u8, 0x20));
 pub const max_u16_ascii: @Vector(ascii_u16_vector_size, u16) = @splat(@as(u16, 127));
@@ -1366,7 +1400,7 @@ pub fn indexOfNotChar(slice: []const u8, char: u8) ?u32 {
 
 const invalid_char: u8 = 0xff;
 const hex_table: [256]u8 = brk: {
-    var values: [256]u8 = [_]u8{invalid_char} ** 256;
+    var values: [256]u8 = @splat(invalid_char);
     values['0'] = 0;
     values['1'] = 1;
     values['2'] = 2;
@@ -1737,8 +1771,8 @@ pub fn firstNonASCII16(slice: []const u16) ?u32 {
                     const out: u32 = @intCast(offset_of_vector_in_input + index_of_first_nonascii_in_vector);
 
                     if (comptime Environment.isDebug) {
-                        for (0..index_of_first_nonascii_in_vector) |i| {
-                            if (vec[i] > 127) {
+                        inline for (0..ascii_u16_vector_size) |i| {
+                            if (i < index_of_first_nonascii_in_vector and vec[i] > 127) {
                                 bun.Output.panic("firstNonASCII16: found non-ASCII character in ASCII vector before the first non-ASCII character", .{});
                             }
                         }
@@ -1920,7 +1954,7 @@ pub fn NewGlobLengthSorter(comptime Type: type, comptime field: string) type {
 pub fn moveAllSlices(comptime Type: type, container: *Type, from: string, to: string) void {
     const fields_we_care_about = comptime brk: {
         var count: usize = 0;
-        for (std.meta.fields(Type)) |field| {
+        for (bun.meta.fields(Type)) |field| {
             if (std.meta.isSlice(field.type) and std.meta.Child(field.type) == u8) {
                 count += 1;
             }
@@ -1928,7 +1962,7 @@ pub fn moveAllSlices(comptime Type: type, container: *Type, from: string, to: st
 
         var fields: [count][]const u8 = undefined;
         count = 0;
-        for (std.meta.fields(Type)) |field| {
+        for (bun.meta.fields(Type)) |field| {
             if (std.meta.isSlice(field.type) and std.meta.Child(field.type) == u8) {
                 fields[count] = field.name;
                 count += 1;
@@ -2088,7 +2122,7 @@ pub fn concatIfNeeded(
     }
 
     if (total_length < 1024) {
-        var stack = std.heap.stackFallback(1024, allocator);
+        var stack = bun.stackFallback(1024, allocator);
         const stack_copy = concatWithLength(stack.get(), args, total_length) catch unreachable;
         for (interned_strings_to_check) |interned| {
             if (eqlLong(stack_copy, interned, true)) {

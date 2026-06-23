@@ -124,7 +124,7 @@ pub const AnyRoute = union(enum) {
             return route;
         }
 
-        var methods = HTTP.Method.Optional{ .method = .initEmpty() };
+        var methods = HTTP.Method.Optional{ .method = .empty };
         methods.insert(.GET);
         methods.insert(.HEAD);
 
@@ -366,7 +366,7 @@ const ServePlugins = struct {
         defer this.deref();
 
         const plugin = bun.jsc.API.JSBundler.Plugin.create(global, .browser);
-        var sfb = std.heap.stackFallback(@sizeOf(bun.String) * 4, bun.default_allocator);
+        var sfb = bun.stackFallback(@sizeOf(bun.String) * 4, bun.default_allocator);
         const alloc = sfb.get();
         const bunstring_array = bun.handleOom(alloc.alloc(bun.String, plugin_list.len));
         defer alloc.free(bunstring_array);
@@ -572,7 +572,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
         /// These associate a route to the index in RouteList.cpp.
         /// User routes may get applied multiple times due to SNI.
         /// So we have to store it.
-        user_routes: std.ArrayListUnmanaged(UserRoute) = .{},
+        user_routes: std.ArrayListUnmanaged(UserRoute) = .empty,
 
         on_clienterror: jsc.Strong.Optional = .empty,
 
@@ -1429,7 +1429,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                     if (this.listener) |listener| {
                         port = @intCast(listener.getLocalPort());
 
-                        var buf: [64]u8 = [_]u8{0} ** 64;
+                        var buf: [64]u8 = @splat(0);
                         const address_bytes = listener.socket().localAddress(&buf) orelse return JSValue.jsNull();
                         var addr = SocketAddress.init(address_bytes, port) catch {
                             @branchHint(.unlikely);
@@ -1439,7 +1439,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                     }
                     if (comptime has_h3) if (this.h3_listener) |h3l| {
                         port = @intCast(h3l.getLocalPort());
-                        var buf: [64]u8 = [_]u8{0} ** 64;
+                        var buf: [64]u8 = @splat(0);
                         const address_bytes = h3l.getLocalAddress(&buf) orelse return JSValue.jsNull();
                         var addr = SocketAddress.init(address_bytes, port) catch {
                             @branchHint(.unlikely);
@@ -1503,7 +1503,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             }
             {
                 if (this.listener) |listener| {
-                    var buf: [1024]u8 = [_]u8{0} ** 1024;
+                    var buf: [1024]u8 = @splat(0);
 
                     if (listener.socket().remoteAddress(buf[0..1024])) |addr| {
                         if (addr.len > 0) {
@@ -2028,7 +2028,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             this.pending_requests += 1;
             defer this.pending_requests -= 1;
             req.setYield(false);
-            var stack_fallback = std.heap.stackFallback(8192, this.allocator);
+            var stack_fallback = bun.stackFallback(8192, this.allocator);
             const allocator = stack_fallback.get();
 
             const buffer_writer = js_printer.BufferWriter.init(allocator);
@@ -2787,7 +2787,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             }
 
             // --- 3. Register compiled user routes (this.user_routes) & Track "/*" Coverage ---
-            var star_methods_covered_by_user = bun.http.Method.Set.initEmpty();
+            var star_methods_covered_by_user = bun.http.Method.Set.empty;
             var has_any_user_route_for_star_path = false; // True if "/*" path appears in user_routes at all
             var has_any_ws_route_for_star_path = false;
 
@@ -2811,7 +2811,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                             if (this.h3_app) |h3_app| h3_app.any(user_route.route.path, *UserRoute, user_route, onH3UserRouteRequest);
                         }
                         if (is_star_path) {
-                            star_methods_covered_by_user = .initFull();
+                            star_methods_covered_by_user = .full;
                         }
 
                         if (this.config.websocket) |*websocket| {
@@ -2873,7 +2873,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                         has_static_route_for_star_path = true;
                         switch (entry.method) {
                             .any => {
-                                star_methods_covered_by_user = .initFull();
+                                star_methods_covered_by_user = .full;
                             },
                             .method => |method| {
                                 star_methods_covered_by_user.setUnion(method);
@@ -2939,7 +2939,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
                 has_dev_server_for_star_path = bun.handleOom(dev.setRoutes(this));
                 if (has_dev_server_for_star_path) {
                     // Assume dev server "/*" covers all methods if it exists
-                    star_methods_covered_by_user = .initFull();
+                    star_methods_covered_by_user = .full;
                 }
             }
 
@@ -2956,7 +2956,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             }
 
             // --- 9. Consolidated "/*" HTTP Fallback Registration ---
-            if (star_methods_covered_by_user.eql(bun.http.Method.Set.initFull())) {
+            if (star_methods_covered_by_user.eql(.full)) {
                 // User/Static/Dev has already provided a "/*" handler for ALL methods.
                 // No further global "/*" HTTP fallback needed.
             } else if (has_any_user_route_for_star_path or has_static_route_for_star_path or has_dev_server_for_star_path) {
@@ -2991,7 +2991,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
             // for method-specific "/*" routes fill the complement per method.
             if (comptime has_h3) {
                 if (this.h3_app) |h3_app| {
-                    if (h3_star_covered.eql(bun.http.Method.Set.initFull())) {
+                    if (h3_star_covered.eql(.full)) {
                         // user/static "/*" already covers every method
                     } else if (has_any_user_route_for_star_path or has_static_route_for_star_path) {
                         var uncovered = h3_star_covered;
@@ -3167,7 +3167,7 @@ pub fn NewServer(protocol_enum: enum { http, https }, development_kind: enum { d
 
                         if (hostname.len > 2 and hostname[0] == '[') {
                             // remove "[" and "]" from hostname
-                            host = std.fmt.bufPrintZ(&host_buff, "{s}", .{hostname[1 .. hostname.len - 1]}) catch unreachable;
+                            host = bun.fmt.bufPrintZ(&host_buff, "{s}", .{hostname[1 .. hostname.len - 1]}) catch unreachable;
                         } else {
                             host = tcp.hostname;
                         }

@@ -83,7 +83,7 @@ const RouteIndex = struct {
 };
 
 pub const Routes = struct {
-    list: RouteIndex.List = RouteIndex.List{},
+    list: RouteIndex.List = .empty,
     dynamic: []*Route = &[_]*Route{},
     dynamic_names: []string = &[_]string{},
     dynamic_match_names: []string = &[_]string{},
@@ -199,7 +199,7 @@ pub const Routes = struct {
     }
 
     fn match(this: *Routes, allocator: std.mem.Allocator, pathname_: string, comptime MatchContext: type, ctx: MatchContext) ?*Route {
-        const pathname = std.mem.trimLeft(u8, pathname_, "/");
+        const pathname = std.mem.trimStart(u8, pathname_, "/");
 
         if (pathname.len == 0) {
             return this.index;
@@ -216,7 +216,7 @@ const RouteLoader = struct {
     config: Options.RouteConfig,
     route_dirname_len: u16 = 0,
 
-    dedupe_dynamic: std.AutoArrayHashMap(u32, string),
+    dedupe_dynamic: std.array_hash_map.Auto(u32, string),
     log: *Logger.Log,
     index: ?*Route = null,
     static_list: bun.StringHashMap(*Route),
@@ -283,7 +283,7 @@ const RouteLoader = struct {
         }
 
         {
-            const entry = this.dedupe_dynamic.getOrPutValue(route.full_hash, route.abs_path.slice()) catch unreachable;
+            const entry = this.dedupe_dynamic.getOrPutValue(this.allocator, route.full_hash, route.abs_path.slice()) catch unreachable;
             if (entry.found_existing) {
                 const source = Logger.Source.initEmptyFile(route.abs_path.slice());
                 this.log.addErrorFmt(
@@ -326,11 +326,11 @@ const RouteLoader = struct {
             .fs = resolver.fs,
             .config = config,
             .static_list = bun.StringHashMap(*Route).init(allocator),
-            .dedupe_dynamic = std.AutoArrayHashMap(u32, string).init(allocator),
-            .all_routes = .{},
+            .dedupe_dynamic = .empty,
+            .all_routes = .empty,
             .route_dirname_len = route_dirname_len,
         };
-        defer this.dedupe_dynamic.deinit();
+        defer this.dedupe_dynamic.deinit(allocator);
         this.load(ResolverType, resolver, root_dir_info, base_dir);
         if (this.all_routes.items.len == 0) return Routes{
             .static = this.static_list,
@@ -340,7 +340,7 @@ const RouteLoader = struct {
 
         std.sort.pdq(*Route, this.all_routes.items, Route.Sorter{}, Route.Sorter.sortByName);
 
-        var route_list = RouteIndex.List{};
+        var route_list: RouteIndex.List = .empty;
         route_list.setCapacity(allocator, this.all_routes.items.len) catch unreachable;
 
         var dynamic_start: ?usize = null;
@@ -690,7 +690,7 @@ pub const Route = struct {
             name = name[0 .. name.len - 6];
         }
 
-        name = std.mem.trimRight(u8, name, "/");
+        name = std.mem.trimEnd(u8, name, "/");
 
         var match_name: string = name;
 
@@ -732,26 +732,26 @@ pub const Route = struct {
         }
 
         if (abs_path_str.len == 0) {
-            var file: std.fs.File = undefined;
+            var file: bun.FD = .invalid;
             var needs_close = true;
             defer if (needs_close) file.close();
             if (entry.cache.fd.unwrapValid()) |valid| {
-                file = valid.stdFile();
+                file = valid;
                 needs_close = false;
             } else {
                 var parts = [_]string{ entry.dir, entry.base() };
                 abs_path_str = FileSystem.instance.absBuf(&parts, route_file_buf);
                 route_file_buf[abs_path_str.len] = 0;
                 const buf = route_file_buf[0..abs_path_str.len :0];
-                file = std.fs.openFileAbsoluteZ(buf, .{ .mode = .read_only }) catch |err| {
+                file = (bun.sys.File.open(buf, bun.O.RDONLY, 0).unwrap() catch |err| {
                     needs_close = false;
                     log.addErrorFmt(null, Logger.Loc.Empty, allocator, "{s} opening route: {s}", .{ @errorName(err), abs_path_str }) catch unreachable;
                     return null;
-                };
-                FileSystem.setMaxFd(file.handle);
+                }).handle;
+                FileSystem.setMaxFd(file.native());
             }
 
-            const _abs = bun.getFdPath(.fromStdFile(file), route_file_buf) catch |err| {
+            const _abs = bun.getFdPath(file, route_file_buf) catch |err| {
                 log.addErrorFmt(null, Logger.Loc.Empty, allocator, "{s} resolving route: {s}", .{ @errorName(err), abs_path_str }) catch unreachable;
                 return null;
             };
@@ -877,7 +877,7 @@ pub const Match = struct {
     }
 
     pub fn pathnameWithoutLeadingSlash(this: *const Match) string {
-        return std.mem.trimLeft(u8, this.pathname, "/");
+        return std.mem.trimStart(u8, this.pathname, "/");
     }
 };
 
@@ -917,25 +917,27 @@ pub const MockServer = struct {
 fn makeTest(cwd_path: string, data: anytype) !void {
     Output.initTest();
     bun.assert(cwd_path.len > 1 and !strings.eql(cwd_path, "/") and !strings.endsWith(cwd_path, "bun"));
-    const bun_tests_dir = try std.fs.cwd().makeOpenPath("bun-test-scratch", .{});
-    bun_tests_dir.deleteTree(cwd_path) catch {};
+    const bun_tests_dir = try bun.MakePath.makeOpenPath(std.Io.Dir.cwd(), "bun-test-scratch", .{});
+    bun_tests_dir.deleteTree(bun.blockingIo(), cwd_path) catch {};
 
-    const cwd = try bun_tests_dir.makeOpenPath(cwd_path, .{});
-    try cwd.setAsCwd();
+    const cwd = try bun.MakePath.makeOpenPath(bun_tests_dir, cwd_path, .{});
+    var cwd_path_buf: bun.PathBuffer = undefined;
+    const cwd_abs = try bun.sys.getFdPath(.fromStdDir(cwd), &cwd_path_buf).unwrap();
+    try bun.sys.chdir(cwd_abs, cwd_abs).unwrap();
 
     const Data = @TypeOf(data);
-    const fields: []const std.builtin.Type.StructField = comptime std.meta.fields(Data);
+    const fields: []const bun.meta.StructField = comptime bun.meta.fields(Data);
     inline for (fields) |field| {
         @setEvalBranchQuota(9999);
         const value = @field(data, field.name);
 
         if (std.fs.path.dirname(field.name)) |dir| {
-            try cwd.makePath(dir);
+            try bun.makePath(cwd, dir);
         }
-        var file = try cwd.createFile(field.name, .{ .truncate = true });
-        try file.writeAll(value);
+        var file = try cwd.createFile(bun.blockingIo(), field.name, .{ .truncate = true });
+        try file.writeStreamingAll(bun.blockingIo(), value);
 
-        file.close();
+        file.close(bun.blockingIo());
     }
 }
 

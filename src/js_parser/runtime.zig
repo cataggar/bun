@@ -18,18 +18,17 @@ pub const Fallback = struct {
         msg: *const api.FallbackMessageContainer,
         allocator: std.mem.Allocator,
         pub fn format(this: Base64FallbackMessage, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            var bb = std.array_list.Managed(u8).init(this.allocator);
-            defer bb.deinit();
-            const bb_writer = bb.writer();
-            const Encoder = schema.Writer(@TypeOf(bb_writer));
-            var encoder = Encoder.init(bb_writer);
+            var allocating_writer = std.Io.Writer.Allocating.init(this.allocator);
+            defer allocating_writer.deinit();
+            const Encoder = schema.Writer(*std.Io.Writer);
+            var encoder = Encoder.init(&allocating_writer.writer);
             this.msg.encode(&encoder) catch {};
 
-            Base64Encoder.encode(bb.items, @TypeOf(writer), writer) catch {};
+            Base64Encoder.encode(allocating_writer.writer.buffered(), @TypeOf(writer), writer) catch {};
         }
 
         pub const Base64Encoder = struct {
-            const alphabet_chars = std.base64.standard_alphabet_chars;
+            const alphabet_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".*;
 
             pub fn encode(source: []const u8, comptime Writer: type, writer: Writer) !void {
                 var acc: u12 = 0;
@@ -238,7 +237,7 @@ pub const Runtime = struct {
             for (feature_flags) |flag| {
                 bun.handleOom(set.insert(flag));
             }
-            set.map.sort(struct {
+            set.map.unmanaged.sort(struct {
                 keys: []const []const u8,
                 pub fn lessThan(ctx: @This(), a: usize, b: usize) bool {
                     return std.mem.lessThan(u8, ctx.keys[a], ctx.keys[b]);

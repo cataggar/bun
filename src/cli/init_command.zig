@@ -23,7 +23,14 @@ pub const InitCommand = struct {
         };
 
         var input: std.array_list.Managed(u8) = .init(alloc);
-        try bun.Output.buffered_stdin.reader().readUntilDelimiterArrayList(&input, '\n', 1024);
+        // Read a line from stdin. The deprecated buffered_stdin reader only
+        // supports streaming (empty buffer) under Zig 0.17, so read directly.
+        while (input.items.len < 1024) {
+            var byte: [1]u8 = undefined;
+            const n = bun.sys.read(bun.FD.stdin(), &byte).unwrap() catch break;
+            if (n == 0 or byte[0] == '\n') break;
+            try input.append(byte[0]);
+        }
 
         if (strings.endsWithChar(input.items, '\r')) {
             _ = input.pop();
@@ -115,7 +122,7 @@ pub const InitCommand = struct {
 
             // Read a single character
             var stdin_b: [1]u8 = undefined;
-            var stdin_r = std.fs.File.stdin().readerStreaming(&stdin_b);
+            var stdin_r = std.Io.File.stdin().readerStreaming(bun.blockingIo(), &stdin_b);
             var stdin_i = &stdin_r.interface;
             const byte = stdin_i.takeByte() catch return selected;
 
@@ -229,12 +236,12 @@ pub const InitCommand = struct {
         /// Create a new asset file, overriding anything that already exists. Known
         /// assets will have their contents pre-populated; otherwise the file will be empty.
         fn create(comptime asset_name: []const u8, args: anytype) !void {
-            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".fields.len > 0;
+            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".field_names.len > 0;
             return createFull(asset_name, asset_name, "", is_template, args);
         }
 
         pub fn createWithContents(comptime asset_name: []const u8, comptime contents: []const u8, args: anytype) !void {
-            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".fields.len > 0;
+            const is_template = comptime (@TypeOf(args) != @TypeOf(null)) and @typeInfo(@TypeOf(args)).@"struct".field_names.len > 0;
             return createFullWithContents(asset_name, contents, "", is_template, args);
         }
 
@@ -260,9 +267,9 @@ pub const InitCommand = struct {
             /// Format arguments
             args: anytype,
         ) !void {
-            var file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
-            defer file.close();
-            var file_w = file.writerStreaming(&.{});
+            var file = try std.Io.Dir.cwd().createFile(bun.blockingIo(), filename, .{ .truncate = true });
+            defer file.close(bun.blockingIo());
+            var file_w = file.writerStreaming(bun.blockingIo(), &.{});
             const file_i = &file_w.interface;
 
             // Write contents of known assets to the new file. Template assets get formatted.
@@ -291,9 +298,9 @@ pub const InitCommand = struct {
             /// Format arguments
             args: anytype,
         ) !void {
-            var file = try std.fs.cwd().createFile(filename, .{ .truncate = true });
-            defer file.close();
-            var file_w = file.writerStreaming(&.{});
+            var file = try std.Io.Dir.cwd().createFile(bun.blockingIo(), filename, .{ .truncate = true });
+            defer file.close(bun.blockingIo());
+            var file_w = file.writerStreaming(bun.blockingIo(), &.{});
             var file_i = &file_w.interface;
 
             if (comptime is_template) {
@@ -392,7 +399,7 @@ pub const InitCommand = struct {
         }
 
         if (initialize_in_folder) |ifdir| {
-            std.fs.cwd().makePath(ifdir) catch |err| {
+            bun.makePath(std.Io.Dir.cwd(), ifdir) catch |err| {
                 Output.prettyErrorln("Failed to create directory {s}: {s}", .{ ifdir, @errorName(err) });
                 Global.exit(1);
             };
@@ -404,11 +411,11 @@ pub const InitCommand = struct {
 
         var fs = try Fs.FileSystem.init(null);
         const pathname = Fs.PathName.init(fs.topLevelDirWithoutTrailingSlash());
-        const destination_dir = std.fs.cwd();
+        const destination_dir = std.Io.Dir.cwd();
 
         var fields = PackageJSONFields{};
 
-        var package_json_file = destination_dir.openFile("package.json", .{ .mode = .read_write }) catch null;
+        var package_json_file = destination_dir.openFile(bun.blockingIo(), "package.json", .{ .mode = .read_write }) catch null;
         var package_json_contents: MutableString = MutableString.initEmpty(alloc);
         initializeStore();
         read_package_json: {
@@ -422,7 +429,7 @@ pub const InitCommand = struct {
 
                         break :brk end;
                     }
-                    const stat = pkg.stat() catch break :read_package_json;
+                    const stat = pkg.stat(bun.blockingIo()) catch break :read_package_json;
 
                     if (stat.kind != .file or stat.size == 0) {
                         break :read_package_json;
@@ -435,7 +442,8 @@ pub const InitCommand = struct {
                 package_json_contents.list.expandToCapacity();
 
                 const prev_file_pos = if (comptime Environment.isWindows) try pkg.getPos() else 0;
-                _ = pkg.preadAll(package_json_contents.list.items, 0) catch {
+                var read_file = bun.sys.File{ .handle = bun.FD.fromStdFile(pkg) };
+                _ = read_file.readAll(package_json_contents.list.items).unwrap() catch {
                     package_json_file = null;
                     break :read_package_json;
                 };
@@ -511,8 +519,8 @@ pub const InitCommand = struct {
             }
 
             // Find any source file
-            var dir = std.fs.cwd().openDir(".", .{ .iterate = true }) catch break :infer;
-            defer dir.close();
+            var dir = std.Io.Dir.cwd().openDir(bun.blockingIo(), ".", .{ .iterate = true }) catch break :infer;
+            defer dir.close(bun.blockingIo());
             var it = bun.DirIterator.iterate(.fromStdDir(dir), .u8);
             while (try it.next().unwrap()) |file| {
                 if (file.kind != .file) continue;
@@ -750,7 +758,7 @@ pub const InitCommand = struct {
         }
 
         write_package_json: {
-            var fd = bun.FD.fromStdFile(package_json_file orelse try std.fs.cwd().createFileZ("package.json", .{}));
+            var fd = bun.FD.fromStdFile(package_json_file orelse try std.Io.Dir.cwd().createFile(bun.blockingIo(), "package.json", .{}));
             defer fd.close();
             var buffer_writer = JSPrinter.BufferWriter.init(bun.default_allocator);
             buffer_writer.append_newline = true;
@@ -798,10 +806,10 @@ pub const InitCommand = struct {
                 }
 
                 if (fields.entry_point.len > 0 and !exists(fields.entry_point)) {
-                    const cwd = std.fs.cwd();
+                    const cwd = std.Io.Dir.cwd();
                     if (std.fs.path.dirname(fields.entry_point)) |dirname| {
                         if (!strings.eqlComptime(dirname, ".")) {
-                            cwd.makePath(dirname) catch {};
+                            bun.makePath(cwd, dirname) catch {};
                         }
                     }
 
@@ -846,17 +854,19 @@ pub const InitCommand = struct {
 
                 if (existsZ("package.json") and need_run_bun_install) {
                     Output.prettyln("", .{});
-                    var process = std.process.Child.init(
-                        &.{
+                    _ = bun.spawnSync(&.{
+                        .argv = &.{
                             try bun.selfExePath(),
                             "install",
                         },
-                        alloc,
-                    );
-                    process.stderr_behavior = .Inherit;
-                    process.stdin_behavior = .Inherit;
-                    process.stdout_behavior = .Inherit;
-                    _ = try process.spawnAndWait();
+                        .envp = null,
+                        .stderr = .inherit,
+                        .stdin = .inherit,
+                        .stdout = .inherit,
+                        .windows = if (bun.Environment.isWindows) .{
+                            .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+                        },
+                    }) catch {};
                 }
             },
             else => {},
@@ -1083,7 +1093,7 @@ const Template = enum {
             if (bun.getenvZAnyCase("USER")) |user| {
                 const pathbuf = bun.path_buffer_pool.get();
                 defer bun.path_buffer_pool.put(pathbuf);
-                const path = std.fmt.bufPrintZ(pathbuf, "C:\\Users\\{s}\\AppData\\Local\\Programs\\Cursor\\Cursor.exe", .{user}) catch {
+                const path = bun.fmt.bufPrintZ(pathbuf, "C:\\Users\\{s}\\AppData\\Local\\Programs\\Cursor\\Cursor.exe", .{user}) catch {
                     return false;
                 };
 
@@ -1181,6 +1191,7 @@ const Template = enum {
     }
 
     pub fn @"write files and run `bun dev`"(comptime this: Template, allocator: std.mem.Allocator) !void {
+        _ = allocator;
         Template.createAgentRule();
 
         inline for (comptime this.files()) |file| {
@@ -1208,18 +1219,19 @@ const Template = enum {
         Output.pretty("\n", .{});
         Output.flush();
 
-        var install = std.process.Child.init(
-            &.{
+        _ = bun.spawnSync(&.{
+            .argv = &.{
                 try bun.selfExePath(),
                 "install",
             },
-            allocator,
-        );
-        install.stderr_behavior = .Inherit;
-        install.stdin_behavior = .Ignore;
-        install.stdout_behavior = .Inherit;
-
-        _ = try install.spawnAndWait();
+            .envp = null,
+            .stderr = .inherit,
+            .stdout = .inherit,
+            .stdin = .ignore,
+            .windows = if (bun.Environment.isWindows) .{
+                .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+            },
+        }) catch {};
 
         Output.prettyln(
             \\

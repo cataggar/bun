@@ -1096,7 +1096,7 @@ pub const Resolver = struct {
                         if (!query.entry.cache.fd.isValid() and store_fd) {
                             buf[out.len] = 0;
                             const span = buf[0..out.len :0];
-                            var file: bun.FD = .fromStdFile(try std.fs.openFileAbsoluteZ(span, .{ .mode = .read_only }));
+                            const file = (try bun.sys.File.open(span, bun.O.RDONLY, 0).unwrap()).handle;
                             query.entry.cache.fd = file;
                             Fs.FileSystem.setMaxFd(file.native());
                         }
@@ -1104,8 +1104,7 @@ pub const Resolver = struct {
                         defer {
                             if (r.fs.fs.needToCloseFiles()) {
                                 if (query.entry.cache.fd.isValid()) {
-                                    var file = query.entry.cache.fd.stdFile();
-                                    file.close();
+                                    query.entry.cache.fd.close();
                                     query.entry.cache.fd = .invalid;
                                 }
                             }
@@ -2875,9 +2874,10 @@ pub const Resolver = struct {
                 const sentinel = path.ptr[0..queue_top.unsafe_path.len :0];
 
                 const open_req = if (comptime Environment.isPosix) open_req: {
-                    const dir_result = std.fs.openDirAbsoluteZ(
+                    const dir_result = std.Io.Dir.openDirAbsolute(
+                        bun.blockingIo(),
                         sentinel,
-                        .{ .no_follow = !follow_symlinks, .iterate = true },
+                        .{ .follow_symlinks = follow_symlinks, .iterate = true },
                     ) catch |err| break :open_req err;
                     break :open_req FD.fromStdDir(dir_result);
                 } else if (comptime Environment.isWindows) open_req: {
@@ -3148,7 +3148,7 @@ pub const Resolver = struct {
                 var matched_text_with_suffix = bufs(.tsconfig_match_full_buf3);
                 var matched_text_with_suffix_len: usize = 0;
                 if (total_length != null) {
-                    const suffix = std.mem.trimLeft(u8, original_path[total_length orelse original_path.len ..], "*");
+                    const suffix = std.mem.trimStart(u8, original_path[total_length orelse original_path.len ..], "*");
                     matched_text_with_suffix_len = matched_text.len + suffix.len;
                     if (matched_text_with_suffix_len > matched_text_with_suffix.len) continue;
                     bun.concat(u8, matched_text_with_suffix, &.{ matched_text, suffix });
@@ -3162,8 +3162,8 @@ pub const Resolver = struct {
                 // so that "/Users/foo/components/", "/foo/bar" => /Users/foo/components/foo/bar
                 var parts = [_]string{
                     prefix,
-                    if (matched_text_with_suffix_len > 0) std.mem.trimLeft(u8, matched_text_with_suffix[0..matched_text_with_suffix_len], "/") else "",
-                    std.mem.trimLeft(u8, longest_match.suffix, "/"),
+                    if (matched_text_with_suffix_len > 0) std.mem.trimStart(u8, matched_text_with_suffix[0..matched_text_with_suffix_len], "/") else "",
+                    std.mem.trimStart(u8, longest_match.suffix, "/"),
                 };
                 const absolute_original_path = r.fs.absBufChecked(
                     &parts,
@@ -3300,7 +3300,7 @@ pub const Resolver = struct {
 
             var index_path: string = "";
             {
-                var parts = [_]string{ std.mem.trimRight(u8, path_to_check, std.fs.path.sep_str), std.fs.path.sep_str ++ "index" };
+                var parts = [_]string{ std.mem.trimEnd(u8, path_to_check, std.fs.path.sep_str), std.fs.path.sep_str ++ "index" };
                 index_path = ResolvePath.joinStringBuf(bufs(.tsconfig_base_url), &parts, .auto);
             }
 
@@ -4046,9 +4046,8 @@ pub const Resolver = struct {
                             bin_folders = BinFolderArray.init(0) catch unreachable;
                         }
 
-                        const this_dir = fd.stdDir();
-                        var file = bun.FD.fromStdDir(this_dir.openDirZ(bun.pathLiteral("node_modules/.bin"), .{}) catch
-                            break :append_bin_dir);
+                        var file = bun.openDirForIteration(fd, bun.pathLiteral("node_modules/.bin")).unwrap() catch
+                            break :append_bin_dir;
                         defer file.close();
                         const bin_path = file.getFdPath(bufs(.node_bin_path)) catch break :append_bin_dir;
                         bin_folders_lock.lock();
@@ -4072,10 +4071,9 @@ pub const Resolver = struct {
                                 bin_folders = BinFolderArray.init(0) catch unreachable;
                             }
 
-                            const this_dir = fd.stdDir();
-                            var file = this_dir.openDirZ(".bin", .{}) catch break :append_bin_dir;
+                            var file = bun.openDirForIteration(fd, bun.pathLiteral(".bin")).unwrap() catch break :append_bin_dir;
                             defer file.close();
-                            const bin_path = bun.getFdPath(.fromStdDir(file), bufs(.node_bin_path)) catch break :append_bin_dir;
+                            const bin_path = file.getFdPath(bufs(.node_bin_path)) catch break :append_bin_dir;
                             bin_folders_lock.lock();
                             defer bin_folders_lock.unlock();
 

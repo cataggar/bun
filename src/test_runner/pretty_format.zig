@@ -630,7 +630,7 @@ pub const JestPrettyFormat = struct {
             writer: Writer,
         ) !void {
             const indent = @min(this.indent, 32);
-            var buf = [_]u8{' '} ** 64;
+            var buf = @as([64]u8, @splat(' '));
             var total_remain: usize = indent;
             while (total_remain > 0) {
                 const written: usize = @min(32, total_remain);
@@ -755,7 +755,7 @@ pub const JestPrettyFormat = struct {
                 ) callconv(.c) void {
                     if (is_private_symbol) return;
 
-                    const key = key_.?[0];
+                    const key = key_[0];
                     if (key.eqlComptime("constructor")) return;
 
                     var ctx: *@This() = bun.cast(*@This(), ctx_ptr orelse return);

@@ -1323,7 +1323,7 @@ pub fn quote(self: string) bun.fmt.QuotedFormatter {
     };
 }
 
-pub fn EnumTagListFormatter(comptime Enum: type, comptime Separator: @Type(.enum_literal)) type {
+pub fn EnumTagListFormatter(comptime Enum: type, comptime Separator: @TypeOf(.enum_literal)) type {
     return struct {
         pretty: bool = true,
         const output = brk: {
@@ -1354,15 +1354,17 @@ pub fn EnumTagListFormatter(comptime Enum: type, comptime Separator: @Type(.enum
     };
 }
 
-pub fn enumTagList(comptime Enum: type, comptime separator: @Type(.enum_literal)) EnumTagListFormatter(Enum, separator) {
+pub fn enumTagList(comptime Enum: type, comptime separator: @TypeOf(.enum_literal)) EnumTagListFormatter(Enum, separator) {
     return EnumTagListFormatter(Enum, separator){};
 }
 
-pub fn formatIp(address: std.net.Address, into: []u8) ![]u8 {
+pub fn formatIp(address: std.Io.net.IpAddress, into: []u8) ![]u8 {
     // std.net.Address.format includes `:<port>` and square brackets (IPv6)
     //  while Node does neither.  This uses format then strips these to bring
     //  the result into conformance with Node.
-    var result = try std.fmt.bufPrint(into, "{f}", .{address});
+    var writer = std.Io.Writer.fixed(into);
+    try address.format(&writer);
+    var result = writer.buffered();
 
     // Strip `:<port>`
     if (std.mem.lastIndexOfScalar(u8, result, ':')) |colon| {
@@ -1571,7 +1573,7 @@ fn TrimmedPrecisionFormatter(comptime precision: usize) type {
                 var buf: [2 + precision]u8 = undefined;
                 var formatted = std.fmt.bufPrint(&buf, "{d:." ++ std.fmt.comptimePrint("{d}", .{precision}) ++ "}", .{rem}) catch unreachable;
                 formatted = formatted[2..];
-                const trimmed = std.mem.trimRight(u8, formatted, "0");
+                const trimmed = std.mem.trimEnd(u8, formatted, "0");
                 try writer.print(".{s}", .{trimmed});
             }
         }
@@ -1592,8 +1594,7 @@ const FormatDurationData = struct {
 fn formatDurationOneDecimal(data: FormatDurationData, writer: *std.Io.Writer) !void {
     // worst case: "-XXXyXXwXXdXXhXXmXX.XXXs".len = 24
     var buf: [24]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&buf);
-    var buf_writer = fbs.writer();
+    var buf_writer = std.Io.Writer.fixed(&buf);
     if (data.negative) {
         buf_writer.writeByte('-') catch unreachable;
     }
@@ -1612,7 +1613,7 @@ fn formatDurationOneDecimal(data: FormatDurationData, writer: *std.Io.Writer) !v
             buf_writer.writeByte(unit.sep) catch unreachable;
             ns_remaining -= units * unit.ns;
             if (ns_remaining == 0)
-                return writer.writeAll(fbs.getWritten());
+                return writer.writeAll(buf_writer.buffered());
         }
     }
 
@@ -1631,13 +1632,13 @@ fn formatDurationOneDecimal(data: FormatDurationData, writer: *std.Io.Writer) !v
                 buf_writer.writeAll(&decimal_buf) catch unreachable;
             }
             buf_writer.writeAll(unit.sep) catch unreachable;
-            return writer.writeAll(fbs.getWritten());
+            return writer.writeAll(buf_writer.buffered());
         }
     }
 
     buf_writer.print("{d}", .{ns_remaining}) catch unreachable;
     buf_writer.writeAll("ns") catch unreachable;
-    return writer.writeAll(fbs.getWritten());
+    return writer.writeAll(buf_writer.buffered());
 }
 
 /// Return a Formatter for number of nanoseconds according to its magnitude:
@@ -1849,3 +1850,8 @@ const strings = bun.strings;
 
 const std = @import("std");
 const fmt = std.fmt;
+
+/// Drop-in for the removed `bun.fmt.bufPrintZ`; writes a sentinel-0 terminated slice.
+pub fn bufPrintZ(buf: []u8, comptime format: []const u8, args: anytype) std.fmt.BufPrintError![:0]u8 {
+    return std.fmt.bufPrintSentinel(buf, format, args, 0);
+}

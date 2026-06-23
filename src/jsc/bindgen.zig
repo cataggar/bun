@@ -132,8 +132,7 @@ fn ExternUnion(comptime field_types: []const type) type {
     var info = @typeInfo(bun.meta.TaggedUnion(field_types));
     info.@"union".tag_type = null;
     info.@"union".layout = .@"extern";
-    info.@"union".decls = &.{};
-    return @Type(info);
+    return bun.meta.Reify(info);
 }
 
 pub fn BindgenArray(comptime Child: type) type {

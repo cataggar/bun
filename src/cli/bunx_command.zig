@@ -6,7 +6,7 @@ pub const BunxCommand = struct {
     /// bunx-specific options parsed from argv.
     const Options = struct {
         /// CLI arguments to pass to the command being run.
-        passthrough_list: std.ArrayListUnmanaged(string) = .{},
+        passthrough_list: std.ArrayListUnmanaged(string) = .empty,
         /// `bunx <package_name>`
         package_name: string,
         /// The binary name to run (when using --package)
@@ -140,7 +140,7 @@ pub const BunxCommand = struct {
     pub fn addCreatePrefix(allocator: std.mem.Allocator, input: []const u8) ![:0]const u8 {
         const prefixLength = "create-".len;
 
-        if (input.len == 0) return try allocator.dupeZ(u8, input);
+        if (input.len == 0) return try bun.dupeZ(allocator, u8, input);
 
         var new_str = try allocator.allocSentinel(u8, input.len + prefixLength, 0);
         if (input[0] == '@') {
@@ -252,14 +252,14 @@ pub const BunxCommand = struct {
 
     fn getBinNameFromProjectDirectory(transpiler: *bun.Transpiler, dir_fd: bun.FD, package_name: []const u8) ![]const u8 {
         var subpath: bun.PathBuffer = undefined;
-        const subpath_z = std.fmt.bufPrintZ(&subpath, bun.pathLiteral("node_modules/{s}/package.json"), .{package_name}) catch unreachable;
+        const subpath_z = bun.fmt.bufPrintZ(&subpath, bun.pathLiteral("node_modules/{s}/package.json"), .{package_name}) catch unreachable;
         return try getBinNameFromSubpath(transpiler, dir_fd, subpath_z);
     }
 
     fn getBinNameFromTempDirectory(transpiler: *bun.Transpiler, tempdir_name: []const u8, package_name: []const u8, with_stale_check: bool) ![]const u8 {
         var subpath: bun.PathBuffer = undefined;
         if (with_stale_check) {
-            const subpath_z = std.fmt.bufPrintZ(
+            const subpath_z = bun.fmt.bufPrintZ(
                 &subpath,
                 bun.pathLiteral("{s}/package.json"),
                 .{tempdir_name},
@@ -275,7 +275,7 @@ pub const BunxCommand = struct {
                     switch (rc) {
                         .SUCCESS => {
                             const time = std.os.windows.fromSysTime(info.LastWriteTime);
-                            const now = std.time.nanoTimestamp();
+                            const now = bun.SystemTimer.nanoTimestamp();
                             break :is_stale (now - time > nanoseconds_cache_valid);
                         },
                         // treat failures to stat as stale
@@ -283,20 +283,20 @@ pub const BunxCommand = struct {
                     }
                 } else {
                     const stat = target_package_json.stat().unwrap() catch break :is_stale true;
-                    break :is_stale std.time.timestamp() - stat.mtime().sec > seconds_cache_valid;
+                    break :is_stale @divTrunc(bun.SystemTimer.milliTimestamp(), 1000) - stat.mtime().sec > seconds_cache_valid;
                 }
             };
 
             if (is_stale) {
                 _ = target_package_json.close();
                 // If delete fails, oh well. Hope installation takes care of it.
-                std.fs.cwd().deleteTree(tempdir_name) catch {};
+                std.Io.Dir.cwd().deleteTree(bun.blockingIo(), tempdir_name) catch {};
                 return error.NeedToInstall;
             }
             _ = target_package_json.close();
         }
 
-        const subpath_z = std.fmt.bufPrintZ(
+        const subpath_z = bun.fmt.bufPrintZ(
             &subpath,
             bun.pathLiteral("{s}/node_modules/{s}/package.json"),
             .{ tempdir_name, package_name },
@@ -626,19 +626,15 @@ pub const BunxCommand = struct {
                             switch (rc) {
                                 .SUCCESS => {
                                     const time = std.os.windows.fromSysTime(info.LastWriteTime);
-                                    const now = std.time.nanoTimestamp();
+                                    const now = bun.SystemTimer.nanoTimestamp();
                                     break :is_stale (now - time > nanoseconds_cache_valid);
                                 },
                                 // treat failures to stat as stale
                                 else => break :is_stale true,
                             }
                         } else {
-                            var stat: std.posix.Stat = undefined;
-                            const rc = std.c.stat(destination, &stat);
-                            if (rc != 0) {
-                                break :is_stale true;
-                            }
-                            break :is_stale std.time.timestamp() - stat.mtime().sec > seconds_cache_valid;
+                            const stat = bun.sys.stat(destination).unwrap() catch break :is_stale true;
+                            break :is_stale @divTrunc(bun.SystemTimer.milliTimestamp(), 1000) - stat.mtime().sec > seconds_cache_valid;
                         }
                     };
 
@@ -744,13 +740,13 @@ pub const BunxCommand = struct {
             Global.exit(1);
         }
 
-        const bunx_install_dir = try std.fs.cwd().makeOpenPath(bunx_cache_dir, .{});
+        const bunx_install_dir = try std.Io.Dir.cwd().createDirPathOpen(bun.blockingIo(), bunx_cache_dir, .{ .open_options = .{} });
 
         create_package_json: {
             // create package.json, but only if it doesn't exist
-            var package_json = bunx_install_dir.createFileZ("package.json", .{ .truncate = true }) catch break :create_package_json;
-            defer package_json.close();
-            package_json.writeAll("{}\n") catch {};
+            var package_json = bunx_install_dir.createFile(bun.blockingIo(), "package.json", .{ .truncate = true }) catch break :create_package_json;
+            defer package_json.close(bun.blockingIo());
+            package_json.writeStreamingAll(bun.blockingIo(), "{}\n") catch {};
         }
 
         var args = bun.BoundedArray([]const u8, 8).fromSlice(&.{

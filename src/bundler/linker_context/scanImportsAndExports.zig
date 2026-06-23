@@ -1091,7 +1091,7 @@ fn validateComposesFromProperties(
         range: bun.logger.Range,
     };
     const Visitor = struct {
-        visited: std.AutoArrayHashMap(Ref, void),
+        visited: std.AutoArrayHashMapUnmanaged(Ref, void),
         properties: bun.StringArrayHashMap(PropertyInFile),
         all_import_records: []const ImportRecord.List,
         all_css_asts: []const ?*bun.css.BundlerStyleSheet,
@@ -1102,7 +1102,7 @@ fn validateComposesFromProperties(
         log: *Logger.Log,
 
         pub fn deinit(v: *@This()) void {
-            v.visited.deinit();
+            v.visited.deinit(v.temp_allocator);
             v.properties.deinit();
         }
 
@@ -1164,7 +1164,7 @@ fn validateComposesFromProperties(
 
         fn visit(v: *@This(), idx: Index.Int, ast: *bun.css.BundlerStyleSheet, ref: Ref) void {
             if (v.visited.contains(ref)) return;
-            v.visited.put(ref, {}) catch unreachable;
+            v.visited.put(v.temp_allocator, ref, {}) catch unreachable;
 
             // This local name was in a style rule that
             if (ast.composes.getPtr(ref)) |composes| {
@@ -1212,10 +1212,10 @@ fn validateComposesFromProperties(
             }
         }
     };
-    var sfb = std.heap.stackFallback(1024, this.graph.allocator);
+    var sfb = bun.stackFallback(1024, this.graph.allocator);
     const temp_allocator = sfb.get();
     var visitor = Visitor{
-        .visited = std.AutoArrayHashMap(Ref, void).init(temp_allocator),
+        .visited = .empty,
         .properties = bun.StringArrayHashMap(PropertyInFile).init(temp_allocator),
         .all_import_records = import_records_list,
         .all_css_asts = all_css_asts,

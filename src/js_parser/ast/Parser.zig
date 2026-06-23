@@ -352,14 +352,14 @@ pub const Parser = struct {
 
         defer p.lexer.deinit();
 
-        var binary_expression_stack_heap = std.heap.stackFallback(42 * @sizeOf(ParserType.BinaryExpressionVisitor), bun.default_allocator);
+        var binary_expression_stack_heap = bun.stackFallback(42 * @sizeOf(ParserType.BinaryExpressionVisitor), bun.default_allocator);
         p.binary_expression_stack = std.array_list.Managed(ParserType.BinaryExpressionVisitor).initCapacity(
             binary_expression_stack_heap.get(),
             41, // one less in case of unlikely alignment between the stack buffer and reality
         ) catch unreachable; // stack allocation cannot fail
         defer p.binary_expression_stack.clearAndFree();
 
-        var binary_expression_simplify_stack_heap = std.heap.stackFallback(48 * @sizeOf(SideEffects.BinaryExpressionSimplifyVisitor), bun.default_allocator);
+        var binary_expression_simplify_stack_heap = bun.stackFallback(48 * @sizeOf(SideEffects.BinaryExpressionSimplifyVisitor), bun.default_allocator);
         p.binary_expression_simplify_stack = std.array_list.Managed(SideEffects.BinaryExpressionSimplifyVisitor).initCapacity(
             binary_expression_simplify_stack_heap.get(),
             47,
@@ -532,7 +532,7 @@ pub const Parser = struct {
             // The TypeScript compiler itself contains code with this pattern, so
             // it's important to implement this optimization.
 
-            var preprocessed_enums: std.ArrayListUnmanaged([]js_ast.Part) = .{};
+            var preprocessed_enums: std.ArrayListUnmanaged([]js_ast.Part) = .empty;
             var preprocessed_enum_i: usize = 0;
             if (p.scopes_in_order_for_enum.count() > 0) {
                 for (stmts) |*stmt| {
@@ -606,7 +606,7 @@ pub const Parser = struct {
                         try p.appendPart(&parts, sliced.items);
 
                         if (should_move) {
-                            before.append(parts.getLast()) catch unreachable;
+                            before.append(parts.getLast().?) catch unreachable;
                             parts.items.len -= 1;
                         }
                     },
@@ -621,7 +621,7 @@ pub const Parser = struct {
                         try p.appendPart(&parts, sliced.items);
 
                         if (should_move) {
-                            before.append(parts.getLast()) catch unreachable;
+                            before.append(parts.getLast().?) catch unreachable;
                             parts.items.len -= 1;
                         }
                     },

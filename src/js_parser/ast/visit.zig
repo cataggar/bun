@@ -21,7 +21,7 @@ pub fn Visit(
             }
 
             p.temp_refs_to_declare.deinit(p.allocator);
-            p.temp_refs_to_declare = @TypeOf(p.temp_refs_to_declare){};
+            p.temp_refs_to_declare = .empty;
             p.temp_ref_count = 0;
 
             try p.visitStmts(stmts, opts.kind);
@@ -794,7 +794,7 @@ pub fn Visit(
                 //
                 // The TypeScript compiler itself contains code with this pattern, so
                 // it's important to implement this optimization.
-                var preprocessed_enums: std.ArrayListUnmanaged([]Stmt) = .{};
+                var preprocessed_enums: std.ArrayListUnmanaged([]Stmt) = .empty;
                 defer preprocessed_enums.deinit(p.allocator);
                 if (p.scopes_in_order_for_enum.count() > 0) {
                     var found: usize = 0;

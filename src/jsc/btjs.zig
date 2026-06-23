@@ -26,28 +26,21 @@ fn dumpBtjsTraceDebugImpl() [*:0]const u8 {
     // std.log.info("jsc_llint_begin: {x}", .{@intFromPtr(&jsc_llint_begin)});
     // std.log.info("jsc_llint_end: {x}", .{@intFromPtr(&jsc_llint_end)});
 
-    const tty_config = std.io.tty.detectConfig(std.fs.File.stdout());
+    const terminal = std.Io.Terminal{
+        .writer = w,
+        .mode = std.Io.Terminal.Mode.detect(bun.blockingIo(), std.Io.File.stdout(), bun.env_var.NO_COLOR.get(), bun.env_var.FORCE_COLOR.get() != null) catch .no_color,
+    };
 
-    var context: std.debug.ThreadContext = undefined;
-    const has_context = std.debug.getContext(&context);
-
-    var it: std.debug.StackIterator = (if (has_context and !bun.Environment.isWindows) blk: {
-        break :blk std.debug.StackIterator.initWithContext(null, debug_info, &context) catch null;
-    } else null) orelse std.debug.StackIterator.init(null, null);
-    defer it.deinit();
-
-    while (it.next()) |return_address| {
-        printLastUnwindError(&it, debug_info, w, tty_config);
-
+    var addresses: [128]usize = undefined;
+    const stack_trace = std.debug.captureCurrentStackTrace(.{}, &addresses);
+    for (stack_trace.return_addresses) |return_address| {
         // On arm64 macOS, the address of the last frame is 0x0 rather than 0x1 as on x86_64 macOS,
         // therefore, we do a check for `return_address == 0` before subtracting 1 from it to avoid
         // an overflow. We do not need to signal `StackIterator` as it will correctly detect this
         // condition on the subsequent iteration and return `null` thus terminating the loop.
         // same behaviour for x86-windows-msvc
         const address = return_address -| 1;
-        printSourceAtAddress(debug_info, w, address, tty_config, it.fp) catch {};
-    } else {
-        printLastUnwindError(&it, debug_info, w, tty_config);
+        printSourceAtAddress(debug_info, w, address, terminal, 0) catch {};
     }
 
     // remove nulls
@@ -63,67 +56,76 @@ fn dumpBtjsTraceDebugImpl() [*:0]const u8 {
     }).ptr);
 }
 
-fn printSourceAtAddress(debug_info: *std.debug.SelfInfo, out_stream: *std.Io.Writer, address: usize, tty_config: std.io.tty.Config, fp: usize) !void {
+fn printSourceAtAddress(debug_info: *std.debug.SelfInfo, out_stream: *std.Io.Writer, address: usize, terminal: std.Io.Terminal, fp: usize) !void {
     if (!bun.Environment.isDebug) unreachable;
-    const module = debug_info.getModuleForAddress(address) catch |err| switch (err) {
-        error.MissingDebugInfo, error.InvalidDebugInfo => return printUnknownSource(debug_info, out_stream, address, tty_config),
-        else => return err,
-    };
+    var text_arena = std.heap.ArenaAllocator.init(bun.default_allocator);
+    defer text_arena.deinit();
 
-    const symbol_info = module.getSymbolAtAddress(debug_info.allocator, address) catch |err| switch (err) {
-        error.MissingDebugInfo, error.InvalidDebugInfo => return printUnknownSource(debug_info, out_stream, address, tty_config),
+    var symbols = try std.ArrayList(std.debug.Symbol).initCapacity(bun.default_allocator, 1);
+    defer symbols.deinit(bun.default_allocator);
+    debug_info.getSymbols(
+        bun.blockingIo(),
+        bun.default_allocator,
+        text_arena.allocator(),
+        address,
+        false,
+        &symbols,
+    ) catch |err| switch (err) {
+        error.MissingDebugInfo, error.UnsupportedDebugInfo, error.InvalidDebugInfo => return printUnknownSource(debug_info, out_stream, address, terminal),
         else => return err,
     };
-    defer if (symbol_info.source_location) |sl| debug_info.allocator.free(sl.file_name);
+    const symbol_info = if (symbols.items.len > 0) symbols.items[0] else std.debug.Symbol.unknown;
+    const symbol_name = symbol_info.name orelse "???";
 
     const probably_llint = address > @intFromPtr(&jsc_llint_begin) and address < @intFromPtr(&jsc_llint_end);
     var allow_llint = true;
-    if (std.mem.startsWith(u8, symbol_info.name, "__")) {
+    if (std.mem.startsWith(u8, symbol_name, "__")) {
         allow_llint = false; // disallow llint for __ZN3JSC11Interpreter20executeModuleProgramEPNS_14JSModuleRecordEPNS_23ModuleProgramExecutableEPNS_14JSGlobalObjectEPNS_19JSModuleEnvironmentENS_7JSValueES9_
     }
-    if (std.mem.startsWith(u8, symbol_info.name, "_llint_call_javascript")) {
+    if (std.mem.startsWith(u8, symbol_name, "_llint_call_javascript")) {
         allow_llint = false; // disallow llint for _llint_call_javascript
     }
-    const do_llint = probably_llint and allow_llint;
+    const do_llint = probably_llint and allow_llint and fp != 0;
 
     const frame: *const bun.jsc.CallFrame = @ptrFromInt(fp);
     if (do_llint) {
         const srcloc = frame.getCallerSrcLoc(bun.jsc.VirtualMachine.get().global);
-        try tty_config.setColor(out_stream, .bold);
+        try terminal.setColor(.bold);
         try out_stream.print("{f}:{d}:{d}: ", .{ srcloc.str, srcloc.line, srcloc.column });
-        try tty_config.setColor(out_stream, .reset);
+        try terminal.setColor(.reset);
     }
 
+    const compile_unit_name = symbol_info.compile_unit_name orelse debug_info.getModuleName(bun.blockingIo(), address) catch "???";
     try printLineInfo(
         out_stream,
         symbol_info.source_location,
         address,
-        symbol_info.name,
-        symbol_info.compile_unit_name,
-        tty_config,
+        symbol_name,
+        compile_unit_name,
+        terminal,
         printLineFromFileAnyOs,
         do_llint,
     );
     if (do_llint) {
         const desc = frame.describeFrame();
         try out_stream.print("    {s}\n    ", .{desc});
-        try tty_config.setColor(out_stream, .green);
+        try terminal.setColor(.green);
         try out_stream.writeAll("^");
-        try tty_config.setColor(out_stream, .reset);
+        try terminal.setColor(.reset);
         try out_stream.writeAll("\n");
     }
 }
 
-fn printUnknownSource(debug_info: *std.debug.SelfInfo, out_stream: *std.Io.Writer, address: usize, tty_config: std.io.tty.Config) !void {
+fn printUnknownSource(debug_info: *std.debug.SelfInfo, out_stream: *std.Io.Writer, address: usize, terminal: std.Io.Terminal) !void {
     if (!bun.Environment.isDebug) unreachable;
-    const module_name = debug_info.getModuleNameForAddress(address);
+    const module_name = debug_info.getModuleName(bun.blockingIo(), address) catch "???";
     return printLineInfo(
         out_stream,
         null,
         address,
         "???",
-        module_name orelse "???",
-        tty_config,
+        module_name,
+        terminal,
         printLineFromFileAnyOs,
         false,
     );
@@ -134,14 +136,14 @@ fn printLineInfo(
     address: usize,
     symbol_name: []const u8,
     compile_unit_name: []const u8,
-    tty_config: std.io.tty.Config,
+    terminal: std.Io.Terminal,
     comptime printLineFromFile: anytype,
     do_llint: bool,
 ) !void {
     if (!bun.Environment.isDebug) unreachable;
 
     nosuspend {
-        try tty_config.setColor(out_stream, .bold);
+        try terminal.setColor(.bold);
 
         if (source_location) |*sl| {
             try out_stream.print("{s}:{d}:{d}", .{ sl.file_name, sl.line, sl.column });
@@ -149,11 +151,11 @@ fn printLineInfo(
             try out_stream.writeAll("???:?:?");
         }
 
-        try tty_config.setColor(out_stream, .reset);
+        try terminal.setColor(.reset);
         if (!do_llint or source_location != null) try out_stream.writeAll(": ");
-        try tty_config.setColor(out_stream, .dim);
+        try terminal.setColor(.dim);
         try out_stream.print("0x{x} in {s} ({s})", .{ address, symbol_name, compile_unit_name });
-        try tty_config.setColor(out_stream, .reset);
+        try terminal.setColor(.reset);
         try out_stream.writeAll("\n");
 
         // Show the matching source code line if possible
@@ -164,9 +166,9 @@ fn printLineInfo(
                     const space_needed = @as(usize, @intCast(sl.column - 1));
 
                     try out_stream.splatByteAll(' ', space_needed);
-                    try tty_config.setColor(out_stream, .green);
+                    try terminal.setColor(.green);
                     try out_stream.writeAll("^");
-                    try tty_config.setColor(out_stream, .reset);
+                    try terminal.setColor(.reset);
                 }
                 try out_stream.writeAll("\n");
             } else |err| switch (err) {
@@ -184,12 +186,16 @@ fn printLineFromFileAnyOs(out_stream: *std.Io.Writer, source_location: std.debug
 
     // Need this to always block even in async I/O mode, because this could potentially
     // be called from e.g. the event loop code crashing.
-    var f = try std.fs.cwd().openFile(source_location.file_name, .{});
-    defer f.close();
+    var path_buf: bun.PathBuffer = undefined;
+    const file = switch (bun.sys.File.open(bun.path.z(source_location.file_name, &path_buf), bun.O.RDONLY, 0)) {
+        .result => |f| f,
+        .err => |err| return err.toZigErr(),
+    };
+    defer file.close();
     // TODO fstat and make sure that the file has the correct size
 
     var buf: [4096]u8 = undefined;
-    var amt_read = try f.read(buf[0..]);
+    var amt_read = try file.read(buf[0..]).unwrap();
     const line_start = seek: {
         var current_line_start: usize = 0;
         var next_line: usize = 1;
@@ -198,13 +204,13 @@ fn printLineFromFileAnyOs(out_stream: *std.Io.Writer, source_location: std.debug
             if (std.mem.indexOfScalar(u8, slice, '\n')) |pos| {
                 next_line += 1;
                 if (pos == slice.len - 1) {
-                    amt_read = try f.read(buf[0..]);
+                    amt_read = try file.read(buf[0..]).unwrap();
                     current_line_start = 0;
                 } else current_line_start += pos + 1;
             } else if (amt_read < buf.len) {
                 return error.EndOfFile;
             } else {
-                amt_read = try f.read(buf[0..]);
+                amt_read = try file.read(buf[0..]).unwrap();
                 current_line_start = 0;
             }
         }
@@ -219,7 +225,7 @@ fn printLineFromFileAnyOs(out_stream: *std.Io.Writer, source_location: std.debug
         std.mem.replaceScalar(u8, slice, '\t', ' ');
         try out_stream.writeAll(slice);
         while (amt_read == buf.len) {
-            amt_read = try f.read(buf[0..]);
+            amt_read = try file.read(buf[0..]).unwrap();
             if (std.mem.indexOfScalar(u8, buf[0..amt_read], '\n')) |pos| {
                 const line = buf[0 .. pos + 1];
                 std.mem.replaceScalar(u8, line, '\t', ' ');
@@ -233,27 +239,6 @@ fn printLineFromFileAnyOs(out_stream: *std.Io.Writer, source_location: std.debug
         // Make sure printing last line of file inserts extra newline
         try out_stream.writeByte('\n');
     }
-}
-
-fn printLastUnwindError(it: *std.debug.StackIterator, debug_info: *std.debug.SelfInfo, out_stream: *std.Io.Writer, tty_config: std.io.tty.Config) void {
-    if (!bun.Environment.isDebug) unreachable;
-    if (!std.debug.have_ucontext) return;
-    if (it.getLastError()) |unwind_error| {
-        printUnwindError(debug_info, out_stream, unwind_error.address, unwind_error.err, tty_config) catch {};
-    }
-}
-
-fn printUnwindError(debug_info: *std.debug.SelfInfo, out_stream: *std.Io.Writer, address: usize, err: std.debug.UnwindError, tty_config: std.io.tty.Config) !void {
-    if (!bun.Environment.isDebug) unreachable;
-
-    const module_name = debug_info.getModuleNameForAddress(address) orelse "???";
-    try tty_config.setColor(out_stream, .dim);
-    if (err == error.MissingDebugInfo) {
-        try out_stream.print("Unwind information for `{s}:0x{x}` was not available, trace may be incomplete\n\n", .{ module_name, address });
-    } else {
-        try out_stream.print("Unwind error at address `{s}:0x{x}` ({}), trace may be incomplete\n\n", .{ module_name, address, err });
-    }
-    try tty_config.setColor(out_stream, .reset);
 }
 
 const bun = @import("bun");

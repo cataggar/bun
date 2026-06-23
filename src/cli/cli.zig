@@ -10,7 +10,7 @@ pub const Cli = struct {
     pub fn startTransform(_: std.mem.Allocator, _: api.TransformOptions, _: *logger.Log) anyerror!void {}
     pub fn start(allocator: std.mem.Allocator) void {
         is_main_thread = true;
-        start_time = std.time.nanoTimestamp();
+        start_time = bun.SystemTimer.nanoTimestamp();
         log_ = logger.Log.init(allocator);
 
         var log = &log_;
@@ -203,7 +203,7 @@ pub const HelpCommand = struct {
     ;
 
     pub fn printWithReason(comptime reason: Reason, show_all_flags: bool) void {
-        var rand_state = std.Random.DefaultPrng.init(@as(u64, @intCast(@max(std.time.milliTimestamp(), 0))));
+        var rand_state = std.Random.DefaultPrng.init(@as(u64, @intCast(@max(bun.SystemTimer.milliTimestamp(), 0))));
         const rand = rand_state.random();
 
         const package_x_i = rand.uintAtMost(usize, packages_to_x_filler.len - 1);
@@ -1174,7 +1174,10 @@ pub const Command = struct {
     fn @"bun --eval --print"(ctx: Context) !void {
         const trigger = bun.pathLiteral("/[eval]");
         var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-        const cwd = try std.posix.getcwd(&entry_point_buf);
+        var cwd_buf: bun.PathBuffer = undefined;
+        const cwd_slice = try bun.getcwd(&cwd_buf);
+        @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+        const cwd = entry_point_buf[0..cwd_slice.len];
         @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
         ctx.passthrough = try std.mem.concat(ctx.allocator, []const u8, &.{ ctx.positionals, ctx.passthrough });
         try bun_js.Run.boot(ctx, entry_point_buf[0 .. cwd.len + trigger.len], null);
@@ -1301,7 +1304,7 @@ pub const Command = struct {
         // Create command wraps bunx
         const ctx = try Command.init(allocator, log, .CreateCommand);
 
-        var args = try std.process.argsAlloc(allocator);
+        const args = bun.argv;
 
         if (args.len <= 2) {
             Command.Tag.printHelp(.CreateCommand, false);

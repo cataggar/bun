@@ -111,7 +111,7 @@ pub fn onShellTouchTaskDone(this: *Touch, task: *ShellTouchTask) void {
     if (err) |e| {
         const output_task: *ShellTouchOutputTask = bun.new(ShellTouchOutputTask, .{
             .parent = this,
-            .output = .{ .arrlist = .{} },
+            .output = .{ .arrlist = .empty },
             .state = .waiting_write_err,
         });
         const error_string = this.bltn().taskErrorToString(.touch, e);
@@ -231,7 +231,7 @@ pub const ShellTouchTask = struct {
         };
 
         var node_fs = jsc.Node.fs.NodeFS{};
-        const milliseconds: f64 = @floatFromInt(std.time.milliTimestamp());
+        const milliseconds: f64 = @floatFromInt(std.Io.Timestamp.now(bun.blockingIo(), .real).toMilliseconds());
         const atime: jsc.Node.TimeLike = if (bun.Environment.isWindows) milliseconds / 1000.0 else jsc.Node.TimeLike{
             .sec = @intFromFloat(@divFloor(milliseconds, std.time.ms_per_s)),
             .nsec = @intFromFloat(@mod(milliseconds, std.time.ms_per_s) * std.time.ns_per_ms),

@@ -59,10 +59,11 @@ pub const TestingAPIs = struct {
 
         const posix = std.posix;
         const sentry = struct {
-            fn handler(_: c_int) callconv(.c) void {}
+            const HandlerArg = if (Environment.isAndroid) i32 else posix.SIG;
+            fn handler(_: HandlerArg) callconv(.c) void {}
         };
         var mask = bun.sys.sigemptyset();
-        bun.sys.sigaddset(&mask, posix.SIG.USR2);
+        bun.sys.sigaddset(&mask, @intFromEnum(posix.SIG.USR2));
         const act = bun.sys.Sigaction{
             .handler = .{ .handler = &sentry.handler },
             .mask = mask,
@@ -70,9 +71,9 @@ pub const TestingAPIs = struct {
         };
         var prev: bun.sys.Sigaction = undefined;
         var readback: bun.sys.Sigaction = undefined;
-        bun.sys.sigaction(posix.SIG.USR2, &act, &prev);
-        bun.sys.sigaction(posix.SIG.USR2, null, &readback);
-        bun.sys.sigaction(posix.SIG.USR2, &prev, null);
+        bun.sys.sigaction(@intFromEnum(posix.SIG.USR2), &act, &prev);
+        bun.sys.sigaction(@intFromEnum(posix.SIG.USR2), null, &readback);
+        bun.sys.sigaction(@intFromEnum(posix.SIG.USR2), &prev, null);
 
         const installed = (try jsc.JSObject.create(.{
             .handler = @as(f64, @floatFromInt(@intFromPtr(&sentry.handler))),

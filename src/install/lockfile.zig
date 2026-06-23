@@ -7,7 +7,7 @@ text_lockfile_version: TextLockfile.Version = TextLockfile.Version.current,
 
 meta_hash: MetaHash = zero_hash,
 
-packages: Lockfile.Package.List = .{},
+packages: Lockfile.Package.List = .empty,
 buffers: Buffers = .{},
 
 /// name -> PackageID || [*]PackageID
@@ -18,13 +18,13 @@ allocator: Allocator,
 scratch: Scratch = .{},
 
 scripts: Scripts = .{},
-workspace_paths: NameHashMap = .{},
-workspace_versions: VersionHashMap = .{},
+workspace_paths: NameHashMap = .empty,
+workspace_versions: VersionHashMap = .empty,
 
 /// Optional because `trustedDependencies` in package.json might be an
 /// empty list or it might not exist
 trusted_dependencies: ?TrustedDependenciesSet = null,
-patched_dependencies: PatchedDependenciesMap = .{},
+patched_dependencies: PatchedDependenciesMap = .empty,
 overrides: OverrideMap = .{},
 catalogs: CatalogMap = .{},
 
@@ -48,7 +48,32 @@ pub const DepSorter = struct {
     }
 };
 
-pub const Stream = std.io.FixedBufferStream([]u8);
+pub const Stream = struct {
+    buffer: []u8,
+    pos: usize = 0,
+
+    pub fn reader(this: *Stream) Reader {
+        return .{ .stream = this };
+    }
+
+    pub const Reader = struct {
+        stream: *Stream,
+
+        pub fn readAll(this: *Reader, dest: []u8) !usize {
+            const remaining = this.stream.buffer[this.stream.pos..];
+            const amount = @min(dest.len, remaining.len);
+            @memcpy(dest[0..amount], remaining[0..amount]);
+            this.stream.pos += amount;
+            return amount;
+        }
+
+        pub fn readInt(this: *Reader, comptime T: type, endian: std.builtin.Endian) !T {
+            var bytes: [@sizeOf(T)]u8 = undefined;
+            if (try this.readAll(&bytes) != bytes.len) return error.EndOfStream;
+            return std.mem.readInt(T, &bytes, endian);
+        }
+    };
+};
 pub const default_filename = "bun.lockb";
 
 pub const Scripts = struct {
@@ -66,12 +91,12 @@ pub const Scripts = struct {
 
     const RunCommand = @import("../cli/run_command.zig").RunCommand;
 
-    preinstall: Entries = .{},
-    install: Entries = .{},
-    postinstall: Entries = .{},
-    preprepare: Entries = .{},
-    prepare: Entries = .{},
-    postprepare: Entries = .{},
+    preinstall: Entries = .empty,
+    install: Entries = .empty,
+    postinstall: Entries = .empty,
+    preprepare: Entries = .empty,
+    prepare: Entries = .empty,
+    postprepare: Entries = .empty,
 
     pub fn hasAny(this: *Scripts) bool {
         inline for (Scripts.names) |hook| {
@@ -375,11 +400,11 @@ pub fn loadFromBytes(this: *Lockfile, pm: ?*PackageManager, buf: []u8, allocator
     this.format = FormatVersion.current;
     this.scripts = .{};
     this.trusted_dependencies = null;
-    this.workspace_paths = .{};
-    this.workspace_versions = .{};
+    this.workspace_paths = .empty;
+    this.workspace_versions = .empty;
     this.overrides = .{};
     this.catalogs = .{};
-    this.patched_dependencies = .{};
+    this.patched_dependencies = .empty;
 
     const load_result = Lockfile.Serializer.load(this, &stream, allocator, log, pm) catch |err| {
         return LoadResult{ .err = .{ .step = .parse_file, .value = err, .lockfile_path = "bun.lockb", .format = .binary } };
@@ -642,9 +667,9 @@ pub fn cleanWithLogger(
     exact_versions: bool,
     log_level: PackageManager.Options.LogLevel,
 ) !*Lockfile {
-    var timer: std.time.Timer = undefined;
+    var timer: Timer = undefined;
     if (log_level.isVerbose()) {
-        timer = try std.time.Timer.start();
+        timer = try Timer.start();
     }
 
     const old_trusted_dependencies = old.trusted_dependencies;
@@ -860,7 +885,7 @@ pub const Cloner = struct {
     lockfile: *Lockfile,
     old: *Lockfile,
     mapping: []PackageID,
-    trees: Tree.List = Tree.List{},
+    trees: Tree.List = .empty,
     trees_count: u32 = 1,
     log: *logger.Log,
     old_preinstall_state: std.ArrayListUnmanaged(Install.PreinstallState),
@@ -1276,9 +1301,9 @@ pub fn saveToDisk(this: *Lockfile, load_result: *const LoadResult, options: *con
     var base64_bytes: [8]u8 = undefined;
     bun.csprng(&base64_bytes);
     const tmpname = if (save_format == .text)
-        std.fmt.bufPrintZ(&tmpname_buf, ".lock-{x}.tmp", .{&base64_bytes}) catch unreachable
+        bun.fmt.bufPrintZ(&tmpname_buf, ".lock-{x}.tmp", .{&base64_bytes}) catch unreachable
     else
-        std.fmt.bufPrintZ(&tmpname_buf, ".lockb-{x}.tmp", .{&base64_bytes}) catch unreachable;
+        bun.fmt.bufPrintZ(&tmpname_buf, ".lockb-{x}.tmp", .{&base64_bytes}) catch unreachable;
 
     const file = switch (File.openat(.cwd(), tmpname, bun.O.CREAT | bun.O.WRONLY, 0o777)) {
         .err => |err| {
@@ -1353,7 +1378,7 @@ inline fn strWithType(this: *const Lockfile, comptime Type: type, slicable: Type
 pub fn initEmpty(this: *Lockfile, allocator: Allocator) void {
     this.* = .{
         .format = Lockfile.FormatVersion.current,
-        .packages = .{},
+        .packages = .empty,
         .buffers = .{},
         .package_index = PackageIndex.Map.initContext(allocator, .{}),
         .string_pool = StringPool.init(allocator),
@@ -1361,8 +1386,8 @@ pub fn initEmpty(this: *Lockfile, allocator: Allocator) void {
         .scratch = Scratch.init(allocator),
         .scripts = .{},
         .trusted_dependencies = null,
-        .workspace_paths = .{},
-        .workspace_versions = .{},
+        .workspace_paths = .empty,
+        .workspace_versions = .empty,
         .overrides = .{},
         .catalogs = .{},
         .meta_hash = zero_hash,
@@ -2140,7 +2165,7 @@ pub const PatchedDependenciesMap = std.ArrayHashMapUnmanaged(PackageNameAndVersi
 pub const PatchedDep = extern struct {
     /// e.g. "patches/is-even@1.0.0.patch"
     path: String,
-    _padding: [7]u8 = [_]u8{0} ** 7,
+    _padding: [7]u8 = @splat(0),
     patchfile_hash_is_null: bool = true,
     /// the hash of the patch file contents
     __patchfile_hash: u64 = 0,
@@ -2173,6 +2198,17 @@ const Resolution = @import("./resolution.zig").Resolution;
 const StaticHashMap = @import("../collections/StaticHashMap.zig").StaticHashMap;
 const which = @import("../which/which.zig").which;
 const Allocator = std.mem.Allocator;
+const Timer = struct {
+    started_at: std.Io.Clock.Timestamp,
+
+    pub fn start() !Timer {
+        return .{ .started_at = std.Io.Clock.Timestamp.now(bun.blockingIo(), .awake) };
+    }
+
+    pub fn read(this: *Timer) u64 {
+        return @intCast(@max(@as(i96, 0), this.started_at.untilNow(bun.blockingIo()).raw.nanoseconds));
+    }
+};
 
 const ArrayIdentityContext = @import("../collections/identity_context.zig").ArrayIdentityContext;
 const IdentityContext = @import("../collections/identity_context.zig").IdentityContext;

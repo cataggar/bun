@@ -428,7 +428,7 @@ pub fn generateCodeForFileInChunkJS(
                 };
 
                 var hoist = ExportHoist{
-                    .decls = .{},
+                    .decls = .empty,
                     .allocator = temp_allocator,
                 };
 
@@ -647,7 +647,7 @@ pub fn generateCodeForFileInChunkJS(
 }
 
 pub const DeclCollector = struct {
-    decls: std.ArrayListUnmanaged(CompileResult.DeclInfo) = .{},
+    decls: std.ArrayListUnmanaged(CompileResult.DeclInfo) = .empty,
     allocator: std.mem.Allocator,
 
     const CompileResult = bun.bundle_v2.CompileResult;

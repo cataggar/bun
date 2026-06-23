@@ -11,8 +11,8 @@ tasks: Queue = undefined,
 ///   - immediate_tasks: tasks that will run on the current tick
 ///
 /// Having two queues avoids infinite loops creating by calling `setImmediate` in a `setImmediate` callback.
-immediate_tasks: std.ArrayListUnmanaged(*Timer.ImmediateObject) = .{},
-next_immediate_tasks: std.ArrayListUnmanaged(*Timer.ImmediateObject) = .{},
+immediate_tasks: std.ArrayListUnmanaged(*Timer.ImmediateObject) = .empty,
+next_immediate_tasks: std.ArrayListUnmanaged(*Timer.ImmediateObject) = .empty,
 
 concurrent_tasks: ConcurrentTask.Queue = ConcurrentTask.Queue{},
 global: *jsc.JSGlobalObject = undefined,
@@ -240,7 +240,7 @@ pub fn tickImmediateTasks(this: *EventLoop, virtual_machine: *VirtualMachine) vo
     var to_run_now = this.immediate_tasks;
 
     this.immediate_tasks = this.next_immediate_tasks;
-    this.next_immediate_tasks = .{};
+    this.next_immediate_tasks = .empty;
 
     var exception_thrown = false;
     for (to_run_now.items) |task| {
@@ -397,13 +397,13 @@ pub fn autoTick(this: *EventLoop) void {
 
     if (loop.isActive()) {
         this.processGCTimer();
-        var event_loop_sleep_timer = if (comptime Environment.isDebug) std.time.Timer.start() catch unreachable;
+        var event_loop_sleep_timer = if (comptime Environment.isDebug) bun.SystemTimer.Timer.start() catch unreachable;
         // for the printer, this is defined:
         var timespec: bun.timespec = if (Environment.isDebug) .{ .sec = 0, .nsec = 0 } else undefined;
         loop.tickWithTimeout(if (ctx.timer.getTimeout(&timespec, ctx)) &timespec else null);
 
         if (comptime Environment.isDebug) {
-            log("tick {D}, timeout: {D}", .{ event_loop_sleep_timer.read(), timespec.ns() });
+            log("tick {f}, timeout: {f}", .{ bun.fmt.fmtDurationOneDecimal(event_loop_sleep_timer.read()), bun.fmt.fmtDurationOneDecimal(timespec.ns()) });
         }
     } else {
         loop.tickWithoutIdle();

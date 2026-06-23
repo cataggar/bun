@@ -28,7 +28,7 @@ pub const BunSpawn = struct {
 
     pub const Actions = struct {
         chdir_buf: ?[*:0]u8 = null,
-        actions: std.ArrayListUnmanaged(Action) = .{},
+        actions: std.ArrayListUnmanaged(Action) = .empty,
         detached: bool = false,
 
         pub fn init() !Actions {
@@ -56,7 +56,7 @@ pub const BunSpawn = struct {
         pub fn openZ(self: *Actions, fd: bun.FD, path: [*:0]const u8, flags: u32, mode: i32) !void {
             try self.actions.append(bun.default_allocator, .{
                 .kind = .open,
-                .path = (try bun.default_allocator.dupeZ(u8, bun.span(path))).ptr,
+                .path = (try bun.dupeZ(bun.default_allocator, u8, bun.span(path))).ptr,
                 .flags = @intCast(flags),
                 .mode = @intCast(mode),
                 .fds = .{ fd.native(), 0 },
@@ -86,7 +86,7 @@ pub const BunSpawn = struct {
                 bun.default_allocator.free(bun.span(buf));
             }
 
-            self.chdir_buf = (try bun.default_allocator.dupeZ(u8, path)).ptr;
+            self.chdir_buf = (try bun.dupeZ(bun.default_allocator, u8, path)).ptr;
         }
     };
 

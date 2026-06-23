@@ -73,7 +73,7 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
 
         request_body_readable_stream_ref: jsc.WebCore.ReadableStream.Strong = .{},
         request_body: ?*WebCore.Body.Value.HiveRef = null,
-        request_body_buf: std.ArrayListUnmanaged(u8) = .{},
+        request_body_buf: std.ArrayListUnmanaged(u8) = .empty,
         request_body_content_len: usize = 0,
 
         sink: ?*ResponseStream.JSSink = null,
@@ -86,7 +86,7 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
 
         /// Used either for temporary blob data or fallback
         /// When the response body is a temporary value
-        response_buf_owned: std.ArrayListUnmanaged(u8) = .{},
+        response_buf_owned: std.ArrayListUnmanaged(u8) = .empty,
 
         /// Defer finalization until after the request handler task is completed?
         defer_deinit_until_callback_completes: ?*bool = null,
@@ -454,14 +454,17 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
 
             // Explicitly use `this.allocator` and *not* the arena
             var bb = std.array_list.Managed(u8).init(this.allocator);
-            const bb_writer = bb.writer();
+            var bb_unmanaged = bb.moveToUnmanaged();
+            var bb_writer = std.Io.Writer.Allocating.fromArrayList(this.allocator, &bb_unmanaged);
 
             Fallback.renderBackend(
                 arena_allocator,
                 fallback_container,
-                @TypeOf(bb_writer),
-                bb_writer,
+                @TypeOf(&bb_writer.writer),
+                &bb_writer.writer,
             ) catch unreachable;
+            bb_unmanaged = bb_writer.toArrayList();
+            bb = bb_unmanaged.toManaged(this.allocator);
             if (this.resp == null or this.resp.?.tryEnd(bb.items, bb.items.len, this.shouldCloseConnection())) {
                 bb.clearAndFree();
                 this.detachResponse();
@@ -875,7 +878,7 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
                 },
             };
 
-            const stat: bun.Stat = switch (bun.sys.fstat(fd)) {
+            const stat: bun.sys.Stat = switch (bun.sys.fstat(fd)) {
                 .result => |s| s,
                 .err => |err| {
                     if (auto_close) fd.close();
@@ -1740,14 +1743,17 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
 
                             var bb = std.array_list.Managed(u8).init(allocator);
                             defer bb.clearAndFree();
-                            const bb_writer = bb.writer();
+                            var bb_unmanaged = bb.moveToUnmanaged();
+                            var bb_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &bb_unmanaged);
 
                             Fallback.renderBackend(
                                 allocator,
                                 fallback_container,
-                                @TypeOf(bb_writer),
-                                bb_writer,
+                                @TypeOf(&bb_writer.writer),
+                                &bb_writer.writer,
                             ) catch unreachable;
+                            bb_unmanaged = bb_writer.toArrayList();
+                            bb = bb_unmanaged.toManaged(allocator);
 
                             if (req.resp) |resp| {
                                 _ = resp.write(bb.items);
@@ -2489,7 +2495,7 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
                         };
                         // }
                     }
-                    this.request_body_buf = .{};
+                    this.request_body_buf = .empty;
 
                     if (old == .Locked) {
                         var loop = vm.eventLoop();
@@ -2519,7 +2525,7 @@ pub fn NewRequestContext(comptime ssl_enabled: bool, comptime debug_mode: bool, 
             // This means we have received part of the body but not the whole thing
             if (this.request_body_buf.items.len > 0) {
                 var emptied = this.request_body_buf;
-                this.request_body_buf = .{};
+                this.request_body_buf = .empty;
                 return .{
                     .owned = .{
                         .list = emptied.toManaged(this.allocator),
@@ -2657,7 +2663,7 @@ fn NewFlags(comptime debug_mode: bool) type {
                 size -= 1;
             }
 
-            break :brk std.meta.Int(.unsigned, size);
+            break :brk @Int(.unsigned, size);
         };
     };
 }

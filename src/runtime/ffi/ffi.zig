@@ -48,9 +48,9 @@ const Offsets = extern struct {
     fn loadOnce() void {
         Bun__FFI__ensureOffsetsAreLoaded();
     }
-    var once = std.once(loadOnce);
+    var once = bun.once(loadOnce);
     pub fn get() *const Offsets {
-        once.call();
+        once.call(.{});
         return &Bun__FFI__offsets;
     }
 };
@@ -76,10 +76,10 @@ pub const FFI = struct {
         library_dirs: StringArray = .{},
         include_dirs: StringArray = .{},
         symbols: SymbolsMap = .{},
-        define: std.ArrayListUnmanaged([2][:0]const u8) = .{},
+        define: std.ArrayListUnmanaged([2][:0]const u8) = .empty,
         // Flags to replace the default flags
         flags: [:0]const u8 = "",
-        deferred_errors: std.ArrayListUnmanaged([]const u8) = .{},
+        deferred_errors: std.ArrayListUnmanaged([]const u8) = .empty,
 
         const Source = union(enum) {
             file: [:0]const u8,
@@ -244,7 +244,7 @@ pub const FFI = struct {
 
         var cached_default_system_include_dir: [:0]const u8 = "";
         var cached_default_system_library_dir: [:0]const u8 = "";
-        var cached_default_system_include_dir_once = std.once(getSystemRootDirOnce);
+        var cached_default_system_include_dir_once = bun.once(getSystemRootDirOnce);
         fn getSystemRootDirOnce() void {
             if (Environment.isMac) {
                 var which_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
@@ -268,7 +268,7 @@ pub const FFI = struct {
                     if (process.result.isOK()) {
                         const stdout = process.result.stdout.items;
                         if (stdout.len > 0) {
-                            cached_default_system_include_dir = bun.default_allocator.dupeZ(u8, strings.trim(stdout, "\n\r")) catch return;
+                            cached_default_system_include_dir = bun.dupeZ(bun.default_allocator, u8, strings.trim(stdout, "\n\r")) catch return;
                         }
                     }
                 }
@@ -306,13 +306,13 @@ pub const FFI = struct {
         }
 
         fn getSystemIncludeDir() ?[:0]const u8 {
-            cached_default_system_include_dir_once.call();
+            cached_default_system_include_dir_once.call(.{});
             if (cached_default_system_include_dir.len == 0) return null;
             return cached_default_system_include_dir;
         }
 
         fn getSystemLibraryDir() ?[:0]const u8 {
-            cached_default_system_include_dir_once.call();
+            cached_default_system_include_dir_once.call(.{});
             if (cached_default_system_library_dir.len == 0) return null;
             return cached_default_system_library_dir;
         }
@@ -411,7 +411,7 @@ pub const FFI = struct {
                     var include_iter = std.mem.splitScalar(u8, c_include_path, ':');
                     while (include_iter.next()) |path| {
                         if (path.len > 0) {
-                            const path_z = bun.default_allocator.dupeZ(u8, path) catch continue;
+                            const path_z = bun.dupeZ(bun.default_allocator, u8, path) catch continue;
                             defer bun.default_allocator.free(path_z);
                             state.addSysIncludePath(path_z) catch {
                                 debug("TinyCC failed to add C_INCLUDE_PATH: {s}", .{path});
@@ -425,7 +425,7 @@ pub const FFI = struct {
                     var library_iter = std.mem.splitScalar(u8, library_path, ':');
                     while (library_iter.next()) |path| {
                         if (path.len > 0) {
-                            const path_z = bun.default_allocator.dupeZ(u8, path) catch continue;
+                            const path_z = bun.dupeZ(bun.default_allocator, u8, path) catch continue;
                             defer bun.default_allocator.free(path_z);
                             state.addLibraryPath(path_z) catch {
                                 debug("TinyCC failed to add LIBRARY_PATH: {s}", .{path});
@@ -506,7 +506,7 @@ pub const FFI = struct {
             for (this.symbols.map.keys(), this.symbols.map.values()) |symbol, *function| {
                 // FIXME: why are we duping here? can we at least use a stack
                 // fallback allocator?
-                const duped = bun.handleOom(bun.default_allocator.dupeZ(u8, symbol));
+                const duped = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, symbol));
                 defer bun.default_allocator.free(duped);
                 function.symbol_from_dynamic_library = state.getSymbol(duped) orelse {
                     return globalThis.throw("{f} is missing from {s}. Was it included in the source code?", .{ bun.fmt.quote(symbol), this.source.first() });
@@ -731,7 +731,7 @@ pub const FFI = struct {
 
         if (try object.getOwn(globalThis, "source")) |source_value| {
             if (source_value.isArray()) {
-                compile_c.source = .{ .files = .{} };
+                compile_c.source = .{ .files = .empty };
                 var iter = try source_value.arrayIterator(globalThis);
                 while (try iter.next()) |value| {
                     if (!value.isString()) {
@@ -757,11 +757,10 @@ pub const FFI = struct {
                 error.DeferredErrors => {
                     var combined = std.array_list.Managed(u8).init(bun.default_allocator);
                     defer combined.deinit();
-                    var writer = combined.writer();
-                    bun.handleOom(writer.print("{d} errors while compiling {s}\n", .{ compile_c.deferred_errors.items.len, if (compile_c.current_file_for_errors.len > 0) compile_c.current_file_for_errors else compile_c.source.first() }));
+                    bun.handleOom(combined.print("{d} errors while compiling {s}\n", .{ compile_c.deferred_errors.items.len, if (compile_c.current_file_for_errors.len > 0) compile_c.current_file_for_errors else compile_c.source.first() }));
 
                     for (compile_c.deferred_errors.items) |deferred_error| {
-                        bun.handleOom(writer.print("{s}\n", .{deferred_error}));
+                        bun.handleOom(combined.print("{s}\n", .{deferred_error}));
                     }
 
                     return globalThis.throw("{s}", .{combined.items});
@@ -931,16 +930,15 @@ pub const FFI = struct {
             return val;
         }
 
-        var arraylist = std.array_list.Managed(u8).init(allocator);
+        var arraylist = std.Io.Writer.Allocating.init(allocator);
         defer arraylist.deinit();
-        var writer = arraylist.writer();
 
         function.base_name = "my_callback_function";
 
-        function.printCallbackSourceCode(null, null, &writer) catch {
+        function.printCallbackSourceCode(null, null, &arraylist.writer) catch {
             return ZigString.init("Error while printing code").toErrorInstance(global);
         };
-        return ZigString.init(arraylist.items).toJS(global);
+        return ZigString.init(arraylist.written()).toJS(global);
     }
 
     pub fn print(global: *JSGlobalObject, object: jsc.JSValue, is_callback_val: ?jsc.JSValue) bun.JSError!JSValue {
@@ -975,9 +973,9 @@ pub const FFI = struct {
             strs.deinit();
         }
         for (symbols.values()) |*function| {
-            var arraylist = std.array_list.Managed(u8).init(allocator);
-            var writer = arraylist.writer();
-            function.printSourceCode(&writer) catch {
+            var arraylist = std.Io.Writer.Allocating.init(allocator);
+            defer arraylist.deinit();
+            function.printSourceCode(&arraylist.writer) catch {
                 // an error while generating source code
                 for (symbols.keys()) |key| {
                     allocator.free(@constCast(key));
@@ -989,7 +987,7 @@ pub const FFI = struct {
                 symbols.clearAndFree(allocator);
                 return ZigString.init("Error while printing code").toErrorInstance(global);
             };
-            strs.appendAssumeCapacity(bun.String.cloneUTF8(arraylist.items));
+            strs.appendAssumeCapacity(bun.String.cloneUTF8(arraylist.written()));
         }
 
         const ret = try bun.String.toJSArray(global, strs.items);
@@ -1291,7 +1289,7 @@ pub const FFI = struct {
     pub fn generateSymbolForFunction(global: *JSGlobalObject, allocator: std.mem.Allocator, value: jsc.JSValue, function: *Function) bun.JSError!?JSValue {
         jsc.markBinding(@src());
 
-        var abi_types = std.ArrayListUnmanaged(ABIType){};
+        var abi_types = std.ArrayListUnmanaged(ABIType).empty;
 
         if (try value.getOwn(global, "args")) |args| {
             if (args.isEmptyOrUndefinedOrNull() or !args.jsType().isArray()) {
@@ -1442,7 +1440,7 @@ pub const FFI = struct {
         state: ?*TCC.State = null,
 
         return_type: ABIType = ABIType.void,
-        arg_types: std.ArrayListUnmanaged(ABIType) = .{},
+        arg_types: std.ArrayListUnmanaged(ABIType) = .empty,
         step: Step = Step{ .pending = {} },
         threadsafe: bool = false,
         allocator: Allocator,
@@ -1540,12 +1538,11 @@ pub const FFI = struct {
         const tcc_options = "-std=c11 -nostdlib -Wl,--export-all-symbols" ++ if (Environment.isDebug) " -g" else "";
 
         pub fn compile(this: *Function, napiEnv: ?*napi.NapiEnv) !void {
-            var source_code = std.array_list.Managed(u8).init(this.allocator);
-            var source_code_writer = source_code.writer();
-            try this.printSourceCode(&source_code_writer);
-
-            try source_code.append(0);
+            var source_code = std.Io.Writer.Allocating.init(this.allocator);
             defer source_code.deinit();
+            try this.printSourceCode(&source_code.writer);
+
+            try source_code.writer.writeByte(0);
             const state = TCC.State.init(Function, .{
                 .options = tcc_options,
                 .err = .{ .ctx = this, .handler = handleTCCError },
@@ -1568,7 +1565,8 @@ pub const FFI = struct {
 
             CompilerRT.define(state);
 
-            state.compileString(@ptrCast(source_code.items)) catch {
+            const source_code_z: [:0]const u8 = source_code.written()[0 .. source_code.written().len - 1 :0];
+            state.compileString(source_code_z) catch {
                 this.fail("Failed to compile source code");
                 return;
             };
@@ -1606,16 +1604,31 @@ pub const FFI = struct {
         ) !void {
             jsc.markBinding(@src());
             var source_code = std.array_list.Managed(u8).init(this.allocator);
-            var source_code_writer = source_code.writer();
             const ffi_wrapper = Bun__createFFICallbackFunction(js_context, js_function);
-            try this.printCallbackSourceCode(js_context, ffi_wrapper, &source_code_writer);
+            {
+                var unmanaged = source_code.moveToUnmanaged();
+                var source_code_writer = std.Io.Writer.Allocating.fromArrayList(this.allocator, &unmanaged);
+                errdefer source_code_writer.deinit();
+                try this.printCallbackSourceCode(js_context, ffi_wrapper, &source_code_writer.writer);
+                var owned = source_code_writer.toArrayList();
+                source_code = owned.toManaged(this.allocator);
+            }
 
             if (comptime Environment.isDebug and Environment.isPosix) {
                 debug_write: {
-                    const fd = std.posix.open("/tmp/bun-ffi-callback-source.c", .{ .CREAT = true, .ACCMODE = .WRONLY }, 0o644) catch break :debug_write;
-                    _ = std.posix.write(fd, source_code.items) catch break :debug_write;
-                    std.posix.ftruncate(fd, source_code.items.len) catch break :debug_write;
-                    std.posix.close(fd);
+                    const fd = switch (bun.sys.openA("/tmp/bun-ffi-callback-source.c", bun.O.CREAT | bun.O.WRONLY, 0o644)) {
+                        .result => |fd| fd,
+                        .err => break :debug_write,
+                    };
+                    defer fd.close();
+                    _ = switch (bun.sys.write(fd, source_code.items)) {
+                        .result => |written| written,
+                        .err => break :debug_write,
+                    };
+                    switch (bun.sys.ftruncate(fd, @intCast(source_code.items.len))) {
+                        .result => {},
+                        .err => break :debug_write,
+                    }
                 }
             }
 
@@ -1650,7 +1663,8 @@ pub const FFI = struct {
 
             CompilerRT.define(state);
 
-            state.compileString(@ptrCast(source_code.items)) catch {
+            const source_code_z: [:0]const u8 = source_code.items[0 .. source_code.items.len - 1 :0];
+            state.compileString(source_code_z) catch {
                 this.fail("Failed to compile source code");
                 return;
             };
@@ -2338,23 +2352,24 @@ const CompilerRT = struct {
 
     fn createCompilerRTDir() void {
         const tmpdir = Fs.FileSystem.instance.tmpdir() catch return;
-        var bunCC = tmpdir.makeOpenPath("bun-cc", .{}) catch return;
-        defer bunCC.close();
+        const io = bun.blockingIo();
+        var bunCC = tmpdir.createDirPathOpen(io, "bun-cc", .{}) catch return;
+        defer bunCC.close(io);
 
         inline for (comptime std.meta.declarations(compiler_rt_sources)) |decl| {
-            const source = @field(compiler_rt_sources, decl.name);
-            bunCC.writeFile(.{
-                .sub_path = decl.name,
+            const source = @field(compiler_rt_sources, decl);
+            bunCC.writeFile(io, .{
+                .sub_path = decl,
                 .data = source,
             }) catch {};
         }
         var path_buf: [bun.MAX_PATH_BYTES]u8 = undefined;
-        compiler_rt_dir = bun.handleOom(bun.default_allocator.dupeZ(u8, bun.getFdPath(.fromStdDir(bunCC), &path_buf) catch return));
+        compiler_rt_dir = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, bun.getFdPath(.fromStdDir(bunCC), &path_buf) catch return));
     }
-    var create_compiler_rt_dir_once = std.once(createCompilerRTDir);
+    var create_compiler_rt_dir_once = bun.once(createCompilerRTDir);
 
     pub fn dir() ?[:0]const u8 {
-        create_compiler_rt_dir_once.call();
+        create_compiler_rt_dir_once.call(.{});
         if (compiler_rt_dir.len == 0) return null;
         return compiler_rt_dir;
     }

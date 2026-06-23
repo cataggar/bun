@@ -27,7 +27,7 @@ writer: WriterImpl = if (bun.Environment.isWindows) .{
 } else .{ .close_fd = false },
 fd: MovableIfWindowsFd,
 writers: Writers = .{ .inlined = .{} },
-buf: std.ArrayListUnmanaged(u8) = .{},
+buf: std.ArrayListUnmanaged(u8) = .empty,
 /// quick hack to get windows working
 /// ideally this should be removed
 winbuf: if (bun.Environment.isWindows) std.ArrayListUnmanaged(u8) else u0 = if (bun.Environment.isWindows) .empty else 0,
@@ -238,7 +238,7 @@ fn write(this: *IOWriter) enum {
     bun.assert(this.writer.handle == .poll);
     if (this.writer.handle.poll.isWatching()) return .suspended;
     switch (this.writer.start(this.fd, this.flags.pollable)) {
-        .result => |_| {},
+        .result => {},
         .err => |err| {
             this.onError(err);
             return .failed;
@@ -467,7 +467,7 @@ pub fn onError(this: *IOWriter, err__: bun.sys.Error) void {
         this.flags.broken_pipe = true;
     }
     log("IOWriter(0x{x}, fd={f}) onError errno={s} errmsg={f} errsyscall={f}", .{ @intFromPtr(this), this.fd, @tagName(ee.getErrno()), ee.message, ee.syscall });
-    var seen_alloc = std.heap.stackFallback(@sizeOf(usize) * 64, bun.default_allocator);
+    var seen_alloc = bun.stackFallback(@sizeOf(usize) * 64, bun.default_allocator);
     var seen = bun.handleOom(std.array_list.Managed(usize).initCapacity(seen_alloc.get(), 64));
     defer seen.deinit();
     // Writers before writer_idx have already had their onIOWriterChunk callback fired and may
@@ -669,9 +669,10 @@ pub fn enqueueFmt(
     comptime fmt: []const u8,
     args: anytype,
 ) Yield {
-    var buf_writer = this.buf.writer(bun.default_allocator);
-    const start = this.buf.items.len;
-    bun.handleOom(buf_writer.print(fmt, args));
+    var buf_writer = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &this.buf);
+    const start = buf_writer.writer.end;
+    buf_writer.writer.print(fmt, args) catch bun.outOfMemory();
+    this.buf = buf_writer.toArrayList();
 
     const childptr = if (@TypeOf(ptr) == ChildPtr) ptr else ChildPtr.init(ptr);
     if (this.handleBrokenPipe(childptr)) |yield| return yield;

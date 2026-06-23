@@ -15,7 +15,7 @@ started: bool = false,
 waiting_for_onReaderDone: bool = false,
 event_loop: jsc.EventLoopHandle,
 lazy: Lazy = .{ .none = {} },
-buffered: std.ArrayListUnmanaged(u8) = .{},
+buffered: std.ArrayListUnmanaged(u8) = .empty,
 read_inside_on_pull: ReadDuringJSOnPullResult = .{ .none = {} },
 highwater_mark: usize = 16384,
 flowing: bool = true,
@@ -97,10 +97,10 @@ pub const Lazy = union(enum) {
 
         if (comptime Environment.isPosix) {
             if ((file.is_atty orelse false) or
-                (fd.stdioTag() != null and std.posix.isatty(fd.cast())) or
+                (fd.stdioTag() != null and isTty(fd, is_nonblocking)) or
                 (file.pathlike == .fd and
                     file.pathlike.fd.stdioTag() != null and
-                    std.posix.isatty(file.pathlike.fd.cast())))
+                    isTty(file.pathlike.fd, false)))
             {
                 // var termios = std.mem.zeroes(std.posix.termios);
                 // _ = std.c.tcgetattr(fd.cast(), &termios);
@@ -109,7 +109,7 @@ pub const Lazy = union(enum) {
                 file.is_atty = true;
             }
 
-            const stat: bun.Stat = switch (bun.sys.fstat(fd)) {
+            const stat: bun.sys.Stat = switch (bun.sys.fstat(fd)) {
                 .result => |result| result,
                 .err => |err| {
                     fd.close();
@@ -117,19 +117,19 @@ pub const Lazy = union(enum) {
                 },
             };
 
-            if (bun.S.ISDIR(stat.mode)) {
+            if (bun.S.ISDIR(@intCast(stat.mode))) {
                 bun.Async.Closer.close(fd, {});
                 return .{ .err = .fromCode(.ISDIR, .fstat) };
             }
 
-            if (bun.S.ISREG(stat.mode)) {
+            if (bun.S.ISREG(@intCast(stat.mode))) {
                 is_nonblocking = false;
             }
 
-            this.pollable = bun.sys.isPollable(stat.mode) or is_nonblocking or (file.is_atty orelse false);
-            this.file_type = if (bun.S.ISFIFO(stat.mode))
+            this.pollable = bun.sys.isPollable(@intCast(stat.mode)) or is_nonblocking or (file.is_atty orelse false);
+            this.file_type = if (bun.S.ISFIFO(@intCast(stat.mode)))
                 .pipe
-            else if (bun.S.ISSOCK(stat.mode))
+            else if (bun.S.ISSOCK(@intCast(stat.mode)))
                 .socket
             else
                 .file;
@@ -433,7 +433,7 @@ pub fn onReadChunk(this: *@This(), init_buf: []const u8, state: bun.io.ReadState
 
         bun.assert_eql(buf.ptr, this.buffered.items.ptr);
         var buffered = this.buffered;
-        this.buffered = .{};
+        this.buffered = .empty;
         buffered.shrinkRetainingCapacity(buf.len);
 
         this.pending.result = if (this.reader.isDone())
@@ -596,7 +596,7 @@ pub fn onReaderDone(this: *FileReader) void {
             } else {
                 this.pending.result = .{ .done = {} };
             }
-            this.buffered = .{};
+            this.buffered = .empty;
             this.pending.run();
         }
         // Don't handle buffered data here - it will be returned on the next onPull
@@ -617,7 +617,7 @@ pub fn onReaderError(this: *FileReader, err: bun.sys.Error) void {
     this.consumeReaderBuffer();
     if (this.buffered.capacity > 0 and this.buffered.items.len == 0) {
         this.buffered.deinit(bun.default_allocator);
-        this.buffered = .{};
+        this.buffered = .empty;
     }
 
     this.pending.result = .{ .err = .{ .Error = err } };
@@ -654,6 +654,14 @@ pub fn setFlowing(this: *FileReader, flag: bool) void {
 pub fn memoryCost(this: *const FileReader) usize {
     // ReadableStreamSource covers @sizeOf(FileReader)
     return this.reader.memoryCost() + this.buffered.capacity;
+}
+
+fn isTty(fd: bun.FD, nonblocking: bool) bool {
+    const file = std.Io.File{
+        .handle = fd.cast(),
+        .flags = .{ .nonblocking = nonblocking },
+    };
+    return file.isTty(bun.blockingIo()) catch false;
 }
 
 pub const Source = ReadableStream.NewSource(

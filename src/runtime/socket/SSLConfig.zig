@@ -132,7 +132,7 @@ pub fn forClientVerification(this: SSLConfig) SSLConfig {
 }
 
 pub fn isSame(this: *const SSLConfig, other: *const SSLConfig) bool {
-    inline for (comptime std.meta.fields(SSLConfig)) |field| {
+    inline for (comptime bun.meta.fields(SSLConfig)) |field| {
         if (comptime std.mem.eql(u8, field.name, "cached_hash")) continue;
         const first = @field(this, field.name);
         const second = @field(other, field.name);
@@ -222,13 +222,13 @@ fn cloneStrings(slice: ?[][*:0]const u8) ?[][*:0]const u8 {
     const inner = slice orelse return null;
     const result = bun.handleOom(bun.default_allocator.alloc([*:0]const u8, inner.len));
     for (inner, result) |string, *out| {
-        out.* = bun.handleOom(bun.default_allocator.dupeZ(u8, std.mem.span(string)));
+        out.* = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, std.mem.span(string)));
     }
     return result;
 }
 
 fn cloneString(string: ?[*:0]const u8) ?[*:0]const u8 {
-    return bun.handleOom(bun.default_allocator.dupeZ(u8, std.mem.span(string orelse return null)));
+    return bun.handleOom(bun.dupeZ(bun.default_allocator, u8, std.mem.span(string orelse return null)));
 }
 
 pub fn clone(this: *const SSLConfig) SSLConfig {
@@ -259,7 +259,7 @@ pub fn clone(this: *const SSLConfig) SSLConfig {
 pub fn contentHash(this: *SSLConfig) u64 {
     if (this.cached_hash != 0) return this.cached_hash;
     var hasher = std.hash.Wyhash.init(0);
-    inline for (comptime std.meta.fields(SSLConfig)) |field| {
+    inline for (comptime bun.meta.fields(SSLConfig)) |field| {
         if (comptime std.mem.eql(u8, field.name, "cached_hash")) continue;
         const value = @field(this, field.name);
         switch (field.type) {
@@ -433,7 +433,7 @@ pub fn fromGenerated(
         .string => |*val| val.get().toOwnedSliceZ(bun.default_allocator),
         .buffer => |*val| blk: {
             const buffer: jsc.ArrayBuffer = val.get().asArrayBuffer();
-            break :blk try bun.default_allocator.dupeZ(u8, buffer.byteSlice());
+            break :blk try bun.dupeZ(bun.default_allocator, u8, buffer.byteSlice());
         },
     };
     if (protocols) |some_protocols| {
@@ -547,7 +547,7 @@ fn handleSingleFile(
         .string => |string| string.toOwnedSliceZ(bun.default_allocator),
         .buffer => |jsc_buffer| blk: {
             const buffer: jsc.ArrayBuffer = jsc_buffer.asArrayBuffer();
-            break :blk try bun.default_allocator.dupeZ(u8, buffer.byteSlice());
+            break :blk try bun.dupeZ(bun.default_allocator, u8, buffer.byteSlice());
         },
         .file => |blob| try readFromBlob(global, blob),
     };

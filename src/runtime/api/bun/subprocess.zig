@@ -17,7 +17,7 @@ process: *Process,
 stdin: Writable,
 stdout: Readable,
 stderr: Readable,
-stdio_pipes: if (Environment.isWindows) std.ArrayListUnmanaged(StdioResult) else std.ArrayListUnmanaged(bun.spawn.PosixSpawnResult.ExtraPipe) = .{},
+stdio_pipes: if (Environment.isWindows) std.ArrayListUnmanaged(StdioResult) else std.ArrayListUnmanaged(bun.spawn.PosixSpawnResult.ExtraPipe) = .empty,
 pid_rusage: ?Rusage = null,
 
 /// Terminal attached to this subprocess (if spawned with terminal option)
@@ -416,7 +416,7 @@ pub fn tryKill(this: *Subprocess, sig: SignalCode) bun.sys.Maybe(void) {
     return this.process.kill(@intFromEnum(sig));
 }
 
-fn hasCalledGetter(this: *Subprocess, comptime getter: @Type(.enum_literal)) bool {
+fn hasCalledGetter(this: *Subprocess, comptime getter: @TypeOf(.enum_literal)) bool {
     return this.observable_getters.contains(getter);
 }
 
@@ -740,7 +740,7 @@ pub fn onProcessExit(this: *Subprocess, process: *Process, status: bun.spawn.Sta
     }
 }
 
-fn closeIO(this: *Subprocess, comptime io: @Type(.enum_literal)) void {
+fn closeIO(this: *Subprocess, comptime io: @TypeOf(.enum_literal)) void {
     if (this.closed.contains(io)) return;
     this.closed.insert(io);
 

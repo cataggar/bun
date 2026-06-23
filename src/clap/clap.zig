@@ -100,7 +100,7 @@ pub fn parseParam(line: []const u8) !Param(Help) {
     } else if (found_comma) {
         return error.TrailingComma;
     } else if (short_name == null) {
-        return parseParamRest(mem.trimLeft(u8, line, " \t"));
+        return parseParamRest(mem.trimStart(u8, line, " \t"));
     } else null;
 
     var res = parseParamRest(it.rest());
@@ -572,7 +572,7 @@ pub fn simpleHelpBunTopLevel(
     comptime params: []const Param(Help),
 ) void {
     const max_spacing = 30;
-    const space_buf: *const [max_spacing]u8 = " " ** max_spacing;
+    const space_buf: *const [max_spacing]u8 = &@splat(' ');
 
     const computed_max_spacing = comptime blk: {
         var res: usize = 2;

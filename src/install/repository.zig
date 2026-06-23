@@ -10,10 +10,10 @@ const SloppyGlobalGitConfig = struct {
     has_ssh_command: bool = false,
 
     var holder: SloppyGlobalGitConfig = .{};
-    var load_and_parse_once = std.once(loadAndParse);
+    var load_and_parse_once = bun.once(loadAndParse);
 
     pub fn get() SloppyGlobalGitConfig {
-        load_and_parse_once.call();
+        load_and_parse_once.call(.{});
         return holder;
     }
 
@@ -22,7 +22,7 @@ const SloppyGlobalGitConfig = struct {
 
         var config_file_path_buf: bun.PathBuffer = undefined;
         const config_file_path = bun.path.joinAbsStringBufZ(home_dir, &config_file_path_buf, &.{".gitconfig"}, .auto);
-        var stack_fallback = std.heap.stackFallback(4096, bun.default_allocator);
+        var stack_fallback = bun.stackFallback(4096, bun.default_allocator);
         const allocator = stack_fallback.get();
         const source = File.toSource(config_file_path, allocator, .{ .convert_bom = true }).unwrap() catch {
             return;
@@ -356,36 +356,40 @@ pub const Repository = extern struct {
         argv: []const string,
     ) !string {
         var env = _env;
-        var std_map = try env.stdEnvMap(allocator);
+        var arena = bun.ArenaAllocator.init(allocator);
+        defer arena.deinit();
 
-        defer std_map.deinit();
+        const envp = try env.createNullDelimitedEnvMap(arena.allocator());
+        const result = switch (try bun.spawnSync(&.{
+            .argv = argv,
+            .envp = envp.ptr,
+            .stdout = .buffer,
+            .stderr = .buffer,
+            .stdin = .ignore,
+            .windows = if (Environment.isWindows) .{
+                .loop = bun.jsc.EventLoopHandle.init(bun.jsc.MiniEventLoop.initGlobal(null, null)),
+            },
+        })) {
+            .result => |result| result,
+            .err => return error.InstallFailed,
+        };
+        defer result.deinit();
 
-        const result = if (comptime Environment.isWindows)
-            try std.process.Child.run(.{
-                .allocator = allocator,
-                .argv = argv,
-                .env_map = std_map.get(),
-            })
-        else
-            try std.process.Child.run(.{
-                .allocator = allocator,
-                .argv = argv,
-                .env_map = std_map.get(),
-            });
+        if (result.status.isOK()) {
+            return try allocator.dupe(u8, result.stdout.items);
+        }
 
-        switch (result.term) {
-            .Exited => |sig| if (sig == 0) return result.stdout else if (
+        const stderr = result.stderr.items;
+        const is_repository_not_found =
             // remote: The page could not be found <-- for non git
             // remote: Repository not found. <-- for git
             // remote: fatal repository '<url>' does not exist <-- for git
-            (strings.containsComptime(result.stderr, "remote:") and
-                strings.containsComptime(result.stderr, "not") and
-                strings.containsComptime(result.stderr, "found")) or
-                strings.containsComptime(result.stderr, "does not exist"))
-            {
-                return error.RepositoryNotFound;
-            },
-            else => {},
+            (strings.containsComptime(stderr, "remote:") and
+                strings.containsComptime(stderr, "not") and
+                strings.containsComptime(stderr, "found")) or
+            strings.containsComptime(stderr, "does not exist");
+        if (is_repository_not_found) {
+            return error.RepositoryNotFound;
         }
 
         return error.InstallFailed;
@@ -497,18 +501,18 @@ pub const Repository = extern struct {
         allocator: std.mem.Allocator,
         env: DotEnv.Map,
         log: *logger.Log,
-        cache_dir: std.fs.Dir,
+        cache_dir: std.Io.Dir,
         task_id: Install.Task.Id,
         name: string,
         url: string,
         attempt: u8,
-    ) !std.fs.Dir {
+    ) !std.Io.Dir {
         bun.analytics.Features.git_dependencies += 1;
-        const folder_name = try std.fmt.bufPrintZ(&tl_bufs.get().folder_name_buf, "{f}.git", .{
+        const folder_name = try bun.fmt.bufPrintZ(&tl_bufs.get().folder_name_buf, "{f}.git", .{
             bun.fmt.hexIntLower(task_id.get()),
         });
 
-        return if (cache_dir.openDirZ(folder_name, .{})) |dir| fetch: {
+        return if (bun.openDir(cache_dir, folder_name)) |dir| fetch: {
             const path = Path.joinAbsString(PackageManager.get().cache_directory_path, &.{folder_name}, .auto);
 
             _ = exec(
@@ -553,7 +557,7 @@ pub const Repository = extern struct {
                 return err;
             };
 
-            break :clone try cache_dir.openDirZ(folder_name, .{});
+            break :clone try bun.openDir(cache_dir, folder_name);
         };
     }
 
@@ -561,7 +565,7 @@ pub const Repository = extern struct {
         allocator: std.mem.Allocator,
         env: *DotEnv.Loader,
         log: *logger.Log,
-        repo_dir: std.fs.Dir,
+        repo_dir: std.Io.Dir,
         name: string,
         committish: string,
         task_id: Install.Task.Id,
@@ -595,8 +599,8 @@ pub const Repository = extern struct {
         allocator: std.mem.Allocator,
         env: DotEnv.Map,
         log: *logger.Log,
-        cache_dir: std.fs.Dir,
-        repo_dir: std.fs.Dir,
+        cache_dir: std.Io.Dir,
+        repo_dir: std.Io.Dir,
         name: string,
         url: string,
         resolved: string,
@@ -643,19 +647,19 @@ pub const Repository = extern struct {
                 return err;
             };
             var dir = try bun.openDir(cache_dir, folder_name);
-            dir.deleteTree(".git") catch {};
+            dir.deleteTree(bun.blockingIo(), ".git") catch {};
 
             if (resolved.len > 0) insert_tag: {
-                const git_tag = dir.createFileZ(".bun-tag", .{ .truncate = true }) catch break :insert_tag;
+                const git_tag = File.openat(.fromStdDir(dir), ".bun-tag", bun.O.WRONLY | bun.O.CREAT | bun.O.TRUNC, 0o664).unwrap() catch break :insert_tag;
                 defer git_tag.close();
-                git_tag.writeAll(resolved) catch {
-                    dir.deleteFileZ(".bun-tag") catch {};
+                git_tag.writeAll(resolved).unwrap() catch {
+                    dir.deleteFile(bun.blockingIo(), ".bun-tag") catch {};
                 };
             }
 
             break :brk dir;
         };
-        defer package_dir.close();
+        defer package_dir.close(bun.blockingIo());
 
         const json_file, const json_buf = bun.sys.File.readFileFrom(package_dir, "package.json", allocator).unwrap() catch |err| {
             if (err == error.ENOENT) {

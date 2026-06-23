@@ -28,8 +28,8 @@ import { basename, resolve } from "node:path";
 import { resolveConfig, type Config, type PartialConfig } from "./build/config.ts";
 import { resolveToolchain } from "./build/configure.ts";
 import { allDeps } from "./build/deps/index.ts";
-import { downloadWithRetry, extractTarGz, extractZip, prefetchPathForUrl } from "./build/download.ts";
-import { zigCompilerSafe, zigDownloadUrl } from "./build/zig.ts";
+import { downloadWithRetry, extractTarGz, extractTarXz, extractZip, prefetchPathForUrl } from "./build/download.ts";
+import { zigDownloadUrl } from "./build/zig.ts";
 
 const dest = process.argv[2];
 if (dest === undefined) {
@@ -69,7 +69,7 @@ interface Item {
     name: string;
     stamp: string;
     value: string;
-    kind: "tar.gz" | "zip";
+    kind: "tar.gz" | "tar.xz" | "zip";
     /** Paths (relative to extracted root) to delete before stamping — mirrors fetchPrebuilt's rmAfterExtract. */
     rm?: string[];
   };
@@ -119,19 +119,19 @@ for (const partial of variants) {
     }
   }
 
-  // Zig — host-only download. Only the variant CI actually uses on this host
-  // gets pre-EXTRACTED to extracted/zig/ (the build's dest is always
-  // vendor/zig regardless of safe, so only one extracted tree can match);
-  // both URLs go into by-url/ so a safe-flag flip still avoids the network.
-  const ciSafe = zigCompilerSafe(cfg);
-  for (const safe of [false, true]) {
-    const url = zigDownloadUrl(cfg, safe);
-    const stampValue = `${cfg.zigCommit}${safe ? "-safe" : ""}`;
-    add({
-      url,
-      extract: safe === ciSafe ? { name: "zig", stamp: ".zig-commit", value: stampValue, kind: "zip" } : undefined,
-    });
-  }
+  // Zig — host-only download. Pre-EXTRACTED to extracted/zig/ (the build's
+  // dest is always vendor/zig); the by-url copy also avoids the network on a
+  // cold build. Windows ships as .zip, every other host as .tar.xz.
+  const zigUrl = zigDownloadUrl(cfg);
+  add({
+    url: zigUrl,
+    extract: {
+      name: "zig",
+      stamp: ".zig-commit",
+      value: cfg.zigCommit,
+      kind: cfg.host.os === "windows" ? "zip" : "tar.xz",
+    },
+  });
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -191,6 +191,7 @@ async function fetchOne(item: Item): Promise<void> {
     await rm(staging, { recursive: true, force: true });
     await mkdir(staging, { recursive: true });
     if (item.extract.kind === "zip") await extractZip(path, staging);
+    else if (item.extract.kind === "tar.xz") await extractTarXz(path, staging, 0);
     else await extractTarGz(path, staging, 0);
     const entries = await readdir(staging);
     const hoist = entries.length === 1 ? resolve(staging, entries[0]!) : staging;

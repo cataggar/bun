@@ -112,7 +112,8 @@ pub const S3Credentials = struct {
         // Date.now() ISO string via JS removed; uses libc gmtime_r
 
         // Create UTC timestamp
-        const secs: u64 = @intCast(@divFloor(std.time.milliTimestamp(), 1000));
+        const millis = std.Io.Clock.real.now(bun.blockingIo()).toMilliseconds();
+        const secs: u64 = @intCast(@divFloor(@max(millis, @as(i64, 0)), 1000));
         const utc_seconds = std.time.epoch.EpochSeconds{ .secs = secs };
         const utc_day = utc_seconds.getEpochDay();
         const year_and_day = utc_day.calculateYearDay();
@@ -524,7 +525,7 @@ pub const S3Credentials = struct {
 
                 // Build query parameters in alphabetical order for AWS Signature V4 canonical request
                 const canonical = brk_canonical: {
-                    var stack_fallback = std.heap.stackFallback(512, bun.default_allocator);
+                    var stack_fallback = bun.stackFallback(512, bun.default_allocator);
                     const allocator = stack_fallback.get();
                     var query_parts: bun.BoundedArray([]const u8, 13) = .{};
 
@@ -587,7 +588,7 @@ pub const S3Credentials = struct {
                 const signature = bun.hmac.generate(sigDateRegionServiceReq, signValue, .sha256, &hmac_sig_service) orelse return error.FailedToGenerateSignature;
 
                 // Build final URL with query parameters in alphabetical order to match canonical request
-                var url_stack_fallback = std.heap.stackFallback(512, bun.default_allocator);
+                var url_stack_fallback = bun.stackFallback(512, bun.default_allocator);
                 const url_allocator = url_stack_fallback.get();
                 var url_query_parts: bun.BoundedArray([]const u8, 14) = .{};
 

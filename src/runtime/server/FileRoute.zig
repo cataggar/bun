@@ -213,10 +213,9 @@ pub fn on(this: *FileRoute, req: uws.AnyRequest, resp: AnyResponse, method: bun.
     const input_if_modified_since_date: ?u64 = req.dateForHeader("if-modified-since") catch return; // TODO: properly propagate exception upwards
 
     const can_serve_file: bool, const size: u64, const file_type: bun.io.FileType, const pollable: bool = brk: {
-        const stat = switch (bun.sys.fstat(fd)) {
-            .result => |s| s,
-            .err => break :brk .{ false, 0, undefined, false },
-        };
+        const stat_maybe = bun.sys.fstat(fd);
+        if (stat_maybe == .err) break :brk .{ false, 0, undefined, false };
+        const stat = stat_maybe.result;
 
         const stat_size: u64 = @intCast(@max(stat.size, 0));
         const _size: u64 = @min(stat_size, @as(u64, this.blob.size));

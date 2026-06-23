@@ -18,7 +18,7 @@ pub const BuntagHashBuf = [max_buntag_hash_buf_len]u8;
 
 pub const PatchTask = struct {
     manager: *PackageManager,
-    tempdir: std.fs.Dir,
+    tempdir: std.Io.Dir,
     project_dir: []const u8,
     callback: union(enum) {
         calc_hash: CalcPatchHash,
@@ -59,7 +59,7 @@ pub const PatchTask = struct {
         patchfilepath: []const u8,
         pkgname: String,
 
-        cache_dir: std.fs.Dir,
+        cache_dir: std.Io.Dir,
         cache_dir_subpath: stringZ,
         cache_dir_subpath_without_patch_hash: stringZ,
 
@@ -416,7 +416,7 @@ pub const PatchTask = struct {
             .auto,
         );
 
-        const stat: bun.Stat = switch (bun.sys.stat(absolute_patchfile_path)) {
+        const stat: bun.sys.Stat = switch (bun.sys.stat(absolute_patchfile_path)) {
             .err => |e| {
                 if (e.getErrno() == .NOENT) {
                     bun.handleOom(log.addErrorFmt(null, Loc.Empty, this.manager.allocator, "Couldn't find patch file: '{s}'\n\nTo create a new patch file run:\n\n  <cyan>bun patch {s}<r>", .{
@@ -508,7 +508,7 @@ pub const PatchTask = struct {
         state: ?CalcPatchHash.EnqueueAfterState,
     ) *PatchTask {
         const patchdep = manager.lockfile.patched_dependencies.get(name_and_version_hash) orelse @panic("This is a bug");
-        const patchfile_path = bun.handleOom(manager.allocator.dupeZ(u8, patchdep.path.slice(manager.lockfile.buffers.string_bytes.items)));
+        const patchfile_path = bun.handleOom(bun.dupeZ(manager.allocator, u8, patchdep.path.slice(manager.lockfile.buffers.string_bytes.items)));
 
         const pt = bun.new(PatchTask, .{
             .tempdir = manager.getTemporaryDirectory().handle,
@@ -561,8 +561,8 @@ pub const PatchTask = struct {
                     // need to dupe this as it's calculated using
                     // `PackageManager.cached_package_folder_name_buf` which may be
                     // modified
-                    .cache_dir_subpath = bun.handleOom(pkg_manager.allocator.dupeZ(u8, stuff.cache_dir_subpath)),
-                    .cache_dir_subpath_without_patch_hash = bun.handleOom(pkg_manager.allocator.dupeZ(u8, stuff.cache_dir_subpath[0 .. std.mem.indexOf(u8, stuff.cache_dir_subpath, "_patch_hash=") orelse @panic("This is a bug in Bun.")])),
+                    .cache_dir_subpath = bun.handleOom(bun.dupeZ(pkg_manager.allocator, u8, stuff.cache_dir_subpath)),
+                    .cache_dir_subpath_without_patch_hash = bun.handleOom(bun.dupeZ(pkg_manager.allocator, u8, stuff.cache_dir_subpath[0 .. std.mem.indexOf(u8, stuff.cache_dir_subpath, "_patch_hash=") orelse @panic("This is a bug in Bun.")])),
                 },
             },
             .manager = pkg_manager,

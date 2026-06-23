@@ -14,7 +14,7 @@ pub fn BundleThread(CompletionStruct: type) type {
         const Self = @This();
 
         waker: bun.Async.Waker,
-        ready_event: std.Thread.ResetEvent,
+        ready_event: std.Io.Event,
         queue: bun.UnboundedQueue(CompletionStruct, .next),
         generation: bun.Generation = 0,
 
@@ -23,19 +23,19 @@ pub fn BundleThread(CompletionStruct: type) type {
             .waker = undefined,
             .queue = .{},
             .generation = 0,
-            .ready_event = .{},
+            .ready_event = .unset,
         };
 
         pub fn spawn(instance: *Self) !std.Thread {
             const thread = try std.Thread.spawn(.{}, threadMain, .{instance});
-            instance.ready_event.wait();
+            instance.ready_event.waitUncancelable(bun.blockingIo());
             return thread;
         }
 
         /// Lazily-initialized singleton. This is used for `Bun.build` since the
         /// bundle thread may not be needed.
         pub const singleton = struct {
-            var once = std.once(loadOnceImpl);
+            var once = bun.once(loadOnceImpl);
             var instance: ?*Self = null;
 
             // Blocks the calling thread until the bun build thread is created.
@@ -52,7 +52,7 @@ pub fn BundleThread(CompletionStruct: type) type {
             }
 
             pub fn get() *Self {
-                once.call();
+                once.call(.{});
                 return instance.?;
             }
 
@@ -72,7 +72,7 @@ pub fn BundleThread(CompletionStruct: type) type {
             instance.waker = bun.Async.Waker.init() catch @panic("Failed to create waker");
 
             // Unblock the calling thread so it can continue.
-            instance.ready_event.set();
+            instance.ready_event.set(bun.blockingIo());
 
             var timer: bun.windows.libuv.Timer = undefined;
             if (bun.Environment.isWindows) {

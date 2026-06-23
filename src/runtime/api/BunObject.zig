@@ -546,7 +546,7 @@ pub fn registerMacro(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFram
         return globalObject.throw("Macro must be a function", .{});
     }
 
-    const get_or_put_result = VirtualMachine.get().macros.getOrPut(id) catch unreachable;
+    const get_or_put_result = VirtualMachine.get().macros.getOrPut(bun.default_allocator, id) catch unreachable;
     if (get_or_put_result.found_existing) {
         get_or_put_result.value_ptr.*.?.value().unprotect();
     }
@@ -741,7 +741,7 @@ pub fn getPublicPathWithAssetPrefix(
             ) catch return;
         }
     } else {
-        writer.writeAll(std.mem.trimLeft(u8, relative_path, "/")) catch unreachable;
+        writer.writeAll(std.mem.trimStart(u8, relative_path, "/")) catch unreachable;
     }
 }
 
@@ -766,7 +766,7 @@ pub fn sleepSync(globalObject: *jsc.JSGlobalObject, callframe: *jsc.CallFrame) b
         return globalObject.throwInvalidArguments("argument to sleepSync must not be negative, got {d}", .{milliseconds});
     }
 
-    std.Thread.sleep(@as(u64, @intCast(milliseconds)) * std.time.ns_per_ms);
+    std.Io.sleep(bun.blockingIo(), .fromMilliseconds(@intCast(milliseconds)), .awake) catch {};
     return .js_undefined;
 }
 
@@ -850,16 +850,16 @@ fn doResolveWithArgs(ctx: *jsc.JSGlobalObject, specifier: bun.String, from: bun.
     defer errorable.result.value.deref();
 
     if (!query_string.isEmpty()) {
-        var stack = std.heap.stackFallback(1024, ctx.allocator());
+        var stack = bun.stackFallback(1024, ctx.allocator());
         const allocator = stack.get();
-        var arraylist = std.array_list.Managed(u8).initCapacity(allocator, 1024) catch unreachable;
+        var arraylist = std.Io.Writer.Allocating.initCapacity(allocator, 1024) catch unreachable;
         defer arraylist.deinit();
-        try arraylist.writer().print("{f}{f}", .{
+        arraylist.writer.print("{f}{f}", .{
             errorable.result.value,
             query_string,
-        });
+        }) catch return error.OutOfMemory;
 
-        return ZigString.initUTF8(arraylist.items).toJS(ctx);
+        return ZigString.initUTF8(arraylist.written()).toJS(ctx);
     }
 
     return errorable.result.value.toJS(ctx);
@@ -1129,7 +1129,7 @@ pub export fn Bun__escapeHTML8(globalObject: *jsc.JSGlobalObject, input_value: J
     assert(len > 0);
 
     const input_slice = ptr[0..len];
-    var stack_allocator = std.heap.stackFallback(256, globalObject.bunVM().allocator);
+    var stack_allocator = bun.stackFallback(256, globalObject.bunVM().allocator);
     const allocator = if (input_slice.len <= 32) stack_allocator.get() else stack_allocator.fallback_allocator;
 
     const escaped = strings.escapeHTMLForLatin1Input(allocator, input_slice) catch {
@@ -1688,8 +1688,7 @@ pub const JSZlib = struct {
                     defer reader.deinit();
                     return globalThis.throwValue(ZigString.init(reader.errorMessage() orelse "Zlib returned an error").toErrorInstance(globalThis));
                 };
-                reader.list = .{ .items = reader.list.items };
-                reader.list.capacity = reader.list.items.len;
+                reader.list = .{ .items = reader.list.items, .capacity = reader.list.items.len };
                 reader.list_ptr = &reader.list;
 
                 var array_buffer = jsc.ArrayBuffer.fromBytes(reader.list.items, .Uint8Array);
@@ -1795,8 +1794,8 @@ pub const JSZlib = struct {
                     defer reader.deinit();
                     return globalThis.throwValue(ZigString.init(reader.errorMessage() orelse "Zlib returned an error").toErrorInstance(globalThis));
                 };
-                reader.list = .{ .items = bun.handleOom(reader.list.toOwnedSlice(allocator)) };
-                reader.list.capacity = reader.list.items.len;
+                const owned_slice = bun.handleOom(reader.list.toOwnedSlice(allocator));
+                reader.list = .{ .items = owned_slice, .capacity = owned_slice.len };
                 reader.list_ptr = &reader.list;
 
                 var array_buffer = jsc.ArrayBuffer.fromBytes(reader.list.items, .Uint8Array);

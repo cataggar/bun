@@ -59,7 +59,7 @@ pub fn IntegerBitSet(comptime size: u16) type {
         pub const bit_length: usize = size;
 
         /// The integer type used to represent a mask in this bit set
-        pub const MaskInt = std.meta.Int(.unsigned, size);
+        pub const MaskInt = @Int(.unsigned, size);
 
         /// The integer type used to shift a mask in this bit set
         pub const ShiftInt = std.math.Log2Int(MaskInt);
@@ -344,7 +344,7 @@ pub fn ArrayBitSet(comptime MaskIntType: type, comptime size: usize) type {
     if (!std.math.isPowerOfTwo(@bitSizeOf(MaskIntType))) {
         var desired_bits = std.math.ceilPowerOfTwoAssert(usize, @bitSizeOf(MaskIntType));
         if (desired_bits < byte_size) desired_bits = byte_size;
-        const FixedMaskType = std.meta.Int(.unsigned, desired_bits);
+        const FixedMaskType = @Int(.unsigned, desired_bits);
         @compileError("ArrayBitSet was passed integer type " ++ @typeName(MaskIntType) ++
             ", which is not a power of two.  Please round this up to a power of two integer size (i.e. " ++ @typeName(FixedMaskType) ++ ").");
     }
@@ -355,7 +355,7 @@ pub fn ArrayBitSet(comptime MaskIntType: type, comptime size: usize) type {
     if (@bitSizeOf(MaskIntType) != @sizeOf(MaskIntType) * byte_size) {
         var desired_bits = @sizeOf(MaskIntType) * byte_size;
         desired_bits = std.math.ceilPowerOfTwoAssert(usize, desired_bits);
-        const FixedMaskType = std.meta.Int(.unsigned, desired_bits);
+        const FixedMaskType = @Int(.unsigned, desired_bits);
         @compileError("ArrayBitSet was passed integer type " ++ @typeName(MaskIntType) ++
             ", which contains padding bits.  Please round this up to an unpadded integer size (i.e. " ++ @typeName(FixedMaskType) ++ ").");
     }
@@ -390,7 +390,7 @@ pub fn ArrayBitSet(comptime MaskIntType: type, comptime size: usize) type {
 
         /// Creates a bit set with no elements present.
         pub fn initEmpty() Self {
-            return .{ .masks = [_]MaskInt{0} ** num_masks };
+            return .{ .masks = @as([num_masks]MaskInt, @splat(0))};
         }
 
         /// Creates a bit set with all elements present.
@@ -398,7 +398,7 @@ pub fn ArrayBitSet(comptime MaskIntType: type, comptime size: usize) type {
             if (num_masks == 0) {
                 return .{ .masks = .{} };
             } else {
-                return .{ .masks = [_]MaskInt{~@as(MaskInt, 0)} ** (num_masks - 1) ++ [_]MaskInt{last_item_mask} };
+                return .{ .masks = @as([num_masks - 1]MaskInt, @splat(~@as(MaskInt, 0))) ++ [_]MaskInt{last_item_mask} };
             }
         }
 
@@ -1943,7 +1943,7 @@ fn testPureBitSet(comptime Set: type) !void {
     try testing.expect(full.differenceWith(even).eql(odd));
 }
 
-fn testStaticBitSet(comptime Set: type, comptime Container: @Type(.enum_literal)) !void {
+fn testStaticBitSet(comptime Set: type, comptime Container: @TypeOf(.enum_literal)) !void {
     var a = Set.initEmpty();
     var b = Set.initFull();
     try testing.expectEqual(@as(usize, 0), a.count());

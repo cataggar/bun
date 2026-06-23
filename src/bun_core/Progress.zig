@@ -18,7 +18,7 @@ const Progress = @This();
 
 /// `null` if the current node (and its children) should
 /// not print on update()
-terminal: ?std.fs.File = undefined,
+terminal: ?std.Io.File = undefined,
 
 /// Is this a windows API terminal (note: this is not the same as being run on windows
 /// because other terminals exist like MSYS/git-bash)
@@ -38,7 +38,7 @@ root: Node = undefined,
 
 /// Keeps track of how much time has passed since the beginning.
 /// Used to compare with `initial_delay_ms` and `refresh_rate_ms`.
-timer: ?std.time.Timer = null,
+timer: ?Timer = null,
 
 /// When the previous refresh was written to the terminal.
 /// Used to compare with `refresh_rate_ms`.
@@ -177,12 +177,12 @@ pub const Node = struct {
 /// API to return Progress rather than accept it as a parameter.
 /// `estimated_total_items` value of 0 means unknown.
 pub fn start(self: *Progress, name: []const u8, estimated_total_items: usize) *Node {
-    const stderr = std.fs.File.stderr();
+    const stderr = std.Io.File.stderr();
     self.terminal = null;
-    if (stderr.supportsAnsiEscapeCodes()) {
+    if (stderr.supportsAnsiEscapeCodes(bun.blockingIo()) catch false) {
         self.terminal = stderr;
         self.supports_ansi_escape_codes = true;
-    } else if (builtin.os.tag == .windows and stderr.isTty()) {
+    } else if (builtin.os.tag == .windows and (stderr.isTty(bun.blockingIo()) catch false)) {
         self.is_windows_terminal = true;
         self.terminal = stderr;
     } else if (builtin.os.tag != .windows) {
@@ -198,7 +198,7 @@ pub fn start(self: *Progress, name: []const u8, estimated_total_items: usize) *N
     };
     self.columns_written = 0;
     self.prev_refresh_timestamp = 0;
-    self.timer = std.time.Timer.start() catch null;
+    self.timer = Timer.start() catch null;
     self.done = false;
     return &self.root;
 }
@@ -212,7 +212,7 @@ pub fn maybeRefresh(self: *Progress) void {
     }
 }
 
-fn maybeRefreshWithHeldLock(self: *Progress, timer: *std.time.Timer) void {
+fn maybeRefreshWithHeldLock(self: *Progress, timer: *Timer) void {
     const now = timer.read();
     if (now < self.initial_delay_ns) return;
     // TODO I have observed this to happen sometimes. I think we need to follow Rust's
@@ -349,7 +349,8 @@ fn refreshWithHeldLock(self: *Progress) void {
         }
     }
 
-    _ = file.write(self.output_buffer[0..end]) catch {
+    var file_writer = file.writerStreaming(bun.blockingIo(), &.{});
+    _ = file_writer.interface.writeAll(self.output_buffer[0..end]) catch {
         // stop trying to write to this file
         self.terminal = null;
     };
@@ -363,7 +364,7 @@ pub fn log(self: *Progress, comptime format: []const u8, args: anytype) void {
         (std.debug).print(format, args);
         return;
     };
-    var file_writer = file.writerStreaming(&.{});
+    var file_writer = file.writerStreaming(bun.blockingIo(), &.{});
     const writer = &file_writer.interface;
     self.refresh();
     writer.print(format, args) catch {
@@ -380,7 +381,8 @@ pub fn lock_stderr(p: *Progress) void {
     if (p.terminal) |file| {
         var end: usize = 0;
         clearWithHeldLock(p, &end);
-        _ = file.write(p.output_buffer[0..end]) catch {
+        var file_writer = file.writerStreaming(bun.blockingIo(), &.{});
+        _ = file_writer.interface.writeAll(p.output_buffer[0..end]) catch {
             // stop trying to write to this file
             p.terminal = null;
         };
@@ -437,24 +439,24 @@ test "basic functionality" {
         next_sub_task = (next_sub_task + 1) % sub_task_names.len;
 
         node.completeOne();
-        std.Thread.sleep(5 * speed_factor);
+        sleepForTest(5 * speed_factor);
         node.completeOne();
         node.completeOne();
-        std.Thread.sleep(5 * speed_factor);
+        sleepForTest(5 * speed_factor);
         node.completeOne();
         node.completeOne();
-        std.Thread.sleep(5 * speed_factor);
+        sleepForTest(5 * speed_factor);
 
         node.end();
 
-        std.Thread.sleep(5 * speed_factor);
+        sleepForTest(5 * speed_factor);
     }
     {
         var node = root_node.start("this is a really long name designed to activate the truncation code. let's find out if it works", 0);
         node.activate();
-        std.Thread.sleep(10 * speed_factor);
+        sleepForTest(10 * speed_factor);
         progress.refresh();
-        std.Thread.sleep(10 * speed_factor);
+        sleepForTest(10 * speed_factor);
         node.end();
     }
 }
@@ -465,3 +467,19 @@ const windows = std.os.windows;
 
 const bun = @import("bun");
 const assert = bun.assert;
+
+const Timer = struct {
+    start_time: u64,
+
+    pub fn start() !Timer {
+        return .{ .start_time = bun.hw_timer.nowNs() };
+    }
+
+    pub fn read(this: *const Timer) u64 {
+        return bun.hw_timer.nowNs() -| this.start_time;
+    }
+};
+
+fn sleepForTest(ns: u64) void {
+    std.Io.sleep(bun.blockingIo(), .fromNanoseconds(@intCast(ns)), .awake) catch {};
+}

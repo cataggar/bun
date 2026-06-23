@@ -97,10 +97,10 @@ pub const HostedGitInfo = struct {
         input: []const u8,
     ) error{ OutOfMemory, InvalidURL }![]const u8 {
         const writable = sb.writable();
-        var stream = std.io.fixedBufferStream(writable);
+        var writer = std.Io.Writer.fixed(writable);
         const decoded_len = PercentEncoding.decode(
-            @TypeOf(stream.writer()),
-            stream.writer(),
+            @TypeOf(&writer),
+            &writer,
             input,
         ) catch {
             return error.InvalidURL;
@@ -532,7 +532,7 @@ pub const UrlProtocolPair = struct {
             .managed => |*u| {
                 u.allocator.free(u.buf);
             },
-            .unmanaged => |_| {},
+            .unmanaged => {},
         }
     }
 
@@ -542,7 +542,7 @@ pub const UrlProtocolPair = struct {
         // statistical distribution of URL lengths and found nothing.
         const long_url_thresh = 2048;
 
-        var alloc = std.heap.stackFallback(long_url_thresh, allocator);
+        var alloc = bun.stackFallback(long_url_thresh, allocator);
 
         var protocol_buf: WellDefinedProtocol.StringWithColonBuffer = undefined;
 
@@ -1379,10 +1379,10 @@ const HostProvider = enum {
 
                     const user_slice = blk: {
                         const writable = sb.writable();
-                        var stream = std.io.fixedBufferStream(writable);
+                        var writer = std.Io.Writer.fixed(writable);
                         const decoded_len = PercentEncoding.decode(
-                            @TypeOf(stream.writer()),
-                            stream.writer(),
+                            @TypeOf(&writer),
+                            &writer,
                             user_part,
                         ) catch return null;
                         sb.len += decoded_len;
@@ -1390,10 +1390,10 @@ const HostProvider = enum {
                     };
                     const project_slice = blk: {
                         const writable = sb.writable();
-                        var stream = std.io.fixedBufferStream(writable);
+                        var writer = std.Io.Writer.fixed(writable);
                         const decoded_len = PercentEncoding.decode(
-                            @TypeOf(stream.writer()),
-                            stream.writer(),
+                            @TypeOf(&writer),
+                            &writer,
                             project,
                         ) catch return null;
                         sb.len += decoded_len;
@@ -1401,10 +1401,10 @@ const HostProvider = enum {
                     };
                     const committish_slice = if (committish) |c| blk: {
                         const writable = sb.writable();
-                        var stream = std.io.fixedBufferStream(writable);
+                        var writer = std.Io.Writer.fixed(writable);
                         const decoded_len = PercentEncoding.decode(
-                            @TypeOf(stream.writer()),
-                            stream.writer(),
+                            @TypeOf(&writer),
+                            &writer,
                             c,
                         ) catch return null;
                         sb.len += decoded_len;
@@ -1577,8 +1577,8 @@ const HostProvider = enum {
         shortcut_str: []const u8,
         comptime with_colon: enum { with_colon, without_colon },
     ) ?HostProvider {
-        inline for (std.meta.fields(Self)) |field| {
-            const provider: HostProvider = @enumFromInt(field.value);
+        inline for (@typeInfo(Self).@"enum".field_values) |field_value| {
+            const provider: HostProvider = @enumFromInt(field_value);
 
             const shortcut_matches = std.mem.eql(
                 u8,
@@ -1599,8 +1599,8 @@ const HostProvider = enum {
 
     /// Find the appropriate host provider by its domain (e.g. "github.com").
     fn fromDomain(domain_str: []const u8) ?HostProvider {
-        inline for (std.meta.fields(Self)) |field| {
-            const provider: HostProvider = @enumFromInt(field.value);
+        inline for (@typeInfo(Self).@"enum".field_values) |field_value| {
+            const provider: HostProvider = @enumFromInt(field_value);
 
             if (std.mem.eql(u8, provider.domain(), domain_str)) {
                 return provider;

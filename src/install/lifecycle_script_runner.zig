@@ -106,7 +106,7 @@ pub const LifecycleScriptSubprocess = struct {
             bun.assertWithLocation(flags & bun.O.NONBLOCK != 0, @src());
 
             const stat = bun.sys.fstat(fd).unwrap() catch @panic("Failed to fstat");
-            bun.assertWithLocation(std.posix.S.ISSOCK(stat.mode), @src());
+            bun.assertWithLocation(std.posix.S.ISSOCK(@as(std.posix.mode_t, @intCast(stat.mode))), @src());
         }
     }
 
@@ -530,8 +530,9 @@ pub const LifecycleScriptSubprocess = struct {
         try_delete_dir: {
             const dirname = std.fs.path.dirname(this.scripts.cwd) orelse break :try_delete_dir;
             const basename = std.fs.path.basename(this.scripts.cwd);
-            const dir = bun.openDirAbsolute(dirname) catch break :try_delete_dir;
-            dir.deleteTree(basename) catch break :try_delete_dir;
+            var dir = bun.openDirAbsolute(dirname) catch break :try_delete_dir;
+            defer dir.close(bun.blockingIo());
+            dir.deleteTree(bun.blockingIo(), basename) catch break :try_delete_dir;
         }
 
         this.deinit();
@@ -594,7 +595,17 @@ const string = []const u8;
 const Lockfile = @import("./lockfile.zig");
 const std = @import("std");
 const PackageManager = @import("./install.zig").PackageManager;
-const Timer = std.time.Timer;
+const Timer = struct {
+    started_at: std.Io.Clock.Timestamp,
+
+    pub fn start() !Timer {
+        return .{ .started_at = std.Io.Clock.Timestamp.now(bun.blockingIo(), .awake) };
+    }
+
+    pub fn read(this: *Timer) u64 {
+        return @intCast(@max(@as(i96, 0), this.started_at.untilNow(bun.blockingIo()).raw.nanoseconds));
+    }
+};
 
 const bun = @import("bun");
 const Environment = bun.Environment;

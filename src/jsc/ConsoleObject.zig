@@ -310,11 +310,76 @@ pub const TablePrinter = struct {
 
         pub const WriteError = error{};
 
-        pub const Writer = std.Io.GenericWriter(
-            VisibleCharacterCounter,
-            VisibleCharacterCounter.WriteError,
-            VisibleCharacterCounter.write,
-        );
+        pub const Writer = struct {
+            context: VisibleCharacterCounter,
+
+            pub const Error = VisibleCharacterCounter.WriteError;
+
+            pub fn write(this: Writer, bytes: []const u8) Error!usize {
+                return this.context.write(bytes);
+            }
+
+            pub fn writeAll(this: Writer, bytes: []const u8) Error!void {
+                return this.context.writeAll(bytes);
+            }
+
+            pub const Adapter = struct {
+                context: VisibleCharacterCounter,
+                new_interface: std.Io.Writer,
+
+                pub fn init(context: VisibleCharacterCounter, buffer: []u8) Adapter {
+                    return .{
+                        .context = context,
+                        .new_interface = .{
+                            .vtable = &.{
+                                .drain = drain,
+                                .flush = std.Io.Writer.defaultFlush,
+                                .rebase = std.Io.Writer.failingRebase,
+                            },
+                            .buffer = buffer,
+                        },
+                    };
+                }
+
+                fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+                    const this: *Adapter = @fieldParentPtr("new_interface", w);
+                    _ = this.context.write(w.buffered()) catch unreachable;
+                    w.end = 0;
+
+                    var written: usize = 0;
+                    for (data[0 .. data.len - 1]) |bytes| {
+                        _ = this.context.write(bytes) catch unreachable;
+                        written += bytes.len;
+                    }
+
+                    const pattern = data[data.len - 1];
+                    for (0..splat) |_| {
+                        _ = this.context.write(pattern) catch unreachable;
+                        written += pattern.len;
+                    }
+
+                    return written;
+                }
+            };
+
+            fn bufferFrom(buffer: anytype) []u8 {
+                return switch (@typeInfo(@TypeOf(buffer))) {
+                    .pointer => |ptr| switch (ptr.size) {
+                        .one => switch (@typeInfo(ptr.child)) {
+                            .array => |arr| @constCast(buffer[0..arr.len]),
+                            else => @compileError("expected a buffer slice or pointer to an array"),
+                        },
+                        .slice => @constCast(buffer),
+                        else => @compileError("expected a buffer slice or pointer to an array"),
+                    },
+                    else => @compileError("expected a buffer slice or pointer to an array"),
+                };
+            }
+
+            pub fn adaptToNewApi(this: Writer, buffer: anytype) Adapter {
+                return Adapter.init(this.context, bufferFrom(buffer));
+            }
+        };
 
         pub fn write(this: VisibleCharacterCounter, bytes: []const u8) WriteError!usize {
             this.width.* += strings.visible.width.exclude_ansi_colors.utf8(bytes);
@@ -522,7 +587,7 @@ pub const TablePrinter = struct {
     ) !void {
         const globalObject = this.globalObject;
 
-        var stack_fallback = std.heap.stackFallback(@sizeOf(Column) * 16, this.globalObject.allocator());
+        var stack_fallback = bun.stackFallback(@sizeOf(Column) * 16, this.globalObject.allocator());
         var columns = try std.array_list.Managed(Column).initCapacity(stack_fallback.get(), 16);
         defer {
             for (columns.items) |*col| {
@@ -1750,7 +1815,7 @@ pub const Formatter = struct {
         };
     }
 
-    const indentation_buf = [_]u8{' '} ** 64;
+    const indentation_buf = @as([64]u8, @splat(' '));
     pub fn writeIndent(
         this: *ConsoleObject.Formatter,
         comptime Writer: type,
@@ -3619,7 +3684,7 @@ pub fn countReset(
     entry.value_ptr.* = 0;
 }
 
-const PendingTimers = std.AutoHashMap(u64, ?std.time.Timer);
+const PendingTimers = std.AutoHashMap(u64, ?Timer);
 threadlocal var pending_time_logs: PendingTimers = undefined;
 threadlocal var pending_time_logs_loaded = false;
 
@@ -3640,7 +3705,7 @@ pub fn time(
     const result = pending_time_logs.getOrPut(id) catch unreachable;
 
     if (!result.found_existing or (result.found_existing and result.value_ptr.* == null)) {
-        result.value_ptr.* = std.time.Timer.start() catch unreachable;
+        result.value_ptr.* = Timer.start() catch unreachable;
     }
 }
 pub fn timeEnd(
@@ -3657,7 +3722,7 @@ pub fn timeEnd(
 
     const id = bun.hash(chars[0..len]);
     const result = (pending_time_logs.fetchPut(id, null) catch null) orelse return;
-    var value: std.time.Timer = result.value orelse return;
+    var value: Timer = result.value orelse return;
     // get the duration in microseconds
     // then display it in milliseconds
     Output.printElapsed(@as(f64, @floatFromInt(value.read() / std.time.ns_per_us)) / std.time.us_per_ms);
@@ -3687,7 +3752,7 @@ pub fn timeLog(
     }
 
     const id = bun.hash(chars[0..len]);
-    var value: std.time.Timer = (pending_time_logs.get(id) orelse return) orelse return;
+    var value: Timer = (pending_time_logs.get(id) orelse return) orelse return;
     // get the duration in microseconds
     // then display it in milliseconds
     Output.printElapsed(@as(f64, @floatFromInt(value.read() / std.time.ns_per_us)) / std.time.us_per_ms);
@@ -3822,6 +3887,7 @@ const Output = bun.Output;
 const String = bun.String;
 const default_allocator = bun.default_allocator;
 const strings = bun.strings;
+const Timer = @import("../perf/system_timer.zig").Timer;
 
 const jsc = bun.jsc;
 const EventType = jsc.EventType;

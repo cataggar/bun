@@ -15,7 +15,7 @@ state: union(enum) {
     },
     waiting_stat,
     stat_complete: struct {
-        stat: Maybe(bun.Stat),
+        stat: Maybe(bun.sys.Stat),
     },
     waiting_write_err,
     done,
@@ -25,12 +25,15 @@ args: std.array_list.Managed([:0]const u8),
 pub const ShellCondExprStatTask = struct {
     task: ShellTask(@This(), runFromThreadPool, runFromMainThread, log),
     condexpr: *CondExpr,
-    result: ?Maybe(bun.Stat) = null,
+    result: ?Maybe(bun.sys.Stat) = null,
     path: [:0]const u8,
     cwdfd: bun.FD,
 
     pub fn runFromThreadPool(this: *ShellCondExprStatTask) void {
-        this.result = ShellSyscall.statat(this.cwdfd, this.path);
+        this.result = if (bun.Environment.isWindows)
+            ShellSyscall.statat(this.cwdfd, this.path)
+        else
+            bun.sys.fstatat(this.cwdfd, this.path);
     }
 
     pub fn runFromMainThread(this: *ShellCondExprStatTask) void {
@@ -119,7 +122,7 @@ pub fn next(this: *CondExpr) Yield {
             .stat_complete => {
                 switch (this.node.op) {
                     .@"-f" => {
-                        const st: bun.Stat = switch (this.state.stat_complete.stat) {
+                        const st: bun.sys.Stat = switch (this.state.stat_complete.stat) {
                             .result => |st| st,
                             .err => {
                                 // It seems that bash always gives exit code 1
@@ -129,7 +132,7 @@ pub fn next(this: *CondExpr) Yield {
                         return this.parent.childDone(this, if (bun.S.ISREG(@intCast(st.mode))) 0 else 1);
                     },
                     .@"-d" => {
-                        const st: bun.Stat = switch (this.state.stat_complete.stat) {
+                        const st: bun.sys.Stat = switch (this.state.stat_complete.stat) {
                             .result => |st| st,
                             .err => {
                                 // It seems that bash always gives exit code 1
@@ -139,7 +142,7 @@ pub fn next(this: *CondExpr) Yield {
                         return this.parent.childDone(this, if (bun.S.ISDIR(@intCast(st.mode))) 0 else 1);
                     },
                     .@"-c" => {
-                        const st: bun.Stat = switch (this.state.stat_complete.stat) {
+                        const st: bun.sys.Stat = switch (this.state.stat_complete.stat) {
                             .result => |st| st,
                             .err => {
                                 // It seems that bash always gives exit code 1
@@ -246,7 +249,7 @@ pub fn childDone(this: *CondExpr, child: ChildPtr, exit_code: ExitCode) Yield {
     @panic("Invalid child to cond expression, this indicates a bug in Bun. Please file a report on Github.");
 }
 
-pub fn onStatTaskComplete(this: *CondExpr, result: Maybe(bun.Stat)) void {
+pub fn onStatTaskComplete(this: *CondExpr, result: Maybe(bun.sys.Stat)) void {
     if (bun.Environment.allow_assert) assert(this.state == .waiting_stat);
 
     this.state = .{

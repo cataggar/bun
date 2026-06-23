@@ -51,6 +51,7 @@ pub fn DMP(comptime Unit: type) type {
         const DiffMatchPatch = @This();
 
         const std = @import("std");
+        const SystemTimer = @import("../../perf/system_timer.zig");
         const testing = std.testing;
         const Allocator = std.mem.Allocator;
 
@@ -120,7 +121,7 @@ pub fn DMP(comptime Unit: type) type {
             const deadline = if (dmp.config.diff_timeout == 0)
                 std.math.maxInt(u64)
             else
-                @as(u64, @intCast(std.time.milliTimestamp())) + dmp.config.diff_timeout;
+                @as(u64, @intCast(SystemTimer.milliTimestamp())) + dmp.config.diff_timeout;
             return dmp.diffInternal(allocator, before, after, check_lines, deadline);
         }
 
@@ -564,7 +565,7 @@ pub fn DMP(comptime Unit: type) type {
             var d: isize = 0;
             while (d < max_d) : (d += 1) {
                 // Bail out if deadline is reached.
-                if (@as(u64, @intCast(std.time.milliTimestamp())) > deadline) {
+                if (@as(u64, @intCast(SystemTimer.milliTimestamp())) > deadline) {
                     break;
                 }
 
@@ -2522,19 +2523,19 @@ pub fn DMP(comptime Unit: type) type {
 
             // Increase the text lengths by 1024 times to ensure a timeout.
             {
-                const a = "`Twas brillig, and the slithy toves\nDid gyre and gimble in the wabe:\nAll mimsy were the borogoves,\nAnd the mome raths outgrabe.\n" ** 1024;
-                const b = "I am the very model of a modern major general,\nI've information vegetable, animal, and mineral,\nI know the kings of England, and I quote the fights historical,\nFrom Marathon to Waterloo, in order categorical.\n" ** 1024;
+                const a = &bun.strings.repeatComptime(u8, "`Twas brillig, and the slithy toves\nDid gyre and gimble in the wabe:\nAll mimsy were the borogoves,\nAnd the mome raths outgrabe.\n", 1024);
+                const b = &bun.strings.repeatComptime(u8, "I am the very model of a modern major general,\nI've information vegetable, animal, and mineral,\nI know the kings of England, and I quote the fights historical,\nFrom Marathon to Waterloo, in order categorical.\n", 1024);
 
                 const with_timout: DiffMatchPatch = .{
                     .config = .{ .diff_timeout = 100 }, // 100ms
                 };
 
-                const start_time = std.time.milliTimestamp();
+                const start_time = SystemTimer.milliTimestamp();
                 {
                     var time_diff = try with_timout.diff(allocator, a, b, false);
                     defer deinitDiffList(allocator, &time_diff);
                 }
-                const end_time = std.time.milliTimestamp();
+                const end_time = SystemTimer.milliTimestamp();
 
                 // Test that we took at least the timeout period.
                 try testing.expect(with_timout.config.diff_timeout <= end_time - start_time); // diff: Timeout min.
@@ -2968,19 +2969,13 @@ pub fn DMP(comptime Unit: type) type {
 
             const ArgsTuple = std.meta.ArgsTuple(TestFn);
 
-            const fn_args_fields = std.meta.fields(ArgsTuple);
-            if (fn_args_fields.len == 0 or fn_args_fields[0].type != std.mem.Allocator) {
+            const arg_types = @typeInfo(ArgsTuple).@"struct".field_types;
+            if (arg_types.len == 0 or arg_types[0] != std.mem.Allocator) {
                 @compileError("The provided function must have an " ++ @typeName(std.mem.Allocator) ++ " as its first argument");
             }
 
             // remove the first tuple field (`std.mem.Allocator`)
-            var extra_args_tuple_info = @typeInfo(ArgsTuple);
-            var extra_args_fields = extra_args_tuple_info.@"struct".fields[1..].*;
-            for (&extra_args_fields, 0..) |*extra_field, i| {
-                extra_field.name = fn_args_fields[i].name;
-            }
-            extra_args_tuple_info.@"struct".fields = &extra_args_fields;
-            const ExtraArgsTuple = @Type(extra_args_tuple_info);
+            const ExtraArgsTuple = @Tuple(arg_types[1..]);
 
             return .{
                 .ArgsTuple = ArgsTuple,

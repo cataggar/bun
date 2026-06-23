@@ -577,7 +577,7 @@ pub const Process = struct {
         if (comptime Environment.isPosix) {
             switch (this.poller) {
                 .waiter_thread, .fd => {
-                    const err = std.c.kill(this.pid, signal);
+                    const err = std.c.kill(this.pid, @enumFromInt(signal));
                     if (err != 0) {
                         const errno_ = bun.sys.getErrno(err);
 
@@ -646,7 +646,7 @@ pub const Status = union(enum) {
                 }
 
                 if (std.posix.W.IFSIGNALED(result.status)) {
-                    signal = @as(u8, @truncate(std.posix.W.TERMSIG(result.status)));
+                    signal = @as(u8, @truncate(@intFromEnum(std.posix.W.TERMSIG(result.status))));
                 }
 
                 // https://developer.apple.com/library/archive/documentation/System/Conceptual/ManPages_iPhoneOS/man2/waitpid.2.html
@@ -655,7 +655,7 @@ pub const Status = union(enum) {
                 // ified the WUNTRACED option or if the child process is being
                 // traced (see ptrace(2)).
                 else if (std.posix.W.IFSTOPPED(result.status)) {
-                    signal = @as(u8, @truncate(std.posix.W.STOPSIG(result.status)));
+                    signal = @as(u8, @truncate(@intFromEnum(std.posix.W.STOPSIG(result.status))));
                 }
             },
         }
@@ -970,7 +970,7 @@ const WaiterThreadPosix = struct {
 
         if (comptime Environment.isLinux) {
             const one = @as([8]u8, @bitCast(@as(usize, 1)));
-            _ = std.posix.write(instance.eventfd.cast(), &one) catch @panic("Failed to write to eventfd");
+            _ = bun.sys.write(instance.eventfd, &one).unwrap() catch @panic("Failed to write to eventfd");
         }
     }
 
@@ -987,14 +987,18 @@ const WaiterThreadPosix = struct {
 
         if (comptime Environment.isLinux) {
             const linux = std.os.linux;
-            instance.eventfd = .fromNative(try std.posix.eventfd(0, linux.EFD.NONBLOCK | linux.EFD.CLOEXEC | 0));
+            const eventfd = linux.eventfd(0, linux.EFD.NONBLOCK | linux.EFD.CLOEXEC | 0);
+            switch (std.posix.errno(eventfd)) {
+                .SUCCESS => instance.eventfd = .fromNative(@intCast(eventfd)),
+                else => |err| return std.posix.unexpectedErrno(err),
+            }
         }
 
         var thread = try std.Thread.spawn(.{ .stack_size = stack_size }, loop, .{});
         thread.detach();
     }
 
-    fn wakeup(_: c_int) callconv(.c) void {
+    fn wakeup(_: std.posix.SIG) callconv(.c) void {
         const one = @as([8]u8, @bitCast(@as(usize, 1)));
         _ = bun.sys.write(instance.eventfd, &one).unwrap() catch 0;
     }
@@ -1006,13 +1010,14 @@ const WaiterThreadPosix = struct {
 
         if (comptime Environment.isLinux) {
             var current_mask = bun.sys.sigemptyset();
-            bun.sys.sigaddset(&current_mask, std.posix.SIG.CHLD);
+            const sigchld: u8 = @intFromEnum(std.posix.SIG.CHLD);
+            bun.sys.sigaddset(&current_mask, sigchld);
             const act = bun.sys.Sigaction{
                 .handler = .{ .handler = &wakeup },
                 .mask = current_mask,
                 .flags = std.posix.SA.NOCLDSTOP,
             };
-            bun.sys.sigaction(std.posix.SIG.CHLD, &act, null);
+            bun.sys.sigaction(sigchld, &act, null);
         }
     }
 
@@ -1307,7 +1312,7 @@ pub const PosixSpawnResult = struct {
                         // That would cause Zombie processes to accumulate.
                         else => {
                             while (true) {
-                                var status: u32 = 0;
+                                var status: i32 = 0;
                                 const rc = std.os.linux.wait4(this.pid, &status, 0, null);
 
                                 switch (bun.sys.getErrno(rc)) {
@@ -1401,7 +1406,7 @@ pub fn spawnProcessPosix(
         attr.linux_pdeathsig = if (options.linux_pdeathsig) |sig|
             @intCast(sig)
         else if (bun.ParentDeathWatchdog.shouldDefaultSpawnPdeathsig())
-            std.posix.SIG.KILL
+            @intFromEnum(std.posix.SIG.KILL)
         else
             0;
     }
@@ -1412,7 +1417,7 @@ pub fn spawnProcessPosix(
     var spawned = PosixSpawnResult{};
     var extra_fds = std.array_list.Managed(PosixSpawnResult.ExtraPipe).init(bun.default_allocator);
     errdefer extra_fds.deinit();
-    var stack_fallback = std.heap.stackFallback(2048, bun.default_allocator);
+    var stack_fallback = bun.stackFallback(2048, bun.default_allocator);
     const allocator = stack_fallback.get();
     var to_close_at_end = std.array_list.Managed(bun.FD).init(allocator);
     var to_set_cloexec = std.array_list.Managed(bun.FD).init(allocator);
@@ -1682,7 +1687,7 @@ pub fn spawnProcessWindows(
     uv_process_options.env = envp;
     uv_process_options.file = options.argv0 orelse argv[0].?;
     uv_process_options.exit_cb = &Process.onExitUV;
-    var stack_allocator = std.heap.stackFallback(8192, bun.default_allocator);
+    var stack_allocator = bun.stackFallback(8192, bun.default_allocator);
     const allocator = stack_allocator.get();
     const loop = options.windows.loop.platformEventLoop().uv_loop;
 
@@ -2459,7 +2464,7 @@ pub const sync = struct {
                 for (&out) |*array_list| {
                     array_list.clearAndFree();
                 }
-                _ = std.c.kill(process.pid, 1);
+                _ = std.c.kill(process.pid, std.posix.SIG.HUP);
             }
 
             for (out_fds) |fd| {
@@ -2780,7 +2785,7 @@ pub const sync = struct {
             var kmask = linux.sigemptyset();
             linux.sigaddset(&kmask, std.posix.SIG.CHLD);
             const rc = linux.signalfd(-1, &kmask, linux.SFD.CLOEXEC | linux.SFD.NONBLOCK);
-            switch (linux.E.init(rc)) {
+            switch (bun.sys.getErrno(rc)) {
                 .SUCCESS => break :blk bun.FD.fromNative(@intCast(rc)),
                 else => break :blk bun.invalid_fd,
             }
@@ -2809,7 +2814,7 @@ pub const sync = struct {
             _ = std.posix.prctl(.SET_PDEATHSIG, .{0}) catch {};
         }
         defer if (ppid > 1) {
-            _ = std.posix.prctl(.SET_PDEATHSIG, .{std.posix.SIG.KILL}) catch {};
+            _ = std.posix.prctl(.SET_PDEATHSIG, .{@intFromEnum(std.posix.SIG.KILL)}) catch {};
         };
         if (ppid > 1 and std.c.getppid() != ppid)
             bun.Global.exit(bun.ParentDeathWatchdog.exit_code);

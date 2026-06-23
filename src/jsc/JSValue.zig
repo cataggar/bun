@@ -729,7 +729,7 @@ pub const JSValue = enum(i64) {
 
     /// Create a JSValue string from a zig format-print (fmt + args)
     pub fn printString(globalThis: *JSGlobalObject, comptime stack_buffer_size: usize, comptime fmt: []const u8, args: anytype) !JSValue {
-        var stack_fallback = std.heap.stackFallback(stack_buffer_size, globalThis.allocator());
+        var stack_fallback = bun.stackFallback(stack_buffer_size, globalThis.allocator());
 
         var buf = try bun.MutableString.init(stack_fallback.get(), stack_buffer_size);
         defer buf.deinit();
@@ -741,7 +741,7 @@ pub const JSValue = enum(i64) {
 
     /// Create a JSValue string from a zig format-print (fmt + args), with pretty format
     pub fn printStringPretty(globalThis: *JSGlobalObject, comptime stack_buffer_size: usize, comptime fmt: []const u8, args: anytype) !JSValue {
-        var stack_fallback = std.heap.stackFallback(stack_buffer_size, globalThis.allocator());
+        var stack_fallback = bun.stackFallback(stack_buffer_size, globalThis.allocator());
 
         var buf = try bun.MutableString.init(stack_fallback.get(), stack_buffer_size);
         defer buf.deinit();
@@ -2417,11 +2417,11 @@ pub const JSValue = enum(i64) {
                     return array;
                 }
 
-                if (comptime @hasDecl(Type, "toJSNewlyCreated") and @typeInfo(@TypeOf(@field(Type, "toJSNewlyCreated"))).@"fn".params.len == 2) {
+                if (comptime @hasDecl(Type, "toJSNewlyCreated") and @typeInfo(@TypeOf(@field(Type, "toJSNewlyCreated"))).@"fn".param_types.len == 2) {
                     return value.toJSNewlyCreated(globalObject);
                 }
 
-                if (comptime @hasDecl(Type, "toJS") and @typeInfo(@TypeOf(@field(Type, "toJS"))).@"fn".params.len == 2) {
+                if (comptime @hasDecl(Type, "toJS") and @typeInfo(@TypeOf(@field(Type, "toJS"))).@"fn".param_types.len == 2) {
                     return value.toJS(globalObject);
                 }
 

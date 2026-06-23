@@ -8,7 +8,7 @@ pub fn createPostgresError(
     const opts_obj = JSValue.createEmptyObject(globalObject, 0);
     opts_obj.ensureStillAlive();
     opts_obj.put(globalObject, jsc.ZigString.static("code"), try bun.String.createUTF8ForJS(globalObject, options.code));
-    inline for (std.meta.fields(PostgresErrorOptions)) |field| {
+    inline for (comptime bun.meta.fields(PostgresErrorOptions)) |field| {
         const FieldType = @typeInfo(@TypeOf(@field(options, field.name)));
         if (FieldType == .optional) {
             if (@field(options, field.name)) |value| {
@@ -74,7 +74,7 @@ pub fn postgresErrorToJS(globalObject: *jsc.JSGlobalObject, message: ?[]const u8
         },
     };
 
-    var buffer_message = [_]u8{0} ** 256;
+    var buffer_message = @as([256]u8, @splat(0));
     const msg = message orelse std.fmt.bufPrint(buffer_message[0..], "Failed to bind query: {s}", .{@errorName(err)}) catch "Failed to bind query";
 
     return createPostgresError(globalObject, msg, .{ .code = code }) catch |e| globalObject.takeError(e);

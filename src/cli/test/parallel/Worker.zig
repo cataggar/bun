@@ -27,7 +27,7 @@ inflight: ?u32 = null,
 /// range has the most remaining — the end is furthest from that worker's
 /// hot region.
 range: FileRange = .{ .lo = 0, .hi = 0 },
-/// `std.time.milliTimestamp()` at the most recent dispatch; drives lazy
+/// `bun.SystemTimer.milliTimestamp()` at the most recent dispatch; drives lazy
 /// scale-up.
 dispatched_at: i64 = 0,
 /// Worker stdout+stderr since the last `test_done`. Flushed atomically
@@ -82,7 +82,7 @@ pub fn start(this: *Worker) !void {
             // anything it spawned. PDEATHSIG is the SIGKILL safety net on
             // Linux for the worker itself.
             .new_process_group = true,
-            .linux_pdeathsig = if (Environment.isLinux) std.posix.SIG.KILL else null,
+            .linux_pdeathsig = if (Environment.isLinux) @as(u8, @intCast(@intFromEnum(std.posix.SIG.KILL))) else null,
         };
         var spawned = try (try bun.spawn.spawnProcess(&options, coord.argv.ptr, coord.envps[this.idx].ptr)).unwrap();
         defer spawned.extra_pipes.deinit();
@@ -172,7 +172,7 @@ pub fn dispatch(this: *Worker, file_idx: u32, file: []const u8) void {
     f.str(file);
     this.ipc.send(f.finish());
     this.inflight = file_idx;
-    this.dispatched_at = std.time.milliTimestamp();
+    this.dispatched_at = bun.SystemTimer.milliTimestamp();
 }
 
 pub fn shutdown(this: *Worker) void {

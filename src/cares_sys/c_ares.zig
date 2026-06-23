@@ -266,7 +266,7 @@ pub const struct_hostent = extern struct {
 
 pub const hostent_with_ttls = struct {
     hostent: *struct_hostent,
-    ttls: [256]c_int = [_]c_int{-1} ** 256,
+    ttls: [256]c_int = @splat(-1),
 
     pub const toJSResponse = @import("../runtime/dns_jsc/cares_jsc.zig").hostentWithTtlsToJSResponse;
 
@@ -579,7 +579,7 @@ pub const Channel = opaque {
                 break :brk null;
             }
 
-            break :brk (std.fmt.bufPrintZ(&port_buf, "{d}", .{port}) catch unreachable).ptr;
+            break :brk (bun.fmt.bufPrintZ(&port_buf, "{d}", .{port}) catch unreachable).ptr;
         };
 
         var hints_buf: [3]AddrInfo_hints = bun.zero([3]AddrInfo_hints);
@@ -1142,9 +1142,9 @@ pub const struct_any_reply = struct {
     }
 
     pub fn deinit(this: *struct_any_reply) void {
-        inline for (@typeInfo(struct_any_reply).@"struct".fields) |field| {
-            if (comptime std.mem.endsWith(u8, field.name, "_reply")) {
-                if (@field(this, field.name)) |reply| {
+        inline for (@typeInfo(struct_any_reply).@"struct".field_names) |field_name| {
+            if (comptime std.mem.endsWith(u8, field_name, "_reply")) {
+                if (@field(this, field_name)) |reply| {
                     reply.deinit();
                 }
             }

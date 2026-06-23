@@ -1440,8 +1440,8 @@ pub const ThreadSafeFunction = struct {
 
     // User implementation error can cause this number to go negative.
     thread_count: std.atomic.Value(i64) = std.atomic.Value(i64).init(0),
-    // for std.condvar
-    lock: std.Thread.Mutex = .{},
+    // for condvar
+    lock: bun.Mutex = .{},
 
     event_loop: *jsc.EventLoop,
     tracker: jsc.Debugger.AsyncTaskTracker,
@@ -1460,7 +1460,7 @@ pub const ThreadSafeFunction = struct {
 
     callback: Callback = undefined,
     dispatch_state: DispatchState.Atomic = DispatchState.Atomic.init(.idle),
-    blocking_condvar: std.Thread.Condition = .{},
+    blocking_condvar: bun.threading.Condition = .{},
     closing: std.atomic.Value(ClosingState) = std.atomic.Value(ClosingState).init(.not_closing),
     aborted: std.atomic.Value(bool) = std.atomic.Value(bool).init(true),
 
@@ -2480,15 +2480,15 @@ pub fn fixDeadCodeElimination() void {
     }
 
     inline for (comptime std.meta.declarations(uv_functions_to_export)) |decl| {
-        std.mem.doNotOptimizeAway(&@field(uv_functions_to_export, decl.name));
+        std.mem.doNotOptimizeAway(&@field(uv_functions_to_export, decl));
     }
 
     inline for (comptime std.meta.declarations(V8API)) |decl| {
-        std.mem.doNotOptimizeAway(&@field(V8API, decl.name));
+        std.mem.doNotOptimizeAway(&@field(V8API, decl));
     }
 
     inline for (comptime std.meta.declarations(posix_platform_specific_v8_apis)) |decl| {
-        std.mem.doNotOptimizeAway(&@field(posix_platform_specific_v8_apis, decl.name));
+        std.mem.doNotOptimizeAway(&@field(posix_platform_specific_v8_apis, decl));
     }
 
     std.mem.doNotOptimizeAway(&@import("../runtime/node/buffer.zig").BufferVectorized.fill);

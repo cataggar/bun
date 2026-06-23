@@ -419,7 +419,7 @@ pub fn len(value: anytype) usize {
             .slice => value.len,
         },
         .@"struct" => |info| if (info.is_tuple) {
-            return info.fields.len;
+            return info.field_names.len;
         } else @compileError("invalid type given to std.mem.len"),
         else => @compileError("invalid type given to std.mem.len"),
     };
@@ -442,12 +442,12 @@ fn Span(comptime T: type) type {
                 },
                 .c => {
                     new_ptr_info.sentinel_ptr = &@as(ptr_info.child, 0);
-                    new_ptr_info.is_allowzero = false;
+                    new_ptr_info.attrs.@"allowzero" = false;
                 },
                 .many, .slice => {},
             }
             new_ptr_info.size = .slice;
-            return @Type(.{ .pointer = new_ptr_info });
+            return meta.Reify(.{ .pointer = new_ptr_info });
         },
         else => @compileError("invalid type given to std.mem.Span: " ++ @typeName(T)),
     }
@@ -819,7 +819,15 @@ pub const simdutf = @import("./simdutf_sys/simdutf.zig");
 
 pub var start_time: i128 = 0;
 
-pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.fs.File.OpenFlags) !std.fs.File {
+var blocking_io_instance: std.Io.Threaded = .init_single_threaded;
+/// Single-threaded blocking `std.Io` instance for simple file/stdout/stderr
+/// operations migrated off the removed synchronous `std.fs.File`/`std.io` APIs
+/// ("Writergate"). Prefer `bun.Output` or `bun.sys` where available.
+pub fn blockingIo() std.Io {
+    return blocking_io_instance.io();
+}
+
+pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.Io.Dir.OpenFileOptions) !std.Io.File {
     var flags: i32 = 0;
     switch (open_flags.mode) {
         .read_only => flags |= O.RDONLY,
@@ -828,10 +836,10 @@ pub fn openFileZ(pathZ: [:0]const u8, open_flags: std.fs.File.OpenFlags) !std.fs
     }
 
     const res = try sys.open(pathZ, flags, 0).unwrap();
-    return std.fs.File{ .handle = res.cast() };
+    return std.Io.File{ .handle = res.cast(), .flags = .{ .nonblocking = false } };
 }
 
-pub fn openFile(path_: []const u8, open_flags: std.fs.File.OpenFlags) !std.fs.File {
+pub fn openFile(path_: []const u8, open_flags: std.Io.Dir.OpenFileOptions) !std.Io.File {
     if (comptime Environment.isWindows) {
         var flags: i32 = 0;
         switch (open_flags.mode) {
@@ -847,7 +855,7 @@ pub fn openFile(path_: []const u8, open_flags: std.fs.File.OpenFlags) !std.fs.Fi
     return try openFileZ(&try std.posix.toPosixPath(path_), open_flags);
 }
 
-pub fn openDir(dir: std.fs.Dir, path_: [:0]const u8) !std.fs.Dir {
+pub fn openDir(dir: std.Io.Dir, path_: [:0]const u8) !std.Io.Dir {
     if (comptime Environment.isWindows) {
         const res = try sys.openDirAtWindowsA(.fromStdDir(dir), path_, .{ .iterable = true, .can_rename_or_delete = true, .read_only = true }).unwrap();
         return res.stdDir();
@@ -857,13 +865,13 @@ pub fn openDir(dir: std.fs.Dir, path_: [:0]const u8) !std.fs.Dir {
     }
 }
 
-pub fn openDirNoRenamingOrDeletingWindows(dir: FD, path_: [:0]const u8) !std.fs.Dir {
+pub fn openDirNoRenamingOrDeletingWindows(dir: FD, path_: [:0]const u8) !std.Io.Dir {
     if (comptime !Environment.isWindows) @compileError("use openDir!");
     const res = try sys.openDirAtWindowsA(dir, path_, .{ .iterable = true, .can_rename_or_delete = false, .read_only = true }).unwrap();
     return res.stdDir();
 }
 
-pub fn openDirA(dir: std.fs.Dir, path_: []const u8) !std.fs.Dir {
+pub fn openDirA(dir: std.Io.Dir, path_: []const u8) !std.Io.Dir {
     if (comptime Environment.isWindows) {
         const res = try sys.openDirAtWindowsA(.fromStdDir(dir), path_, .{ .iterable = true, .can_rename_or_delete = true, .read_only = true }).unwrap();
         return res.stdDir();
@@ -887,7 +895,7 @@ pub fn openDirForIterationOSPath(dir: FD, path_: []const OSPathChar) sys.Maybe(F
     return sys.openatA(dir, path_, O.DIRECTORY | O.CLOEXEC | O.RDONLY, 0);
 }
 
-pub fn openDirAbsolute(path_: []const u8) !std.fs.Dir {
+pub fn openDirAbsolute(path_: []const u8) !std.Io.Dir {
     const fd = if (comptime Environment.isWindows)
         try sys.openDirAtWindowsA(invalid_fd, path_, .{ .iterable = true, .can_rename_or_delete = true, .read_only = true }).unwrap()
     else
@@ -896,7 +904,7 @@ pub fn openDirAbsolute(path_: []const u8) !std.fs.Dir {
     return fd.stdDir();
 }
 
-pub fn openDirAbsoluteNotForDeletingOrRenaming(path_: []const u8) !std.fs.Dir {
+pub fn openDirAbsoluteNotForDeletingOrRenaming(path_: []const u8) !std.Io.Dir {
     const fd = if (comptime Environment.isWindows)
         try sys.openDirAtWindowsA(invalid_fd, path_, .{ .iterable = true, .can_rename_or_delete = false, .read_only = true }).unwrap()
     else
@@ -911,7 +919,10 @@ pub fn openDirAbsoluteNotForDeletingOrRenaming(path_: []const u8) !std.fs.Dir {
 /// This wrapper exists to avoid the call to sliceTo(0)
 /// Zig's sliceTo(0) is scalar
 pub fn getenvZAnyCase(key: [:0]const u8) ?[]const u8 {
-    for (std.os.environ) |lineZ| {
+    // Zig 0.17 removed `std.os.environ`; use `std.c.environ` which is
+    // `[*:null]?[*:0]u8` (a null-terminated array of optional C strings).
+    var i: usize = 0;
+    while (std.c.environ[i]) |lineZ| : (i += 1) {
         const line = sliceTo(lineZ, 0);
         const key_end = strings.indexOfCharUsize(line, '=') orelse line.len;
         if (strings.eqlCaseInsensitiveASCII(line[0..key_end], key, true)) {
@@ -1105,12 +1116,182 @@ pub const StringHashMapContext = struct {
     };
 };
 
+/// Managed `ArrayHashMap` shim.
+///
+/// Zig 0.17 ("Writergate") removed the managed `std.ArrayHashMap` wrapper; only
+/// the unmanaged `std.ArrayHashMapUnmanaged` (`array_hash_map.Custom`) remains.
+/// Bun has 100+ call sites that rely on the managed API (a stored allocator +
+/// `.init(allocator)` + allocator-free `.put`/`.getOrPut`/`.deinit`). Rather than
+/// thread an allocator through every one of them, this thin wrapper restores the
+/// old managed surface on top of the unmanaged map.
+///
+/// `Context` is expected to be zero-sized (only `hash`/`eql` methods), as is the
+/// case for Bun's string contexts, so the allocator-and-context-free unmanaged
+/// methods are used directly.
+pub fn ArrayHashMapManaged(
+    comptime K: type,
+    comptime V: type,
+    comptime Context: type,
+    comptime store_hash: bool,
+) type {
+    return struct {
+        unmanaged: Unmanaged = .empty,
+        allocator: std.mem.Allocator,
+
+        const Self = @This();
+        pub const Unmanaged = std.ArrayHashMapUnmanaged(K, V, Context, store_hash);
+        pub const Entry = Unmanaged.Entry;
+        pub const KV = Unmanaged.KV;
+        pub const GetOrPutResult = Unmanaged.GetOrPutResult;
+        pub const Iterator = Unmanaged.Iterator;
+        pub const Index = Unmanaged.Index;
+
+        pub fn init(allocator: std.mem.Allocator) Self {
+            return .{ .unmanaged = .empty, .allocator = allocator };
+        }
+
+        /// Compatibility shim for the removed managed `initContext`. `Context` is
+        /// zero-sized for Bun's string contexts, so `ctx` is unused.
+        pub fn initContext(allocator: std.mem.Allocator, ctx: Context) Self {
+            _ = ctx;
+            return .{ .unmanaged = .empty, .allocator = allocator };
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.unmanaged.deinit(self.allocator);
+            self.* = undefined;
+        }
+
+        pub fn clearRetainingCapacity(self: *Self) void {
+            self.unmanaged.clearRetainingCapacity();
+        }
+        pub fn clearAndFree(self: *Self) void {
+            self.unmanaged.clearAndFree(self.allocator);
+        }
+        pub fn count(self: Self) usize {
+            return self.unmanaged.count();
+        }
+        pub fn capacity(self: Self) usize {
+            return self.unmanaged.capacity();
+        }
+        pub fn keys(self: Self) []K {
+            return self.unmanaged.keys();
+        }
+        pub fn values(self: Self) []V {
+            return self.unmanaged.values();
+        }
+        pub fn iterator(self: *const Self) Iterator {
+            return self.unmanaged.iterator();
+        }
+
+        pub fn put(self: *Self, key: K, value: V) !void {
+            return self.unmanaged.put(self.allocator, key, value);
+        }
+        pub fn putNoClobber(self: *Self, key: K, value: V) !void {
+            return self.unmanaged.putNoClobber(self.allocator, key, value);
+        }
+        pub fn fetchPut(self: *Self, key: K, value: V) !?KV {
+            return self.unmanaged.fetchPut(self.allocator, key, value);
+        }
+        pub fn getOrPut(self: *Self, key: K) !GetOrPutResult {
+            return self.unmanaged.getOrPut(self.allocator, key);
+        }
+        pub fn getOrPutValue(self: *Self, key: K, value: V) !GetOrPutResult {
+            return self.unmanaged.getOrPutValue(self.allocator, key, value);
+        }
+        pub fn ensureTotalCapacity(self: *Self, new_capacity: usize) !void {
+            return self.unmanaged.ensureTotalCapacity(self.allocator, new_capacity);
+        }
+        pub fn ensureUnusedCapacity(self: *Self, additional_capacity: usize) !void {
+            return self.unmanaged.ensureUnusedCapacity(self.allocator, additional_capacity);
+        }
+
+        pub fn putAssumeCapacity(self: *Self, key: K, value: V) void {
+            self.unmanaged.putAssumeCapacity(key, value);
+        }
+        pub fn putAssumeCapacityNoClobber(self: *Self, key: K, value: V) void {
+            self.unmanaged.putAssumeCapacityNoClobber(key, value);
+        }
+        pub fn getOrPutAssumeCapacity(self: *Self, key: K) GetOrPutResult {
+            return self.unmanaged.getOrPutAssumeCapacity(key);
+        }
+
+        pub fn get(self: Self, key: K) ?V {
+            return self.unmanaged.get(key);
+        }
+        pub fn getPtr(self: Self, key: K) ?*V {
+            return self.unmanaged.getPtr(key);
+        }
+        pub fn getEntry(self: Self, key: K) ?Entry {
+            return self.unmanaged.getEntry(key);
+        }
+        pub fn getKey(self: Self, key: K) ?K {
+            return self.unmanaged.getKey(key);
+        }
+        pub fn getKeyPtr(self: Self, key: K) ?*K {
+            return self.unmanaged.getKeyPtr(key);
+        }
+        pub fn getIndex(self: Self, key: K) ?usize {
+            return self.unmanaged.getIndex(key);
+        }
+        pub fn contains(self: Self, key: K) bool {
+            return self.unmanaged.contains(key);
+        }
+
+        pub fn swapRemove(self: *Self, key: K) bool {
+            return self.unmanaged.swapRemove(key);
+        }
+        pub fn fetchSwapRemove(self: *Self, key: K) ?KV {
+            return self.unmanaged.fetchSwapRemove(key);
+        }
+        pub fn orderedRemove(self: *Self, key: K) bool {
+            return self.unmanaged.orderedRemove(key);
+        }
+        pub fn fetchOrderedRemove(self: *Self, key: K) ?KV {
+            return self.unmanaged.fetchOrderedRemove(key);
+        }
+        pub fn swapRemoveAt(self: *Self, index: usize) void {
+            self.unmanaged.swapRemoveAt(index);
+        }
+        pub fn orderedRemoveAt(self: *Self, index: usize) void {
+            self.unmanaged.orderedRemoveAt(index);
+        }
+        pub fn shrinkRetainingCapacity(self: *Self, new_len: usize) void {
+            self.unmanaged.shrinkRetainingCapacity(new_len);
+        }
+        pub fn shrinkAndFree(self: *Self, new_len: usize) void {
+            self.unmanaged.shrinkAndFree(self.allocator, new_len);
+        }
+        pub fn pop(self: *Self) ?KV {
+            return self.unmanaged.pop();
+        }
+        pub fn reIndex(self: *Self) !void {
+            return self.unmanaged.reIndex(self.allocator);
+        }
+
+        pub fn clone(self: Self) !Self {
+            return .{ .unmanaged = try self.unmanaged.clone(self.allocator), .allocator = self.allocator };
+        }
+        pub fn move(self: *Self) Self {
+            const result = self.*;
+            self.unmanaged = .empty;
+            return result;
+        }
+    };
+}
+
 pub fn StringArrayHashMap(comptime Type: type) type {
-    return std.ArrayHashMap([]const u8, Type, StringArrayHashMapContext, true);
+    return ArrayHashMapManaged([]const u8, Type, StringArrayHashMapContext, true);
+}
+
+/// Managed `AutoArrayHashMap` shim (removed in Zig 0.17 along with the other
+/// managed array hash maps). Restores the old managed API over the unmanaged map.
+pub fn AutoArrayHashMap(comptime K: type, comptime V: type) type {
+    return ArrayHashMapManaged(K, V, std.array_hash_map.AutoContext(K), !std.array_hash_map.autoEqlIsCheap(K));
 }
 
 pub fn CaseInsensitiveASCIIStringArrayHashMap(comptime Type: type) type {
-    return std.ArrayHashMap([]const u8, Type, CaseInsensitiveASCIIStringContext, true);
+    return ArrayHashMapManaged([]const u8, Type, CaseInsensitiveASCIIStringContext, true);
 }
 
 pub fn CaseInsensitiveASCIIStringArrayHashMapUnmanaged(comptime Type: type) type {
@@ -1123,6 +1304,16 @@ pub fn StringArrayHashMapUnmanaged(comptime Type: type) type {
 
 pub fn StringHashMap(comptime Type: type) type {
     return std.HashMap([]const u8, Type, StringHashMapContext, std.hash_map.default_max_load_percentage);
+}
+
+/// Duplicate `slice` into a newly allocated, null-terminated slice.
+///
+/// Zig 0.17 ("Writergate") removed `std.mem.Allocator.dupeZ`. This restores it as
+/// a free function: `bun.dupeZ(allocator, u8, s)` becomes `bun.dupeZ(allocator, u8, s)`.
+pub fn dupeZ(allocator: std.mem.Allocator, comptime T: type, slice: []const T) std.mem.Allocator.Error![:0]T {
+    const new_buf = try allocator.allocSentinel(T, slice.len, 0);
+    @memcpy(new_buf, slice);
+    return new_buf;
 }
 
 pub fn StringHashMapUnmanaged(comptime Type: type) type {
@@ -1240,23 +1431,27 @@ var needs_proc_self_workaround: bool = false;
 // necessary on linux because other platforms don't have an optional
 // /proc/self/fd
 fn getFdPathViaCWD(fd: std.posix.fd_t, buf: *bun.PathBuffer) ![]u8 {
-    const prev_fd = try std.posix.openatZ(std.fs.cwd().fd, ".", .{ .DIRECTORY = true }, 0);
+    const prev_fd = try std.posix.openatZ(std.Io.Dir.cwd().handle, ".", .{ .DIRECTORY = true }, 0);
     var needs_chdir = false;
     defer {
-        if (needs_chdir) std.posix.fchdir(prev_fd) catch unreachable;
-        std.posix.close(prev_fd);
+        if (needs_chdir) _ = std.c.fchdir(prev_fd);
+        _ = std.c.close(prev_fd);
     }
-    try std.posix.fchdir(fd);
+    if (std.c.fchdir(fd) != 0) return error.Fchdir;
     needs_chdir = true;
-    return std.posix.getcwd(buf);
+    return getcwd(buf);
 }
 
-pub const getcwd = std.posix.getcwd;
+/// Zig 0.17 removed `std.posix.getcwd`; route through `bun.sys`.
+pub fn getcwd(buf: *bun.PathBuffer) ![]u8 {
+    const slice = try sys.getcwd(buf).unwrap();
+    return buf[0..slice.len];
+}
 
 pub fn getcwdAlloc(allocator: std.mem.Allocator) ![:0]u8 {
     var temp: PathBuffer = undefined;
     const temp_slice = try getcwd(&temp);
-    return allocator.dupeZ(u8, temp_slice);
+    return dupeZ(allocator, u8, temp_slice);
 }
 
 /// TODO: move to bun.sys and add a method onto FD
@@ -1282,21 +1477,26 @@ pub fn getFdPath(fd: FD, buf: *bun.PathBuffer) ![]u8 {
             needs_proc_self_workaround = bun.env_var.BUN_NEEDS_PROC_SELF_WORKAROUND.get();
         }
     } else if (comptime !Environment.isLinux) {
-        return try std.os.getFdPath(fd.native(), buf);
+        return switch (sys.getFdPath(fd, buf)) {
+            .result => |p| p,
+            .err => |err| err.toZigErr(),
+        };
     }
 
     if (needs_proc_self_workaround) {
         return getFdPathViaCWD(fd.native(), buf);
     }
 
-    return std.os.getFdPath(fd.native(), buf) catch |err| {
-        if (err == error.FileNotFound and !needs_proc_self_workaround) {
-            needs_proc_self_workaround = true;
-            return getFdPathViaCWD(fd.native(), buf);
-        }
-
-        return err;
-    };
+    switch (sys.getFdPath(fd, buf)) {
+        .result => |p| return p,
+        .err => |err| {
+            if (err.getErrno() == .NOENT and !needs_proc_self_workaround) {
+                needs_proc_self_workaround = true;
+                return getFdPathViaCWD(fd.native(), buf);
+            }
+            return err.toZigErr();
+        },
+    }
 }
 
 /// TODO: move to bun.sys and add a method onto FD
@@ -1401,11 +1601,11 @@ fn SliceTo(comptime T: type, comptime end: std.meta.Elem(T)) type {
                 .c => {
                     new_ptr_info.sentinel_ptr = &end;
                     // C pointers are always allowzero, but we don't want the return type to be.
-                    assert(new_ptr_info.is_allowzero);
-                    new_ptr_info.is_allowzero = false;
+                    assert(new_ptr_info.attrs.@"allowzero");
+                    new_ptr_info.attrs.@"allowzero" = false;
                 },
             }
-            return @Type(.{ .pointer = new_ptr_info });
+            return meta.Reify(.{ .pointer = new_ptr_info });
         },
         else => {},
     }
@@ -1548,13 +1748,18 @@ pub noinline fn maybeHandlePanicDuringProcessReload() void {
             std.atomic.spinLoopHint();
 
             if (comptime Environment.isPosix) {
-                std.posix.nanosleep(1, 0);
+                // Zig 0.17 removed `std.posix.nanosleep`; call libc directly.
+                var req: std.c.timespec = .{ .sec = 1, .nsec = 0 };
+                _ = nanosleep(&req, null);
             }
         }
     }
 }
 
 extern "c" fn on_before_reload_process_linux() void;
+extern "c" fn nanosleep(rqtp: *const std.c.timespec, rmtp: ?*std.c.timespec) c_int;
+extern "c" fn _NSGetArgc() *c_int;
+extern "c" fn _NSGetArgv() *[*][*:0]u8;
 
 /// Reload Bun's process. This clones envp, argv, and gets the current
 /// executable path.
@@ -1609,7 +1814,7 @@ pub fn reloadProcess(
 
     const dupe_argv = allocator.allocSentinel(?[*:0]const u8, bun.argv.len, null) catch unreachable;
     for (bun.argv, dupe_argv) |src, *dest| {
-        dest.* = (allocator.dupeZ(u8, src) catch unreachable).ptr;
+        dest.* = (dupeZ(allocator, u8, src) catch unreachable).ptr;
     }
 
     const environ_slice = std.mem.span(std.c.environ);
@@ -1618,7 +1823,7 @@ pub fn reloadProcess(
         if (src == null) {
             dest.* = null;
         } else {
-            dest.* = (allocator.dupeZ(u8, sliceTo(src.?, 0)) catch unreachable).ptr;
+            dest.* = (dupeZ(allocator, u8, sliceTo(src.?, 0)) catch unreachable).ptr;
         }
     }
 
@@ -1658,7 +1863,7 @@ pub fn reloadProcess(
                 }
                 Output.panic("Unexpected error while reloading: {d} {s}", .{ err.errno, @tagName(err.getErrno()) });
             },
-            .result => |_| {
+            .result => {
                 if (may_return) {
                     Output.errGeneric("Failed to reload process", .{});
                     return;
@@ -1668,16 +1873,15 @@ pub fn reloadProcess(
         }
     } else if (comptime Environment.isPosix) {
         if (comptime Environment.isLinux or Environment.isFreeBSD) on_before_reload_process_linux();
-        const err = std.posix.execveZ(
-            exec_path,
-            newargv,
-            envp,
-        );
+        // Zig 0.17 removed `std.posix.execveZ`; call libc directly. execve only
+        // returns on failure.
+        _ = std.c.execve(exec_path, newargv, envp);
+        const errno: std.c.E = @enumFromInt(std.c._errno().*);
         if (may_return) {
-            Output.errGeneric("Failed to reload process: {s}", .{@errorName(err)});
+            Output.errGeneric("Failed to reload process: {s}", .{@tagName(errno)});
             return;
         }
-        Output.panic("Unexpected error while reloading: {s}", .{@errorName(err)});
+        Output.panic("Unexpected error while reloading: {s}", .{@tagName(errno)});
     } else {
         @compileError("unsupported platform for reloadProcess");
     }
@@ -1897,29 +2101,30 @@ pub fn HiveRef(comptime T: type, comptime capacity: u16) type {
 pub const tracy = @import("./perf/tracy.zig");
 pub const trace = tracy.trace;
 
-pub fn openFileForPath(file_path: [:0]const u8) !std.fs.File {
+pub fn openFileForPath(file_path: [:0]const u8) !std.Io.File {
     if (Environment.isWindows)
         return std.fs.cwd().openFileZ(file_path, .{});
 
     const O_PATH = if (comptime Environment.isLinux) O.PATH else O.RDONLY;
     const flags: u32 = O.CLOEXEC | O.NOCTTY | O_PATH;
 
-    const fd = try std.posix.openZ(file_path, O.toPacked(flags), 0);
-    return std.fs.File{
-        .handle = fd,
+    const fd = try sys.open(file_path, @bitCast(flags), 0).unwrap();
+    return std.Io.File{
+        .handle = fd.cast(),
+        .flags = .{ .nonblocking = false },
     };
 }
 
-pub fn openDirForPath(file_path: [:0]const u8) !std.fs.Dir {
+pub fn openDirForPath(file_path: [:0]const u8) !std.Io.Dir {
     if (Environment.isWindows)
         return std.fs.cwd().openDirZ(file_path, .{});
 
     const O_PATH = if (comptime Environment.isLinux) O.PATH else O.RDONLY;
     const flags: u32 = O.CLOEXEC | O.NOCTTY | O.DIRECTORY | O_PATH;
 
-    const fd = try std.posix.openZ(file_path, O.toPacked(flags), 0);
-    return std.fs.Dir{
-        .fd = fd,
+    const fd = try sys.open(file_path, @bitCast(flags), 0).unwrap();
+    return std.Io.Dir{
+        .handle = fd.cast(),
     };
 }
 
@@ -2002,7 +2207,7 @@ const WindowsStat = extern struct {
     }
 };
 
-pub const Stat = if (Environment.isWindows) windows.libuv.uv_stat_t else std.posix.Stat;
+pub const Stat = if (Environment.isWindows) windows.libuv.uv_stat_t else sys.PosixStat;
 pub const StatFS = switch (Environment.os) {
     .mac, .linux, .freebsd => bun.c.struct_statfs,
     .windows => windows.libuv.uv_statfs_t,
@@ -2149,10 +2354,30 @@ pub fn appendOptionsEnv(env: []const u8, comptime ArgType: type, args: *std.arra
 }
 
 pub fn initArgv() !void {
-    if (comptime Environment.isPosix) {
-        argv = try bun.default_allocator.alloc([:0]const u8, std.os.argv.len);
-        for (0..argv.len) |i| {
-            argv[i] = std.mem.sliceTo(std.os.argv[i], 0);
+    if (comptime Environment.isLinux) {
+        // Zig 0.17 ("Writergate") removed the `std.os.argv` global. On Linux read
+        // the process arguments from /proc/self/cmdline (NUL-separated, with a
+        // trailing NUL).
+        const data = switch (sys.File.readFrom(FD.cwd(), "/proc/self/cmdline", default_allocator)) {
+            .result => |d| d,
+            .err => |err| return err.toZigErr(),
+        };
+        var list: std.ArrayListUnmanaged([:0]const u8) = .empty;
+        var start: usize = 0;
+        for (data, 0..) |byte, i| {
+            if (byte == 0) {
+                try list.append(default_allocator, data[start..i :0]);
+                start = i + 1;
+            }
+        }
+        argv = try list.toOwnedSlice(default_allocator);
+    } else if (comptime Environment.isMac) {
+        // Darwin exposes argc/argv via crt_externs.
+        const argc: usize = @intCast(_NSGetArgc().*);
+        const raw = _NSGetArgv().*;
+        argv = try default_allocator.alloc([:0]const u8, argc);
+        for (0..argc) |i| {
+            argv[i] = std.mem.sliceTo(raw[i], 0);
         }
     } else if (comptime Environment.isWindows) {
         // Zig's implementation of `std.process.argsAlloc()`on Windows platforms
@@ -2283,13 +2508,13 @@ pub inline fn serializableInto(comptime T: type, init: anytype) T {
     return result.*;
 }
 
-/// Like std.fs.Dir.makePath except instead of infinite looping on dangling
+/// Like std.Io.Dir.makePath except instead of infinite looping on dangling
 /// symlink, it deletes the symlink and tries again.
-pub fn makePath(dir: std.fs.Dir, sub_path: []const u8) !void {
-    var it = try std.fs.path.componentIterator(sub_path);
+pub fn makePath(dir: std.Io.Dir, sub_path: []const u8) !void {
+    var it = std.fs.path.componentIterator(sub_path);
     var component = it.last() orelse return;
     while (true) {
-        dir.makeDir(component.path) catch |err| switch (err) {
+        dir.createDir(blockingIo(), component.path, .default_dir) catch |err| switch (err) {
             error.PathAlreadyExists => {
                 var path_buf2: [MAX_PATH_BYTES * 2]u8 = undefined;
                 copy(u8, &path_buf2, component.path);
@@ -2300,7 +2525,7 @@ pub fn makePath(dir: std.fs.Dir, sub_path: []const u8) !void {
                 const is_dir = S.ISDIR(@intCast(result.mode));
                 // dangling symlink
                 if (!is_dir) {
-                    dir.deleteTree(component.path) catch {};
+                    dir.deleteTree(blockingIo(), component.path) catch {};
                     continue;
                 }
             },
@@ -2314,9 +2539,9 @@ pub fn makePath(dir: std.fs.Dir, sub_path: []const u8) !void {
     }
 }
 
-/// Like std.fs.Dir.makePath except instead of infinite looping on dangling
+/// Like std.Io.Dir.makePath except instead of infinite looping on dangling
 /// symlink, it deletes the symlink and tries again.
-pub fn makePathW(dir: std.fs.Dir, sub_path: []const u16) !void {
+pub fn makePathW(dir: std.Io.Dir, sub_path: []const u16) !void {
     // was going to copy/paste makePath and use all W versions but they didn't all exist
     // and this buffer was needed anyway
     var buf: PathBuffer = undefined;
@@ -2368,7 +2593,7 @@ pub const MakePath = struct {
     /// Opens the dir if the path already exists and is a directory.
     /// This function is not atomic, and if it returns an error, the file system may
     /// have been modified regardless.
-    fn makeOpenPathAccessMaskW(self: std.fs.Dir, comptime T: type, sub_path: []const T, access_mask: u32, no_follow: bool) !std.fs.Dir {
+    fn makeOpenPathAccessMaskW(self: std.Io.Dir, comptime T: type, sub_path: []const T, access_mask: u32, no_follow: bool) !std.Io.Dir {
         const Iterator = std.fs.path.ComponentIterator(.windows, T);
         var it = try Iterator.init(sub_path);
         // If there are no components in the path, then create a dummy component with the full path.
@@ -2407,8 +2632,8 @@ pub const MakePath = struct {
         create_disposition: u32,
     };
 
-    fn makeOpenDirAccessMaskW(self: std.fs.Dir, sub_path_w: [*:0]const u16, access_mask: u32, flags: MakeOpenDirAccessMaskWOptions) !std.fs.Dir {
-        var result = std.fs.Dir{
+    fn makeOpenDirAccessMaskW(self: std.Io.Dir, sub_path_w: [*:0]const u16, access_mask: u32, flags: MakeOpenDirAccessMaskWOptions) !std.Io.Dir {
+        var result = std.Io.Dir{
             .fd = undefined,
         };
 
@@ -2457,7 +2682,7 @@ pub const MakePath = struct {
         }
     }
 
-    pub fn makeOpenPath(self: std.fs.Dir, sub_path: anytype, opts: std.fs.Dir.OpenOptions) !std.fs.Dir {
+    pub fn makeOpenPath(self: std.Io.Dir, sub_path: anytype, opts: std.Io.Dir.OpenOptions) !std.Io.Dir {
         if (comptime Environment.isWindows) {
             return makeOpenPathAccessMaskW(
                 self,
@@ -2472,13 +2697,13 @@ pub const MakePath = struct {
             );
         }
 
-        return self.makeOpenPath(sub_path, opts);
+        return self.createDirPathOpen(blockingIo(), sub_path, .{ .open_options = opts });
     }
 
-    /// copy/paste of `std.fs.Dir.makePath` and related functions and modified to support u16 slices.
+    /// copy/paste of `std.Io.Dir.makePath` and related functions and modified to support u16 slices.
     /// inside `MakePath` scope to make deleting later easier.
     /// TODO(dylan-conway) delete `MakePath`
-    pub fn makePath(comptime T: type, self: std.fs.Dir, sub_path: []const T) !void {
+    pub fn makePath(comptime T: type, self: std.Io.Dir, sub_path: []const T) !void {
         if (Environment.isWindows) {
             var dir = try makeOpenPath(self, sub_path, .{});
             dir.close();
@@ -2488,7 +2713,7 @@ pub const MakePath = struct {
         var it = try componentIterator(T, sub_path);
         var component = it.last() orelse return;
         while (true) {
-            std.fs.Dir.makeDir(self, component.path) catch |err| switch (err) {
+            self.createDir(blockingIo(), component.path, .default_dir) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     // TODO stat the file and return an error if it's not a directory
                     // this is important because otherwise a dangling symlink
@@ -2694,11 +2919,76 @@ pub const StackFallbackAllocator = struct {
     }
 };
 
+/// Drop-in replacement for the removed `bun.stackFallback`. Returns an
+/// allocator backed by a comptime-sized inline buffer that falls back to
+/// `fallback_allocator` when the buffer is exhausted. Call `.get()` to obtain
+/// the `Allocator` interface (resets the internal fixed buffer).
+pub fn stackFallback(comptime size: usize, fallback_allocator: std.mem.Allocator) StackFallbackComptime(size) {
+    return StackFallbackComptime(size){
+        .buffer = undefined,
+        .fallback_allocator = fallback_allocator,
+        .fixed_buffer_allocator = undefined,
+    };
+}
+
+pub fn StackFallbackComptime(comptime size: usize) type {
+    return struct {
+        const Self = @This();
+
+        buffer: [size]u8,
+        fallback_allocator: std.mem.Allocator,
+        fixed_buffer_allocator: std.heap.FixedBufferAllocator,
+
+        /// Fetches the `Allocator` interface *and* resets the internal buffer.
+        pub fn get(self: *Self) std.mem.Allocator {
+            self.fixed_buffer_allocator = std.heap.FixedBufferAllocator.init(self.buffer[0..]);
+            return .{
+                .ptr = self,
+                .vtable = &.{
+                    .alloc = alloc,
+                    .resize = resize,
+                    .remap = remap,
+                    .free = free,
+                },
+            };
+        }
+
+        fn alloc(ctx: *anyopaque, n: usize, alignment: std.mem.Alignment, ra: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            return std.heap.FixedBufferAllocator.alloc(&self.fixed_buffer_allocator, n, alignment, ra) orelse
+                self.fallback_allocator.rawAlloc(n, alignment, ra);
+        }
+
+        fn resize(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) bool {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(buf.ptr)) {
+                return std.heap.FixedBufferAllocator.resize(&self.fixed_buffer_allocator, buf, alignment, new_len, ra);
+            }
+            return self.fallback_allocator.rawResize(buf, alignment, new_len, ra);
+        }
+
+        fn remap(ctx: *anyopaque, mem: []u8, alignment: std.mem.Alignment, new_len: usize, ra: usize) ?[*]u8 {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(mem.ptr)) {
+                return std.heap.FixedBufferAllocator.remap(&self.fixed_buffer_allocator, mem, alignment, new_len, ra);
+            }
+            return self.fallback_allocator.rawRemap(mem, alignment, new_len, ra);
+        }
+
+        fn free(ctx: *anyopaque, buf: []u8, alignment: std.mem.Alignment, ra: usize) void {
+            const self: *Self = @ptrCast(@alignCast(ctx));
+            if (self.fixed_buffer_allocator.ownsPtr(buf.ptr)) {
+                return std.heap.FixedBufferAllocator.free(&self.fixed_buffer_allocator, buf, alignment, ra);
+            }
+            return self.fallback_allocator.rawFree(buf, alignment, ra);
+        }
+    };
+}
+
 pub fn todoPanic(
     src: std.builtin.SourceLocation,
     comptime format: []const u8,
-    args: anytype,
-) noreturn {
+    args: anytype,) noreturn {
     @branchHint(.cold);
     analytics.Features.todo_panic = 1;
     Output.panic("TODO: " ++ format ++ " ({s}:{d})", args ++ .{ src.file, src.line });
@@ -2883,13 +3173,13 @@ pub fn iterateDir(dir: FD) DirIterator.Iterator {
 }
 
 fn ReinterpretSliceType(comptime T: type, comptime slice: type) type {
-    const is_const = @typeInfo(slice).pointer.is_const;
+    const is_const = @typeInfo(slice).pointer.attrs.@"const";
     return if (is_const) []const T else []T;
 }
 
 /// Zig has a todo for @ptrCast changing the `.len`. This is the workaround
 pub fn reinterpretSlice(comptime T: type, slice: anytype) ReinterpretSliceType(T, @TypeOf(slice)) {
-    const is_const = @typeInfo(@TypeOf(slice)).pointer.is_const;
+    const is_const = @typeInfo(@TypeOf(slice)).pointer.attrs.@"const";
     const bytes = std.mem.sliceAsBytes(slice);
     const new_ptr = @as(if (is_const) [*]const T else [*]T, @ptrCast(@alignCast(bytes.ptr)));
     return new_ptr[0..@divTrunc(bytes.len, @sizeOf(T))];
@@ -2951,11 +3241,11 @@ pub fn runtimeEmbedFile(
         var once = bun.once(load);
 
         fn load() [:0]const u8 {
-            return std.fs.cwd().readFileAllocOptions(
-                default_allocator,
+            return std.Io.Dir.cwd().readFileAllocOptions(
+                blockingIo(),
                 abs_path,
-                std.math.maxInt(usize),
-                null,
+                default_allocator,
+                .unlimited,
                 .fromByteUnits(@alignOf(u8)),
                 '\x00',
             ) catch |e| {
@@ -3021,9 +3311,30 @@ pub fn selfExePath() ![:0]u8 {
         var lock: Mutex = .{};
 
         pub fn load() ![:0]u8 {
-            const init = try std.fs.selfExePath(&value);
-            @This().len = init.len;
-            value[@This().len] = 0;
+            // Zig 0.17 ("Writergate") removed `std.fs.selfExePath`. Reimplement
+            // per-platform into `value`.
+            const result: [:0]u8 = if (comptime Environment.isLinux) blk: {
+                break :blk switch (sys.readlink("/proc/self/exe", &value)) {
+                    .result => |p| p,
+                    .err => return error.SelfExePathFailed,
+                };
+            } else if (comptime Environment.isMac) blk: {
+                var size: u32 = @intCast(value.len);
+                if (std.c._NSGetExecutablePath(&value, &size) != 0) return error.SelfExePathFailed;
+                const exe_path = sliceTo(@as([*:0]u8, @ptrCast(&value)), 0);
+                break :blk value[0..exe_path.len :0];
+            } else blk: {
+                // Windows: GetModuleFileNameW(null) → WTF-16 → UTF-8.
+                var wide_buf: [(4096 + 1)]u16 = undefined;
+                const wide = windows.getModuleNameW(
+                    windows.GetModuleHandleW(null) orelse return error.SelfExePathFailed,
+                    &wide_buf,
+                ) orelse return error.SelfExePathFailed;
+                const written = strings.convertUTF16ToUTF8InBuffer(&value, wide) catch return error.SelfExePathFailed;
+                value[written.len] = 0;
+                break :blk value[0..written.len :0];
+            };
+            @This().len = result.len;
             set = true;
             return value[0..@This().len :0];
         }
@@ -3490,8 +3801,9 @@ pub const bake = @import("./bake/bake.zig");
 
 /// like std.enums.tagName, except it doesn't lose the sentinel value.
 pub fn tagName(comptime Enum: type, value: Enum) ?[:0]const u8 {
-    return inline for (@typeInfo(Enum).@"enum".fields) |f| {
-        if (@intFromEnum(value) == f.value) break f.name;
+    const e = @typeInfo(Enum).@"enum";
+    return inline for (e.field_names, e.field_values) |f_name, f_value| {
+        if (@intFromEnum(value) == f_value) break f_name;
     } else null;
 }
 
@@ -3599,7 +3911,7 @@ pub fn getThreadCount() u16 {
     const min_threads = 2;
     const ThreadCount = struct {
         pub var cached_thread_count: u16 = 0;
-        var cached_thread_count_once = std.once(getThreadCountOnce);
+        var cached_thread_count_once = bun.once(getThreadCountOnce);
         fn getThreadCountFromUser() ?u16 {
             inline for (.{ "UV_THREADPOOL_SIZE", "GOMAXPROCS" }) |envname| {
                 if (getenvZ(envname)) |env| {
@@ -3621,7 +3933,7 @@ pub fn getThreadCount() u16 {
             cached_thread_count = @min(max_threads, @max(min_threads, getThreadCountFromUser() orelse jsc.wtf.numberOfProcessorCores()));
         }
     };
-    ThreadCount.cached_thread_count_once.call();
+    ThreadCount.cached_thread_count_once.call(.{});
     return ThreadCount.cached_thread_count;
 }
 
@@ -3709,8 +4021,8 @@ pub inline fn wrappingNegation(val: anytype) @TypeOf(val) {
 fn assertNoPointers(T: type) void {
     switch (@typeInfo(T)) {
         .pointer => @compileError("no pointers!"),
-        inline .@"struct", .@"union" => |s| for (s.fields) |field| {
-            assertNoPointers(field.type);
+        inline .@"struct", .@"union" => |s| for (s.field_types) |FieldType| {
+            assertNoPointers(FieldType);
         },
         .array => |a| assertNoPointers(a.child),
         else => {},
@@ -3723,8 +4035,9 @@ pub inline fn writeAnyToHasher(hasher: anytype, thing: anytype) void {
 }
 
 pub const perf = @import("./perf/perf.zig");
+pub const SystemTimer = @import("./perf/system_timer.zig");
 pub inline fn isComptimeKnown(x: anytype) bool {
-    return comptime @typeInfo(@TypeOf(.{x})).@"struct".fields[0].is_comptime;
+    return comptime @typeInfo(@TypeOf(.{x})).@"struct".field_attrs[0].@"comptime";
 }
 
 pub inline fn itemOrNull(comptime T: type, slice: []const T, index: usize) ?T {

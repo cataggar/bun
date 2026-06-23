@@ -99,15 +99,15 @@ pub const Fs = struct {
     ) !Entry {
         var rfs = _fs.fs;
 
-        const file_handle: std.fs.File = if (cached_file_descriptor) |fd| handle: {
-            const handle = std.fs.File{ .handle = fd };
-            try handle.seekTo(0);
+        const file_handle: std.Io.File = if (cached_file_descriptor) |fd| handle: {
+            const handle = fd.stdFile();
+            try bun.sys.setFileOffset(fd, 0).unwrap();
             break :handle handle;
-        } else try std.fs.openFileAbsoluteZ(path, .{ .mode = .read_only });
+        } else try bun.openFileZ(path, .{ .mode = .read_only });
 
         defer {
             if (rfs.needToCloseFiles() and cached_file_descriptor == null) {
-                file_handle.close();
+                file_handle.close(bun.blockingIo());
             }
         }
 
@@ -154,7 +154,7 @@ pub const Fs = struct {
     ) !Entry {
         var rfs = _fs.fs;
 
-        var file_handle: std.fs.File = if (_file_handle) |__file| __file.stdFile() else undefined;
+        var file_handle: std.Io.File = if (_file_handle) |__file| __file.stdFile() else undefined;
 
         if (_file_handle == null) {
             if (FeatureFlags.store_file_descriptors and dirname_fd.isValid()) {
@@ -175,7 +175,7 @@ pub const Fs = struct {
                 file_handle = try bun.openFile(path, .{ .mode = .read_only });
             }
         } else {
-            try file_handle.seekTo(0);
+            try bun.sys.setFileOffset(bun.FD.fromStdFile(file_handle), 0).unwrap();
         }
 
         if (comptime !Environment.isWindows) // skip on Windows because NTCreateFile will do it.
@@ -185,7 +185,7 @@ pub const Fs = struct {
         defer {
             if (will_close) {
                 debug("readFileWithAllocator close({f})", .{bun.fs.printHandle(file_handle.handle)});
-                file_handle.close();
+                file_handle.close(bun.blockingIo());
             }
         }
 

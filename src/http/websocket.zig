@@ -37,16 +37,29 @@ pub const WebsocketHeader = packed struct(u16) {
         // lets check it worked right
         if (comptime Environment.allow_assert) {
             var buf_ = [2]u8{ 0, 0 };
-            var stream = std.io.fixedBufferStream(&buf_);
-            stream.writer().writeInt(u16, @as(u16, @bitCast(header)), .big) catch unreachable;
-            stream.pos = 0;
-            const casted = stream.reader().readInt(u16, .big) catch unreachable;
+            var stream = std.Io.Writer.fixed(&buf_);
+            stream.writeInt(u16, @as(u16, @bitCast(header)), .big) catch unreachable;
+            var reader = std.Io.Reader.fixed(&buf_);
+            const casted = reader.takeInt(u16, .big) catch unreachable;
             bun.assert(casted == @as(u16, @bitCast(header)));
             bun.assert(std.meta.eql(@as(WebsocketHeader, @bitCast(casted)), header));
         }
 
-        try writer.writeInt(u16, @as(u16, @bitCast(header)), .big);
+        var header_bytes: [2]u8 = undefined;
+        std.mem.writeInt(u16, &header_bytes, @as(u16, @bitCast(header)), .big);
+        try writeAllBytes(writer, &header_bytes);
         bun.assert(header.len == packLength(n));
+    }
+
+    fn writeAllBytes(writer: anytype, bytes: []const u8) !void {
+        const Writer = @typeInfo(@TypeOf(writer)).pointer.child;
+        if (comptime @hasField(Writer, "buffer") and @hasField(Writer, "pos")) {
+            @memcpy(writer.buffer[writer.pos..][0..bytes.len], bytes);
+            writer.pos += bytes.len;
+            return;
+        }
+
+        try writer.writeAll(bytes);
     }
 
     pub fn packLength(length: usize) u7 {

@@ -96,11 +96,19 @@ fn writeEntryItem(
 
 // Extremely unfortunate, but necessary due to E.String not accepting pre-rescaped input and this happening at the very end.
 pub fn writeEscapedJSON(index: u32, graph: *const Graph, linker_graph: *const LinkerGraph, chunks: []const Chunk, writer: anytype) !void {
-    var stack = std.heap.stackFallback(4096, bun.default_allocator);
+    var stack = bun.stackFallback(4096, bun.default_allocator);
     const allocator = stack.get();
     var bytes = std.array_list.Managed(u8).init(allocator);
     defer bytes.deinit();
-    try write(index, graph, linker_graph, chunks, bytes.writer());
+    var unmanaged = bytes.moveToUnmanaged();
+    var allocating_writer = std.Io.Writer.Allocating.fromArrayList(allocator, &unmanaged);
+    errdefer allocating_writer.deinit();
+    write(index, graph, linker_graph, chunks, &allocating_writer.writer) catch |err| switch (err) {
+        error.WriteFailed => return error.OutOfMemory,
+        else => |e| return e,
+    };
+    var result_list = allocating_writer.toArrayList();
+    bytes = result_list.toManaged(allocator);
     try bun.js_printer.writePreQuotedString(bytes.items, @TypeOf(writer), writer, '"', false, true, .utf8);
 }
 

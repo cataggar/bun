@@ -444,7 +444,7 @@ pub const Version = struct {
             }
 
             // Allocator necessary for slow paths.
-            var stackFallback = std.heap.stackFallback(1024, bun.default_allocator);
+            var stackFallback = bun.stackFallback(1024, bun.default_allocator);
             const allocator = stackFallback.get();
 
             switch (dependency[0]) {
@@ -807,7 +807,7 @@ pub inline fn parse(
     log: ?*logger.Log,
     manager: ?*PackageManager,
 ) ?Version {
-    const dep = std.mem.trimLeft(u8, dependency, " \t\n\r");
+    const dep = std.mem.trimStart(u8, dependency, " \t\n\r");
     return parseWithTag(allocator, alias, alias_hash, dep, Version.Tag.infer(dep), sliced, log, manager);
 }
 
@@ -821,7 +821,7 @@ pub fn parseWithOptionalTag(
     log: ?*logger.Log,
     package_manager: ?*PackageManager,
 ) ?Version {
-    const dep = std.mem.trimLeft(u8, dependency, " \t\n\r");
+    const dep = std.mem.trimStart(u8, dependency, " \t\n\r");
     return parseWithTag(
         allocator,
         alias,
@@ -1235,13 +1235,13 @@ pub const Behavior = packed struct(u8) {
         return @as(u8, @bitCast(lhs)) & @as(u8, @bitCast(rhs)) != 0;
     }
 
-    pub inline fn add(this: Behavior, kind: @Type(.enum_literal)) Behavior {
+    pub inline fn add(this: Behavior, kind: @TypeOf(.enum_literal)) Behavior {
         var new = this;
         @field(new, @tagName(kind)) = true;
         return new;
     }
 
-    pub inline fn set(this: Behavior, kind: @Type(.enum_literal), value: bool) Behavior {
+    pub inline fn set(this: Behavior, kind: @TypeOf(.enum_literal), value: bool) Behavior {
         var new = this;
         @field(new, @tagName(kind)) = value;
         return new;

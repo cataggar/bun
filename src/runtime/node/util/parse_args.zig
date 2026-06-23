@@ -39,7 +39,7 @@ const TokenKind = enum {
     option,
     @"option-terminator",
 
-    const COUNT = @typeInfo(TokenKind).@"enum".fields.len;
+    const COUNT = @typeInfo(TokenKind).@"enum".field_names.len;
 };
 const Token = union(TokenKind) {
     positional: struct { index: u32, value: ValueRef },
@@ -561,7 +561,7 @@ const ParseArgsState = struct {
     tokens: JSValue,
 
     /// To reuse JSValue for the "kind" field in the output tokens array ("positional", "option", "option-terminator")
-    kinds_jsvalues: [TokenKind.COUNT]?JSValue = [_]?JSValue{null} ** TokenKind.COUNT,
+    kinds_jsvalues: [TokenKind.COUNT]?JSValue = @splat(null),
 
     pub fn handleToken(this: *ParseArgsState, token_generic: Token) bun.JSError!void {
         var globalThis = this.globalThis;
@@ -678,7 +678,7 @@ pub fn parseArgs(globalThis: *JSGlobalObject, callframe: *jsc.CallFrame) bun.JSE
 
     // Phase 0.C: Parse the options definitions
 
-    var options_defs_allocator = std.heap.stackFallback(2048, globalThis.allocator());
+    var options_defs_allocator = bun.stackFallback(2048, globalThis.allocator());
     var option_defs = std.array_list.Managed(OptionDefinition).init(options_defs_allocator.get());
     defer option_defs.deinit();
 

@@ -88,7 +88,7 @@ pub fn alloc(self: *Self, len: usize, offset: usize, flags: std.posix.MAP) bun.s
     switch (bun.sys.mmap(
         null,
         @min(size, self.size),
-        std.posix.PROT.READ | std.posix.PROT.WRITE,
+        @bitCast(std.posix.PROT{ .READ = true, .WRITE = true }),
         flags_mut,
         self.fd,
         offset,
@@ -131,7 +131,7 @@ pub fn create(bytes: []const u8) bun.sys.Maybe(bun.webcore.Blob.Store.Bytes) {
     }
 
     var label_buf: [128]u8 = undefined;
-    const label = std.fmt.bufPrintZ(&label_buf, "memfd-num-{d}", .{memfd_counter.fetchAdd(1, .monotonic)}) catch "";
+    const label = bun.fmt.bufPrintZ(&label_buf, "memfd-num-{d}", .{memfd_counter.fetchAdd(1, .monotonic)}) catch "";
 
     // Using huge pages was slower.
     const fd = switch (bun.sys.memfd_create(label, .non_executable)) {

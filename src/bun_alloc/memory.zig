@@ -96,7 +96,7 @@ pub fn deinit(ptr_or_slice: anytype) void {
     }
 
     const Child = ptr_info.pointer.child;
-    const mutable = !ptr_info.pointer.is_const;
+    const mutable = !ptr_info.pointer.attrs.@"const";
     defer {
         if (comptime mutable) {
             ptr_or_slice.* = undefined;
@@ -130,7 +130,7 @@ pub fn deinit(ptr_or_slice: anytype) void {
                 @compileError("cannot deinit an untagged union: " ++ @typeName(Child));
             }
         },
-        .type, .noreturn, .@"fn", .@"opaque", .frame, .@"anyframe", .enum_literal => {
+        .type, .noreturn, .@"fn", .@"opaque", .frame, .@"anyframe", .enum_literal, .spirv => {
             @compileError("unsupported type for deinit: " ++ @typeName(Child));
         },
     }
@@ -183,7 +183,7 @@ pub fn dropSentinel(ptr: anytype, allocator: std.mem.Allocator) blk: {
     var info = @typeInfo(@TypeOf(ptr));
     info.pointer.size = .slice;
     info.pointer.sentinel_ptr = null;
-    break :blk bun.OOM!@Type(info);
+    break :blk bun.OOM!bun.meta.Reify(info);
 } {
     const info = @typeInfo(@TypeOf(ptr)).pointer;
     const Child = info.child;
@@ -197,7 +197,8 @@ pub fn dropSentinel(ptr: anytype, allocator: std.mem.Allocator) blk: {
         else => @compileError("only slices and many-item pointers are supported"),
     };
 
-    if (allocator.remap(@constCast(slice), slice.len)) |new| return new;
+    const mut_slice: []Child = @constCast(slice)[0..slice.len];
+    if (allocator.remap(mut_slice, mut_slice.len)) |new| return new;
     defer allocator.free(slice);
     return allocator.dupe(Child, slice);
 }

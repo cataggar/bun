@@ -24,7 +24,7 @@ pub export fn Resolver__propForRequireMainPaths(globalThis: *bun.jsc.JSGlobalObj
 pub fn nodeModulePathsJSValue(in_str: bun.String, globalObject: *bun.jsc.JSGlobalObject, use_dirname: bool) callconv(.c) bun.jsc.JSValue {
     var arena = std.heap.ArenaAllocator.init(bun.default_allocator);
     defer arena.deinit();
-    var stack_fallback_allocator = std.heap.stackFallback(1024, arena.allocator());
+    var stack_fallback_allocator = bun.stackFallback(1024, arena.allocator());
     const alloc = stack_fallback_allocator.get();
 
     var list = std.array_list.Managed(bun.String).init(alloc);

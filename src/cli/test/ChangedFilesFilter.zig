@@ -148,9 +148,9 @@ pub fn filter(
         for (importers) |*list| list.deinit(allocator);
         allocator.free(importers);
     }
-    for (importers) |*list| list.* = .{};
+    for (importers) |*list| list.* = .empty;
 
-    var graph_files: std.ArrayListUnmanaged([]const u8) = .{};
+    var graph_files: std.ArrayListUnmanaged([]const u8) = .empty;
     errdefer {
         for (graph_files.items) |p| allocator.free(p);
         graph_files.deinit(allocator);
@@ -197,7 +197,7 @@ pub fn filter(
     // BFS backward from every changed file that participates in the graph.
     var affected = try bun.bit_set.DynamicBitSetUnmanaged.initEmpty(allocator, sources.len);
     defer affected.deinit(allocator);
-    var queue: std.ArrayListUnmanaged(u32) = .{};
+    var queue: std.ArrayListUnmanaged(u32) = .empty;
     defer queue.deinit(allocator);
 
     {
@@ -265,9 +265,9 @@ pub fn initWatchTrigger(allocator: std.mem.Allocator) void {
     }
 
     const path: [:0]const u8 = if (bun.getenvZ(trigger_file_env_var)) |existing|
-        bun.handleOom(allocator.dupeZ(u8, existing))
+        bun.handleOom(bun.dupeZ(allocator, u8, existing))
     else brk: {
-        var rng = std.Random.DefaultPrng.init(@as(u64, @bitCast(std.time.milliTimestamp())) ^
+        var rng = std.Random.DefaultPrng.init(@as(u64, @bitCast(bun.SystemTimer.milliTimestamp())) ^
             @as(u64, @intCast(std.c.getpid())));
         const tmpdir = bun.fs.FileSystem.RealFS.tmpdirPath();
         const fresh = bun.handleOom(std.fmt.allocPrintSentinel(
@@ -302,7 +302,7 @@ fn consumeWatchTrigger(allocator: std.mem.Allocator) ?bun.StringSet {
 
     const trigger_path_raw = bun.getenvZ(trigger_file_env_var) orelse return null;
     if (trigger_path_raw.len == 0) return null;
-    const trigger_path = bun.handleOom(allocator.dupeZ(u8, trigger_path_raw));
+    const trigger_path = bun.handleOom(bun.dupeZ(allocator, u8, trigger_path_raw));
     defer allocator.free(trigger_path);
 
     const contents = switch (bun.sys.File.readFrom(bun.FD.cwd(), trigger_path, allocator)) {

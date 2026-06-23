@@ -43,26 +43,28 @@ pub fn mergeJUnitFragments(coord: *Coordinator, outfile: []const u8, summary: *c
 
     for (coord.crashed_files.items) |idx| {
         const rel = coord.relPath(idx);
-        const w = body.writer(bun.default_allocator);
-        bun.handleOom(w.writeAll("  <testsuite name=\""));
-        bun.handleOom(test_command.escapeXml(rel, w));
-        bun.handleOom(w.writeAll("\" tests=\"1\" assertions=\"0\" failures=\"1\" skipped=\"0\" time=\"0\">\n    <testcase name=\"(worker crashed)\" classname=\""));
-        bun.handleOom(test_command.escapeXml(rel, w));
-        bun.handleOom(w.writeAll(
+        var body_aw = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &body);
+        defer body = body_aw.toArrayList();
+        const w = &body_aw.writer;
+        w.writeAll("  <testsuite name=\"") catch bun.outOfMemory();
+        test_command.escapeXml(rel, w) catch bun.outOfMemory();
+        w.writeAll("\" tests=\"1\" assertions=\"0\" failures=\"1\" skipped=\"0\" time=\"0\">\n    <testcase name=\"(worker crashed)\" classname=\"") catch bun.outOfMemory();
+        test_command.escapeXml(rel, w) catch bun.outOfMemory();
+        w.writeAll(
             \\">
             \\      <failure message="worker process crashed before reporting results"></failure>
             \\    </testcase>
             \\  </testsuite>
             \\
-        ));
+        ) catch bun.outOfMemory();
         totals.tests += 1;
         totals.failures += 1;
     }
 
     var contents: std.ArrayListUnmanaged(u8) = .empty;
     defer contents.deinit(bun.default_allocator);
-    const elapsed_time = @as(f64, @floatFromInt(std.time.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
-    bun.handleOom(contents.writer(bun.default_allocator).print(
+    const elapsed_time = @as(f64, @floatFromInt(bun.SystemTimer.nanoTimestamp() - bun.start_time)) / std.time.ns_per_s;
+    bun.handleOom(contents.print(bun.default_allocator, 
         \\<?xml version="1.0" encoding="UTF-8"?>
         \\<testsuites name="bun test" tests="{d}" assertions="{d}" failures="{d}" skipped="{d}" time="{d}">
         \\
@@ -70,7 +72,7 @@ pub fn mergeJUnitFragments(coord: *Coordinator, outfile: []const u8, summary: *c
     bun.handleOom(contents.appendSlice(bun.default_allocator, body.items));
     bun.handleOom(contents.appendSlice(bun.default_allocator, "</testsuites>\n"));
 
-    const out_z = bun.handleOom(bun.default_allocator.dupeZ(u8, outfile));
+    const out_z = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, outfile));
     defer bun.default_allocator.free(out_z);
     switch (bun.sys.File.openat(.cwd(), out_z, bun.O.WRONLY | bun.O.CREAT | bun.O.TRUNC, 0o664)) {
         .err => |err| Output.err(error.JUnitReportFailed, "Failed to write JUnit report to {s}\n{f}", .{ outfile, err }),

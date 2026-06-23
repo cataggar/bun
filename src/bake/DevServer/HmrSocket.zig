@@ -63,9 +63,10 @@ pub fn onMessage(s: *HmrSocket, ws: AnyWebSocket, msg: []const u8, opcode: uws.O
             const topics = msg[1..];
             if (topics.len > HmrTopic.max_count) return;
             outer: for (topics) |char| {
-                inline for (@typeInfo(HmrTopic).@"enum".fields) |field| {
-                    if (char == field.value) {
-                        @field(new_bits, field.name) = true;
+                const hmr_topic_info = @typeInfo(HmrTopic).@"enum";
+                inline for (hmr_topic_info.field_names, hmr_topic_info.field_values) |field_name, field_value| {
+                    if (char == field_value) {
+                        @field(new_bits, field_name) = true;
                         continue :outer;
                     }
                 }
@@ -163,7 +164,7 @@ pub fn onMessage(s: *HmrSocket, ws: AnyWebSocket, msg: []const u8, opcode: uws.O
                 s.dev.startAsyncBundle(
                     event.entry_points,
                     true,
-                    std.time.Timer.start() catch @panic("timers unsupported"),
+                    bun.SystemTimer.Timer.start() catch @panic("timers unsupported"),
                 ) catch |err| bun.handleOom(err);
 
                 event.entry_points.deinit(s.dev.allocator());
@@ -205,10 +206,9 @@ pub fn onMessage(s: *HmrSocket, ws: AnyWebSocket, msg: []const u8, opcode: uws.O
             }
         },
         .unref_source_map => {
-            var fbs = std.io.fixedBufferStream(msg[1..]);
-            const r = fbs.reader();
+            var r = std.Io.Reader.fixed(msg[1..]);
 
-            const source_map_id = SourceMapStore.Key.init(r.readInt(u64, .little) catch
+            const source_map_id = SourceMapStore.Key.init(r.takeInt(u64, .little) catch
                 return ws.close());
             const kv = s.referenced_source_maps.fetchRemove(source_map_id) orelse {
                 bun.Output.debugWarn("unref_source_map: no entry found: {x}\n", .{source_map_id.get()});

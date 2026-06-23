@@ -1,5 +1,5 @@
 pub const Integrity = extern struct {
-    const empty_digest_buf: [Integrity.digest_buf_len]u8 = [_]u8{0} ** Integrity.digest_buf_len;
+    const empty_digest_buf: [Integrity.digest_buf_len]u8 = @splat(0);
 
     tag: Tag = Tag.unknown,
     /// Possibly a [Subresource Integrity](https://developer.mozilla.org/en-US/docs/Web/Security/Subresource_Integrity) value initially
@@ -83,7 +83,7 @@ pub const Integrity = extern struct {
             };
         }
 
-        const input = std.mem.trimRight(u8, buf[offset..], "=");
+        const input = std.mem.trimEnd(u8, buf[offset..], "=");
 
         // Check if the base64 input would decode to more bytes than we can handle
         const decoded_size = Base64.Decoder.calcSizeForSlice(input) catch {

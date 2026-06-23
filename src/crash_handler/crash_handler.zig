@@ -43,6 +43,31 @@ threadlocal var panic_stage: usize = 0;
 
 threadlocal var inside_native_plugin: ?[*:0]const u8 = null;
 threadlocal var unsupported_uv_function: ?[*:0]const u8 = null;
+const has_crash_cpu_context = std.debug.cpu_context.Native != noreturn;
+const CrashCpuContext = if (has_crash_cpu_context) std.debug.cpu_context.Native else void;
+threadlocal var current_crash_context: ?*const CrashCpuContext = null;
+
+fn stackUnwindOptions(first_address: ?usize, allow_unsafe_unwind: bool) std.debug.StackUnwindOptions {
+    var options: std.debug.StackUnwindOptions = .{
+        .first_address = first_address,
+        .allow_unsafe_unwind = allow_unsafe_unwind,
+    };
+    if (comptime has_crash_cpu_context) {
+        if (current_crash_context) |context| {
+            options.context = context;
+            options.first_address = null;
+        }
+    }
+    return options;
+}
+
+fn debugStackTraceFromErrorReturnTrace(trace: *const std.builtin.StackTrace) std.debug.StackTrace {
+    const len = @min(trace.index, trace.instruction_addresses.len);
+    return .{
+        .return_addresses = trace.instruction_addresses[0..len],
+        .skipped = @enumFromInt(trace.index - len),
+    };
+}
 
 /// This can be set by various parts of the codebase to indicate a broader
 /// action being taken. It is printed when a crash happens, which can help
@@ -53,7 +78,7 @@ threadlocal var unsupported_uv_function: ?[*:0]const u8 = null;
 /// rate or only crash due to assertion failures, are debug-only. See `Action`.
 pub threadlocal var current_action: ?Action = null;
 
-var before_crash_handlers: std.ArrayListUnmanaged(struct { *anyopaque, *const OnBeforeCrash }) = .{};
+var before_crash_handlers: std.ArrayListUnmanaged(struct { *anyopaque, *const OnBeforeCrash }) = .empty;
 
 var before_crash_handlers_mutex: bun.Mutex = .{};
 
@@ -163,19 +188,18 @@ pub const Action = union(enum) {
     }
 };
 
-fn captureLibcBacktrace(begin_addr: usize, stack_trace: *std.builtin.StackTrace) void {
+fn captureLibcBacktrace(begin_addr: usize, addr_buf: []usize) std.debug.StackTrace {
     const backtrace = struct {
         extern "c" fn backtrace(buffer: [*]*anyopaque, size: c_int) c_int;
     }.backtrace;
 
-    const addrs = stack_trace.instruction_addresses;
-    const count = backtrace(@ptrCast(addrs), @intCast(addrs.len));
-    stack_trace.index = @intCast(count);
+    const count: usize = @intCast(backtrace(@ptrCast(addr_buf.ptr), @intCast(addr_buf.len)));
+    var len = count;
 
     // Skip frames until we find begin_addr (or close to it)
     // backtrace() captures everything including crash handler frames
     const tolerance: usize = 128;
-    const skip: usize = for (addrs[0..stack_trace.index], 0..) |addr, i| {
+    const skip: usize = for (addr_buf[0..len], 0..) |addr, i| {
         // Check if this address is close to begin_addr (within tolerance)
         const delta = if (addr >= begin_addr)
             addr - begin_addr
@@ -189,9 +213,14 @@ fn captureLibcBacktrace(begin_addr: usize, stack_trace: *std.builtin.StackTrace)
     // Shift the addresses to skip crash handler frames
     // If begin_addr was not found, use the complete backtrace
     if (skip > 0) {
-        std.mem.copyForwards(usize, addrs, addrs[skip..stack_trace.index]);
-        stack_trace.index -= skip;
+        std.mem.copyForwards(usize, addr_buf, addr_buf[skip..len]);
+        len -= skip;
     }
+
+    return .{
+        .return_addresses = addr_buf[0..len],
+        .skipped = if (count == addr_buf.len) .unknown else .none,
+    };
 }
 
 /// This function is invoked when a crash happens. A crash is classified in `CrashReason`.
@@ -232,7 +261,7 @@ pub fn crashHandler(
                 //
                 // Output.errorWriter() is not used here because it may not be configured
                 // if the program crashes immediately at startup.
-                var writer_w = std.fs.File.stderr().writerStreaming(&.{});
+                var writer_w = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
                 const writer = &writer_w.interface;
 
                 // The format of the panic trace is slightly different in debug
@@ -257,8 +286,8 @@ pub fn crashHandler(
                     Output.flush();
                     Output.Source.Stdio.restore();
 
-                    writer.writeAll("=" ** 60 ++ "\n") catch std.posix.abort();
-                    printMetadata(writer) catch std.posix.abort();
+                    writer.writeAll(&(bun.strings.repeatComptime(u8, "=", 60) ++ "\n".*)) catch std.process.abort();
+                    printMetadata(writer) catch std.process.abort();
 
                     if (inside_native_plugin) |name| {
                         const native_plugin_name = name;
@@ -269,7 +298,7 @@ pub fn crashHandler(
                             \\This indicates either a bug in the native plugin or in Bun.
                             \\
                         ;
-                        writer.print(Output.prettyFmt(fmt, true), .{native_plugin_name}) catch std.posix.abort();
+                        writer.print(Output.prettyFmt(fmt, true), .{native_plugin_name}) catch std.process.abort();
                     } else if (bun.analytics.Features.unsupported_uv_function > 0) {
                         const name = unsupported_uv_function orelse "<unknown>";
                         const fmt =
@@ -283,85 +312,85 @@ pub fn crashHandler(
                             \\
                             \\
                         ;
-                        writer.print(Output.prettyFmt(fmt, true), .{name}) catch std.posix.abort();
+                        writer.print(Output.prettyFmt(fmt, true), .{name}) catch std.process.abort();
                         has_printed_message = true;
                     }
                 } else {
                     if (Output.enable_ansi_colors_stderr) {
-                        writer.writeAll(Output.prettyFmt("<red>", true)) catch std.posix.abort();
+                        writer.writeAll(Output.prettyFmt("<red>", true)) catch std.process.abort();
                     }
-                    writer.writeAll("oh no") catch std.posix.abort();
+                    writer.writeAll("oh no") catch std.process.abort();
                     if (Output.enable_ansi_colors_stderr) {
-                        writer.writeAll(Output.prettyFmt("<r><d>: multiple threads are crashing<r>\n", true)) catch std.posix.abort();
+                        writer.writeAll(Output.prettyFmt("<r><d>: multiple threads are crashing<r>\n", true)) catch std.process.abort();
                     } else {
-                        writer.writeAll(Output.prettyFmt(": multiple threads are crashing\n", true)) catch std.posix.abort();
+                        writer.writeAll(Output.prettyFmt(": multiple threads are crashing\n", true)) catch std.process.abort();
                     }
                 }
 
                 if (reason != .out_of_memory or debug_trace) {
                     if (Output.enable_ansi_colors_stderr) {
-                        writer.writeAll(Output.prettyFmt("<red>", true)) catch std.posix.abort();
+                        writer.writeAll(Output.prettyFmt("<red>", true)) catch std.process.abort();
                     }
 
-                    writer.writeAll("panic") catch std.posix.abort();
+                    writer.writeAll("panic") catch std.process.abort();
 
                     if (Output.enable_ansi_colors_stderr) {
-                        writer.writeAll(Output.prettyFmt("<r><d>", true)) catch std.posix.abort();
+                        writer.writeAll(Output.prettyFmt("<r><d>", true)) catch std.process.abort();
                     }
 
                     if (bun.cli.Cli.is_main_thread) {
-                        writer.writeAll("(main thread)") catch std.posix.abort();
+                        writer.writeAll("(main thread)") catch std.process.abort();
                     } else switch (bun.Environment.os) {
                         .windows => {
                             var name: std.os.windows.PWSTR = undefined;
                             const result = bun.windows.GetThreadDescription(bun.windows.GetCurrentThread(), &name);
                             if (std.os.windows.HRESULT_CODE(result) == .SUCCESS and name[0] != 0) {
-                                writer.print("({f})", .{bun.fmt.utf16(bun.span(name))}) catch std.posix.abort();
+                                writer.print("({f})", .{bun.fmt.utf16(bun.span(name))}) catch std.process.abort();
                             } else {
-                                writer.print("(thread {d})", .{bun.c.GetCurrentThreadId()}) catch std.posix.abort();
+                                writer.print("(thread {d})", .{bun.c.GetCurrentThreadId()}) catch std.process.abort();
                             }
                         },
                         .mac, .linux, .freebsd => {},
                         .wasm => @compileError("TODO"),
                     }
 
-                    writer.writeAll(": ") catch std.posix.abort();
+                    writer.writeAll(": ") catch std.process.abort();
                     if (Output.enable_ansi_colors_stderr) {
-                        writer.writeAll(Output.prettyFmt("<r>", true)) catch std.posix.abort();
+                        writer.writeAll(Output.prettyFmt("<r>", true)) catch std.process.abort();
                     }
-                    writer.print("{f}\n", .{reason}) catch std.posix.abort();
+                    writer.print("{f}\n", .{reason}) catch std.process.abort();
                 }
 
                 if (current_action) |action| {
-                    writer.print("Crashed while {f}\n", .{action}) catch std.posix.abort();
+                    writer.print("Crashed while {f}\n", .{action}) catch std.process.abort();
                 }
 
                 var addr_buf: [20]usize = undefined;
-                var trace_buf: std.builtin.StackTrace = undefined;
+                var trace_buf: std.debug.StackTrace = undefined;
 
                 // If a trace was not provided, compute one now
                 const trace = blk: {
                     if (error_return_trace) |ert| {
-                        if (ert.index > 0) break :blk ert;
+                        if (ert.index > 0) {
+                            trace_buf = debugStackTraceFromErrorReturnTrace(ert);
+                            break :blk &trace_buf;
+                        }
                     }
-                    trace_buf = std.builtin.StackTrace{
-                        .index = 0,
-                        .instruction_addresses = &addr_buf,
-                    };
                     const desired_begin_addr = begin_addr orelse @returnAddress();
-                    std.debug.captureStackTrace(desired_begin_addr, &trace_buf);
+                    trace_buf = std.debug.captureCurrentStackTrace(stackUnwindOptions(desired_begin_addr, true), &addr_buf);
 
                     if (comptime bun.Environment.isGlibc) {
-                        var addr_buf_libc: [20]usize = undefined;
-                        var trace_buf_libc: std.builtin.StackTrace = .{
-                            .index = 0,
-                            .instruction_addresses = &addr_buf_libc,
-                        };
-                        captureLibcBacktrace(desired_begin_addr, &trace_buf_libc);
-                        // Use stack trace from glibc's backtrace() if it has more frames
-                        if (trace_buf_libc.index > trace_buf.index) {
-                            addr_buf = addr_buf_libc;
-                            trace_buf.index = trace_buf_libc.index;
+                        if (current_crash_context == null) {
+                            var addr_buf_libc: [20]usize = undefined;
+                            const trace_buf_libc = captureLibcBacktrace(desired_begin_addr, &addr_buf_libc);
+                            // Use stack trace from glibc's backtrace() if it has more frames
+                            if (trace_buf_libc.return_addresses.len > trace_buf.return_addresses.len) {
+                                addr_buf = addr_buf_libc;
+                                trace_buf = .{
+                                    .return_addresses = addr_buf[0..trace_buf_libc.return_addresses.len],
+                                    .skipped = trace_buf_libc.skipped,
+                                };
+                            }
                         }
                     }
                     break :blk &trace_buf;
@@ -372,19 +401,20 @@ pub fn crashHandler(
 
                     dumpStackTrace(trace.*, .{});
 
-                    trace_str_buf.writer().print("{f}", .{TraceString{
+                    var trace_str_writer = trace_str_buf.writer();
+                    trace_str_writer.print("{f}", .{TraceString{
                         .trace = trace,
                         .reason = reason,
                         .action = .view_trace,
-                    }}) catch std.posix.abort();
+                    }}) catch std.process.abort();
                 } else {
                     if (!has_printed_message) {
                         has_printed_message = true;
-                        writer.writeAll("oh no") catch std.posix.abort();
+                        writer.writeAll("oh no") catch std.process.abort();
                         if (Output.enable_ansi_colors_stderr) {
-                            writer.writeAll(Output.prettyFmt("<r><d>:<r> ", true)) catch std.posix.abort();
+                            writer.writeAll(Output.prettyFmt("<r><d>:<r> ", true)) catch std.process.abort();
                         } else {
-                            writer.writeAll(Output.prettyFmt(": ", true)) catch std.posix.abort();
+                            writer.writeAll(Output.prettyFmt(": ", true)) catch std.process.abort();
                         }
                         if (inside_native_plugin) |name| {
                             const native_plugin_name = name;
@@ -395,7 +425,7 @@ pub fn crashHandler(
                                 \\please file a GitHub issue using the link below:
                                 \\
                                 \\
-                            , true), .{native_plugin_name}) catch std.posix.abort();
+                            , true), .{native_plugin_name}) catch std.process.abort();
                         } else if (bun.analytics.Features.unsupported_uv_function > 0) {
                             const name = unsupported_uv_function orelse "<unknown>";
                             const fmt =
@@ -409,7 +439,7 @@ pub fn crashHandler(
                                 \\
                                 \\
                             ;
-                            writer.print(Output.prettyFmt(fmt, true), .{name}) catch std.posix.abort();
+                            writer.print(Output.prettyFmt(fmt, true), .{name}) catch std.process.abort();
                         } else if (reason == .out_of_memory) {
                             writer.writeAll(
                                 \\Bun has run out of memory.
@@ -418,7 +448,7 @@ pub fn crashHandler(
                                 \\please file a GitHub issue using the link below:
                                 \\
                                 \\
-                            ) catch std.posix.abort();
+                            ) catch std.process.abort();
                         } else {
                             writer.writeAll(
                                 \\Bun has crashed. This indicates a bug in Bun, not your code.
@@ -427,31 +457,32 @@ pub fn crashHandler(
                                 \\please file a GitHub issue using the link below:
                                 \\
                                 \\
-                            ) catch std.posix.abort();
+                            ) catch std.process.abort();
                         }
                     }
 
                     if (Output.enable_ansi_colors_stderr) {
-                        writer.print(Output.prettyFmt("<cyan>", true), .{}) catch std.posix.abort();
+                        writer.print(Output.prettyFmt("<cyan>", true), .{}) catch std.process.abort();
                     }
 
-                    writer.writeAll(" ") catch std.posix.abort();
+                    writer.writeAll(" ") catch std.process.abort();
 
-                    trace_str_buf.writer().print("{f}", .{TraceString{
+                    var trace_str_writer = trace_str_buf.writer();
+                    trace_str_writer.print("{f}", .{TraceString{
                         .trace = trace,
                         .reason = reason,
                         .action = .open_issue,
-                    }}) catch std.posix.abort();
+                    }}) catch std.process.abort();
 
-                    writer.writeAll(trace_str_buf.slice()) catch std.posix.abort();
+                    writer.writeAll(trace_str_buf.slice()) catch std.process.abort();
 
-                    writer.writeAll("\n") catch std.posix.abort();
+                    writer.writeAll("\n") catch std.process.abort();
                 }
 
                 if (Output.enable_ansi_colors_stderr) {
-                    writer.writeAll(Output.prettyFmt("<r>\n", true)) catch std.posix.abort();
+                    writer.writeAll(Output.prettyFmt("<r>\n", true)) catch std.process.abort();
                 } else {
-                    writer.writeAll("\n") catch std.posix.abort();
+                    writer.writeAll("\n") catch std.process.abort();
                 }
             }
 
@@ -478,7 +509,7 @@ pub fn crashHandler(
                 bun.auto_reload_on_crash = false;
 
                 Output.prettyErrorln("<d>--- Bun is auto-restarting due to crash <d>[time: <b>{d}<r><d>] ---<r>", .{
-                    @max(std.time.milliTimestamp(), 0),
+                    @max(bun.SystemTimer.milliTimestamp(), 0),
                 });
                 Output.flush();
 
@@ -498,10 +529,10 @@ pub fn crashHandler(
             // A panic happened while trying to print a previous panic message,
             // we're still holding the mutex but that's fine as we're going to
             // call abort()
-            var stderr_w = std.fs.File.stderr().writerStreaming(&.{});
+            var stderr_w = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
             const stderr = &stderr_w.interface;
-            stderr.print("\npanic: {f}\n", .{reason}) catch std.posix.abort();
-            stderr.print("panicked during a panic. Aborting.\n", .{}) catch std.posix.abort();
+            stderr.print("\npanic: {f}\n", .{reason}) catch std.process.abort();
+            stderr.print("panicked during a panic. Aborting.\n", .{}) catch std.process.abort();
         },
         3 => {
             // Panicked while printing "Panicked during a panic."
@@ -509,7 +540,7 @@ pub fn crashHandler(
         },
         else => {
             // Panicked or otherwise looped into the panic handler while trying to exit.
-            std.posix.abort();
+            std.process.abort();
         },
     };
 
@@ -826,7 +857,8 @@ pub fn panicImpl(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, 
 }
 
 fn panicBuiltin(msg: []const u8, error_return_trace: ?*std.builtin.StackTrace, begin_addr: ?usize) noreturn {
-    std.debug.panicImpl(error_return_trace, begin_addr, msg);
+    _ = error_return_trace;
+    std.debug.defaultPanic(msg, begin_addr);
 }
 
 pub const panic = if (enable) panicImpl else panicBuiltin;
@@ -863,19 +895,27 @@ const metadata_version_line = std.fmt.comptimePrint(
     },
 );
 
-fn handleSegfaultPosix(sig: i32, info: *const std.posix.siginfo_t, _: ?*const anyopaque) callconv(.c) noreturn {
+fn handleSegfaultPosix(sig: i32, info: *const std.posix.siginfo_t, ctx_ptr: ?*const anyopaque) callconv(.c) noreturn {
     const addr = switch (bun.Environment.os) {
         .linux => @intFromPtr(info.fields.sigfault.addr),
         .mac, .freebsd => @intFromPtr(info.addr),
         .windows, .wasm => @compileError("unreachable"),
     };
 
+    var opt_cpu_context: ?CrashCpuContext = null;
+    if (comptime has_crash_cpu_context) {
+        opt_cpu_context = std.debug.cpu_context.fromPosixSignalContext(ctx_ptr);
+        if (opt_cpu_context) |*cpu_context| {
+            current_crash_context = cpu_context;
+        }
+    }
+
     crashHandler(
         switch (sig) {
-            std.posix.SIG.SEGV => .{ .segmentation_fault = addr },
-            std.posix.SIG.ILL => .{ .illegal_instruction = addr },
-            std.posix.SIG.BUS => .{ .bus_error = addr },
-            std.posix.SIG.FPE => .{ .floating_point_error = addr },
+            @intFromEnum(std.posix.SIG.SEGV) => .{ .segmentation_fault = addr },
+            @intFromEnum(std.posix.SIG.ILL) => .{ .illegal_instruction = addr },
+            @intFromEnum(std.posix.SIG.BUS) => .{ .bus_error = addr },
+            @intFromEnum(std.posix.SIG.FPE) => .{ .floating_point_error = addr },
 
             // we do not register this handler for other signals
             else => unreachable,
@@ -904,10 +944,10 @@ fn updatePosixSegfaultHandler(act: ?*bun.sys.Sigaction) !void {
         }
     }
 
-    bun.sys.sigaction(std.posix.SIG.SEGV, act, null);
-    bun.sys.sigaction(std.posix.SIG.ILL, act, null);
-    bun.sys.sigaction(std.posix.SIG.BUS, act, null);
-    bun.sys.sigaction(std.posix.SIG.FPE, act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.SEGV), act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.ILL), act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.BUS), act, null);
+    bun.sys.sigaction(@intFromEnum(std.posix.SIG.FPE), act, null);
 }
 
 var windows_segfault_handle: ?windows.HANDLE = null;
@@ -915,7 +955,7 @@ var windows_segfault_handle: ?windows.HANDLE = null;
 pub fn resetOnPosix() void {
     if (bun.Environment.enable_asan) return;
     var act = bun.sys.Sigaction{
-        .handler = .{ .sigaction = handleSegfaultPosix },
+        .handler = .{ .sigaction = @ptrCast(&handleSegfaultPosix) },
         .mask = bun.sys.sigemptyset(),
         .flags = (std.posix.SA.SIGINFO | std.posix.SA.RESTART | std.posix.SA.RESETHAND),
     };
@@ -958,6 +998,12 @@ pub fn resetSegfaultHandler() void {
 }
 
 pub fn handleSegfaultWindows(info: *windows.EXCEPTION_POINTERS) callconv(.winapi) c_long {
+    var cpu_context: CrashCpuContext = undefined;
+    if (comptime has_crash_cpu_context) {
+        cpu_context = std.debug.cpu_context.fromWindowsContext(info.ContextRecord);
+        current_crash_context = &cpu_context;
+    }
+
     crashHandler(
         switch (info.ExceptionRecord.ExceptionCode) {
             windows.EXCEPTION_DATATYPE_MISALIGNMENT => .{ .datatype_misalignment = {} },
@@ -1283,12 +1329,12 @@ const StackLine = struct {
                         if (context.address < info.addr) return;
                         const phdrs = info.phdr[0..info.phnum];
                         for (phdrs) |*phdr| {
-                            if (phdr.p_type != std.elf.PT_LOAD) continue;
+                            if (phdr.type != .LOAD) continue;
 
                             // Overflowing addition is used to handle the case of VSDOs
                             // having a p_vaddr = 0xffffffffff700000
-                            const seg_start = info.addr +% phdr.p_vaddr;
-                            const seg_end = seg_start + phdr.p_memsz;
+                            const seg_start = info.addr +% phdr.vaddr;
+                            const seg_end = seg_start + phdr.memsz;
                             if (context.address >= seg_start and context.address < seg_end) {
                                 // const name = bun.sliceTo(info.name, 0) orelse "";
                                 context.result = .{
@@ -1339,7 +1385,7 @@ const StackLine = struct {
 };
 
 const TraceString = struct {
-    trace: *const std.builtin.StackTrace,
+    trace: *const std.debug.StackTrace,
     reason: CrashReason,
     action: TraceString.Action,
 
@@ -1372,7 +1418,7 @@ fn encodeTraceString(opts: TraceString, writer: anytype) !void {
 
     var name_bytes: [1024]u8 = undefined;
 
-    for (opts.trace.instruction_addresses[0..opts.trace.index]) |addr| {
+    for (opts.trace.return_addresses) |addr| {
         const line = StackLine.fromAddress(addr, &name_bytes);
         try StackLine.writeEncoded(line, writer);
     }
@@ -1406,7 +1452,7 @@ fn encodeTraceString(opts: TraceString, writer: anytype) !void {
             }
             const b64_len = bun.base64.encode(&b64_bytes, compressed);
 
-            try writer.writeAll(std.mem.trimRight(u8, b64_bytes[0..b64_len], "="));
+            try writer.writeAll(std.mem.trimEnd(u8, b64_bytes[0..b64_len], "="));
         },
 
         .@"unreachable" => try writer.writeByte('1'),
@@ -1589,7 +1635,7 @@ fn crash() noreturn {
         .windows => {
             // Node.js exits with code 134 (128 + SIGABRT) instead. We use abort() as it includes a
             // breakpoint which makes crashes easier to debug.
-            std.posix.abort();
+            std.process.abort();
         },
         else => {
             // Install default handler so that the tkill below will terminate.
@@ -1603,7 +1649,7 @@ fn crash() noreturn {
                 std.posix.SIG.HUP,
                 std.posix.SIG.TERM,
             }) |sig| {
-                bun.sys.sigaction(sig, &sigact, null);
+                bun.sys.sigaction(@intFromEnum(sig), &sigact, null);
             }
 
             @trap();
@@ -1613,7 +1659,7 @@ fn crash() noreturn {
 
 pub var verbose_error_trace = false;
 
-noinline fn coldHandleErrorReturnTrace(err_int_workaround_for_zig_ccall_bug: std.meta.Int(.unsigned, @bitSizeOf(anyerror)), trace: *std.builtin.StackTrace, comptime is_root: bool) void {
+noinline fn coldHandleErrorReturnTrace(err_int_workaround_for_zig_ccall_bug: @Int(.unsigned, @bitSizeOf(anyerror)), trace: *std.builtin.StackTrace, comptime is_root: bool) void {
     @branchHint(.cold);
     const err = @errorFromInt(err_int_workaround_for_zig_ccall_bug);
 
@@ -1644,10 +1690,11 @@ noinline fn coldHandleErrorReturnTrace(err_int_workaround_for_zig_ccall_bug: std
             );
         }
         Output.flush();
-        dumpStackTrace(trace.*, .{});
+        dumpStackTrace(debugStackTraceFromErrorReturnTrace(trace), .{});
     } else {
+        var debug_trace = debugStackTraceFromErrorReturnTrace(trace);
         const ts = TraceString{
-            .trace = trace,
+            .trace = &debug_trace,
             .reason = .{ .zig_error = err },
             .action = .view_trace,
         };
@@ -1694,9 +1741,13 @@ extern "c" fn WTF__DumpStackTrace(ptr: [*]usize, count: usize) void;
 
 /// Version of the standard library dumpStackTrace that has some fallbacks for
 /// cases where such logic fails to run.
-pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimits) void {
+fn stderrTerminalMode() std.Io.Terminal.Mode {
+    return if (Output.enable_ansi_colors_stderr) .escape_codes else .no_color;
+}
+
+pub fn dumpStackTrace(trace: std.debug.StackTrace, limits: WriteStackTraceLimits) void {
     Output.flush();
-    var stderr_w = std.fs.File.stderr().writerStreaming(&.{});
+    var stderr_w = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
     const stderr = &stderr_w.interface;
     if (!bun.Environment.show_crash_trace) {
         // debug symbols aren't available, lets print a tracestring
@@ -1715,7 +1766,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
                 stderr.print("Unable to dump stack trace: Unable to open debug info: {s}\nFallback trace:\n", .{@errorName(err)}) catch return;
                 break :attempt_dump;
             };
-            writeStackTrace(trace, stderr, debug_info, std.io.tty.detectConfig(std.fs.File.stderr()), limits) catch |err| {
+            writeStackTrace(trace, .{ .writer = stderr, .mode = stderrTerminalMode() }, debug_info, limits) catch |err| {
                 stderr.print("Unable to dump stack trace: {s}\nFallback trace:\n", .{@errorName(err)}) catch return;
                 break :attempt_dump;
             };
@@ -1724,7 +1775,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
         .linux => {
             // In non-debug builds, use WTF's stack trace printer and return early
             if (!bun.Environment.isDebug) {
-                WTF__DumpStackTrace(trace.instruction_addresses.ptr, trace.index);
+                WTF__DumpStackTrace(trace.return_addresses.ptr, trace.return_addresses.len);
                 return;
             }
             // Otherwise fall through to llvm-symbolizer for debug builds
@@ -1735,7 +1786,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
                 stderr.print("Unable to dump stack trace: Unable to open debug info: {s}\n", .{@errorName(err)}) catch return;
                 return;
             };
-            writeStackTrace(trace, stderr, debug_info, std.io.tty.detectConfig(std.fs.File.stderr()), limits) catch |err| {
+            writeStackTrace(trace, .{ .writer = stderr, .mode = stderrTerminalMode() }, debug_info, limits) catch |err| {
                 stderr.print("Unable to dump stack trace: {s}", .{@errorName(err)}) catch return;
                 return;
             };
@@ -1751,7 +1802,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
     for (programs) |program| {
         var arena = bun.ArenaAllocator.init(bun.default_allocator);
         defer arena.deinit();
-        var sfa = std.heap.stackFallback(16384, arena.allocator());
+        var sfa = bun.stackFallback(16384, arena.allocator());
         spawnSymbolizer(program, sfa.get(), &trace) catch |err| switch (err) {
             // try next program if this one wasn't found
             error.FileNotFound => continue,
@@ -1761,7 +1812,7 @@ pub fn dumpStackTrace(trace: std.builtin.StackTrace, limits: WriteStackTraceLimi
     }
 }
 
-fn spawnSymbolizer(program: [:0]const u8, alloc: std.mem.Allocator, trace: *const std.builtin.StackTrace) !void {
+fn spawnSymbolizer(program: [:0]const u8, alloc: std.mem.Allocator, trace: *const std.debug.StackTrace) !void {
     var argv = std.array_list.Managed([]const u8).init(alloc);
     try argv.append(program);
     try argv.append("--exe");
@@ -1779,39 +1830,42 @@ fn spawnSymbolizer(program: [:0]const u8, alloc: std.mem.Allocator, trace: *cons
     );
 
     var name_bytes: [1024]u8 = undefined;
-    for (trace.instruction_addresses[0..trace.index]) |addr| {
+    for (trace.return_addresses) |addr| {
         const line = StackLine.fromAddress(addr, &name_bytes) orelse
             continue;
         try argv.append(try std.fmt.allocPrint(alloc, "0x{X}", .{line.address}));
     }
 
-    var child = std.process.Child.init(argv.items, alloc);
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
-
-    child.expand_arg0 = .expand;
-    child.progress_node = std.Progress.Node.none;
-
-    var stderr_writer = std.fs.File.stderr().writerStreaming(&.{});
+    var stderr_writer = std.Io.File.stderr().writerStreaming(bun.blockingIo(), &.{});
     const stderr = &stderr_writer.interface;
-    const result = child.spawnAndWait() catch |err| {
+    const io = bun.blockingIo();
+    var child = std.process.spawn(io, .{
+        .argv = argv.items,
+        .stdin = .inherit,
+        .stdout = .inherit,
+        .stderr = .inherit,
+        .expand_arg0 = .expand,
+        .progress_node = std.Progress.Node.none,
+    }) catch |err| {
         stderr.print("Failed to invoke command: {f}\n", .{bun.fmt.fmtSlice(argv.items, " ")}) catch {};
         if (bun.Environment.isWindows) {
             stderr.print("(You can compile pdb-addr2line from https://github.com/oven-sh/bun.report, cd pdb-addr2line && cargo build)\n", .{}) catch {};
         }
         return err;
     };
+    const result = child.wait(io) catch |err| {
+        stderr.print("Failed to invoke command: {f}\n", .{bun.fmt.fmtSlice(argv.items, " ")}) catch {};
+        return err;
+    };
 
-    if (result != .Exited or result.Exited != 0) {
+    if (!result.success()) {
         stderr.print("Failed to invoke command: {f}\n", .{bun.fmt.fmtSlice(argv.items, " ")}) catch {};
     }
 }
 
 pub fn dumpCurrentStackTrace(first_address: ?usize, limits: WriteStackTraceLimits) void {
     var addrs: [32]usize = undefined;
-    var stack: std.builtin.StackTrace = .{ .index = 0, .instruction_addresses = &addrs };
-    std.debug.captureStackTrace(first_address orelse @returnAddress(), &stack);
+    const stack = std.debug.captureCurrentStackTrace(stackUnwindOptions(first_address orelse @returnAddress(), false), &addrs);
     dumpStackTrace(stack, limits);
 }
 
@@ -1838,33 +1892,36 @@ pub fn suppressReporting() void {
     suppress_reporting = true;
 }
 
-/// A variant of `std.builtin.StackTrace` that stores its data within itself
+/// A variant of `std.debug.StackTrace` that stores its data within itself
 /// instead of being a pointer. This allows storing captured stack traces
 /// for later printing.
 pub const StoredTrace = struct {
     data: [31]usize,
     index: usize,
+    skipped: std.debug.SkippedAddresses,
 
     pub const empty: StoredTrace = .{
-        .data = .{0} ** 31,
+        .data = @splat(0),
         .index = 0,
+        .skipped = .none,
     };
 
-    pub fn trace(stored: *StoredTrace) std.builtin.StackTrace {
+    pub fn trace(stored: *StoredTrace) std.debug.StackTrace {
         return .{
-            .index = stored.index,
-            .instruction_addresses = &stored.data,
+            .return_addresses = stored.data[0..stored.index],
+            .skipped = stored.skipped,
         };
     }
 
     pub fn capture(begin: ?usize) StoredTrace {
         var stored: StoredTrace = StoredTrace.empty;
-        var frame = stored.trace();
-        std.debug.captureStackTrace(begin orelse @returnAddress(), &frame);
-        stored.index = frame.index;
-        for (frame.instruction_addresses[0..frame.index], 0..) |addr, i| {
+        const frame = std.debug.captureCurrentStackTrace(stackUnwindOptions(begin orelse @returnAddress(), false), &stored.data);
+        stored.index = frame.return_addresses.len;
+        stored.skipped = frame.skipped;
+        for (frame.return_addresses, 0..) |addr, i| {
             if (addr == 0) {
                 stored.index = i;
+                stored.skipped = .none;
                 break;
             }
         }
@@ -1875,11 +1932,12 @@ pub const StoredTrace = struct {
         if (stack_trace) |stack| {
             var data: [31]usize = undefined;
             @memset(&data, 0);
-            const items = @min(stack.instruction_addresses.len, 31);
+            const items = @min(stack.index, stack.instruction_addresses.len, 31);
             @memcpy(data[0..items], stack.instruction_addresses[0..items]);
             return .{
                 .data = data,
-                .index = @min(items, stack.index),
+                .index = items,
+                .skipped = @enumFromInt(stack.index - items),
             };
         } else {
             return empty;
@@ -1926,9 +1984,6 @@ pub const SourceAtAddress = struct {
     source_location: ?SourceLocation,
     symbol_name: []const u8,
     compile_unit_name: []const u8,
-    fn deinit(self: *@This(), debug_info: *debug.SelfInfo) void {
-        if (self.source_location) |sl| debug_info.allocator.free(sl.file_name);
-    }
 };
 
 pub const WriteStackTraceLimits = struct {
@@ -1944,33 +1999,32 @@ pub const WriteStackTraceLimits = struct {
 /// does not print the `^`, instead it highlights the word at the column. This
 /// Makes each frame take up two lines instead of three.
 pub fn writeStackTrace(
-    stack_trace: std.builtin.StackTrace,
-    out_stream: anytype,
+    stack_trace: std.debug.StackTrace,
+    terminal: std.Io.Terminal,
     debug_info: *debug.SelfInfo,
-    tty_config: std.io.tty.Config,
     limits: WriteStackTraceLimits,
 ) !void {
     if (builtin.strip_debug_info) return error.MissingDebugInfo;
-    var frame_index: usize = 0;
-    var frames_left: usize = @min(stack_trace.index, stack_trace.instruction_addresses.len);
+    const out_stream = terminal.writer;
+    var text_arena: std.heap.ArenaAllocator = .init(debug.getDebugInfoAllocator());
+    defer text_arena.deinit();
 
-    while (frames_left != 0) : ({
-        frames_left -= 1;
-        frame_index = (frame_index + 1) % stack_trace.instruction_addresses.len;
-    }) {
+    var frames_left: usize = 0;
+    for (stack_trace.return_addresses, 0..) |return_address, frame_index| {
         if (frame_index >= limits.frame_count) {
+            frames_left = stack_trace.return_addresses.len - frame_index;
             break;
         }
-        const return_address = stack_trace.instruction_addresses[frame_index];
-        const source = (try getSourceAtAddress(debug_info, return_address - 1)) orelse {
-            const module_name = debug_info.getModuleNameForAddress(return_address - 1);
+        defer _ = text_arena.reset(.retain_capacity);
+
+        const source = (try getSourceAtAddress(debug_info, &text_arena, return_address - 1)) orelse {
+            const module_name = debug_info.getModuleName(bun.blockingIo(), return_address - 1) catch "???";
             try printLineInfo(
-                out_stream,
+                terminal,
                 null,
                 return_address - 1,
                 "???",
-                module_name orelse "???",
-                tty_config,
+                module_name,
             );
             continue;
         };
@@ -1999,93 +2053,114 @@ pub fn writeStackTrace(
         }
 
         try printLineInfo(
-            out_stream,
+            terminal,
             source.source_location,
             return_address - 1,
             source.symbol_name,
             source.compile_unit_name,
-            tty_config,
         );
     }
 
-    if (stack_trace.index > stack_trace.instruction_addresses.len) {
-        const dropped_frames = stack_trace.index - stack_trace.instruction_addresses.len;
+    switch (stack_trace.skipped) {
+        .none => {},
+        .unknown => {
+            terminal.setColor(.bold) catch {};
+            try out_stream.writeAll("(additional stack frames may have been skipped...)\n");
+            terminal.setColor(.reset) catch {};
+        },
+        else => |dropped_frames| {
+            terminal.setColor(.bold) catch {};
+            try out_stream.print("({d} additional stack frames not recorded...)\n", .{dropped_frames});
+            terminal.setColor(.reset) catch {};
+        },
+    }
 
-        tty_config.setColor(out_stream, .bold) catch {};
-        try out_stream.print("({d} additional stack frames not recorded...)\n", .{dropped_frames});
-        tty_config.setColor(out_stream, .reset) catch {};
-    } else if (frames_left != 0) {
-        tty_config.setColor(out_stream, .bold) catch {};
+    if (frames_left != 0) {
+        terminal.setColor(.bold) catch {};
         try out_stream.print("({d} additional stack frames skipped...)\n", .{frames_left});
-        tty_config.setColor(out_stream, .reset) catch {};
+        terminal.setColor(.reset) catch {};
     }
     out_stream.writeAll("\n") catch {};
 }
 
 /// Clone of `debug.printSourceAtAddress` but it returns the metadata as well.
-pub fn getSourceAtAddress(debug_info: *debug.SelfInfo, address: usize) !?SourceAtAddress {
-    const module = debug_info.getModuleForAddress(address) catch |err| switch (err) {
-        error.MissingDebugInfo, error.InvalidDebugInfo => return null,
+pub fn getSourceAtAddress(debug_info: *debug.SelfInfo, text_arena: *std.heap.ArenaAllocator, address: usize) !?SourceAtAddress {
+    var symbol_buf: [1]debug.Symbol = undefined;
+    var bfa: std.heap.BufferFirstAllocator = .init(@ptrCast(&symbol_buf), debug.getDebugInfoAllocator());
+    const symbol_allocator = bfa.allocator();
+    var symbols = try std.ArrayList(debug.Symbol).initCapacity(symbol_allocator, 1);
+    defer symbols.deinit(symbol_allocator);
+
+    debug_info.getSymbols(
+        bun.blockingIo(),
+        symbol_allocator,
+        text_arena.allocator(),
+        address,
+        false,
+        &symbols,
+    ) catch |err| switch (err) {
+        error.MissingDebugInfo, error.InvalidDebugInfo, error.UnsupportedDebugInfo => return null,
         else => return err,
     };
+    if (symbols.items.len == 0) return null;
 
-    const symbol_info = module.getSymbolAtAddress(debug_info.allocator, address) catch |err| switch (err) {
-        error.MissingDebugInfo, error.InvalidDebugInfo => return null,
-        else => return err,
-    };
-
+    const symbol_info = symbols.items[0];
     return .{
         .source_location = symbol_info.source_location,
-        .symbol_name = symbol_info.name,
-        .compile_unit_name = symbol_info.compile_unit_name,
+        .symbol_name = symbol_info.name orelse "???",
+        .compile_unit_name = symbol_info.compile_unit_name orelse debug_info.getModuleName(bun.blockingIo(), address) catch "???",
     };
 }
 
 /// Clone of `debug.printLineInfo` as it is private.
 fn printLineInfo(
-    out_stream: *std.Io.Writer,
+    terminal: std.Io.Terminal,
     source_location: ?SourceLocation,
     address: usize,
     symbol_name: []const u8,
     compile_unit_name: []const u8,
-    tty_config: std.io.tty.Config,
 ) !void {
+    const out_stream = terminal.writer;
     const base_path = bun.Environment.base_path ++ std.fs.path.sep_str;
     nosuspend {
         if (source_location) |*sl| {
             if (bun.strings.startsWith(sl.file_name, base_path)) {
-                try tty_config.setColor(out_stream, .dim);
+                try terminal.setColor(.dim);
                 try out_stream.print("{s}", .{base_path});
-                try tty_config.setColor(out_stream, .reset);
-                try tty_config.setColor(out_stream, .bold);
+                try terminal.setColor(.reset);
+                try terminal.setColor(.bold);
                 try out_stream.print("{s}", .{sl.file_name[base_path.len..]});
             } else {
-                try tty_config.setColor(out_stream, .bold);
+                try terminal.setColor(.bold);
                 try out_stream.print("{s}", .{sl.file_name});
             }
             try out_stream.print(":{d}:{d}", .{ sl.line, sl.column });
         } else {
-            try tty_config.setColor(out_stream, .bold);
+            try terminal.setColor(.bold);
             try out_stream.writeAll("???:?:?");
         }
 
-        try tty_config.setColor(out_stream, .reset);
+        try terminal.setColor(.reset);
         try out_stream.writeAll(": ");
-        try tty_config.setColor(out_stream, .dim);
+        try terminal.setColor(.dim);
         try out_stream.print("0x{x} in", .{address});
-        try tty_config.setColor(out_stream, .reset);
-        try tty_config.setColor(out_stream, .yellow);
+        try terminal.setColor(.reset);
+        try terminal.setColor(.yellow);
         try out_stream.print(" {s}", .{symbol_name});
-        try tty_config.setColor(out_stream, .reset);
-        try tty_config.setColor(out_stream, .dim);
+        try terminal.setColor(.reset);
+        try terminal.setColor(.dim);
         try out_stream.print(" ({s})", .{compile_unit_name});
-        try tty_config.setColor(out_stream, .reset);
+        try terminal.setColor(.reset);
         try out_stream.writeAll("\n");
 
         // Show the matching source code line if possible
         if (source_location) |sl| {
-            if (printLineFromFileAnyOs(out_stream, tty_config, sl)) {
-                if (sl.column > 0 and tty_config == .no_color) {
+            if (printLineFromFileAnyOs(terminal, sl)) {
+                const is_no_color = switch (terminal.mode) {
+                    .no_color => true,
+                    else => false,
+                };
+                if (sl.column > 0 and is_no_color) {
                     // The caret already takes one char
                     const space_needed = @as(usize, @intCast(sl.column - 1));
                     try out_stream.splatByteAll(' ', space_needed);
@@ -2105,17 +2180,23 @@ fn printLineInfo(
 /// - Record the whole slice into a buffer
 /// - Locate the column, expand a highlight to one word.
 /// - Print the line, with the highlight.
-fn printLineFromFileAnyOs(out_stream: anytype, tty_config: std.io.tty.Config, source_location: SourceLocation) !void {
+fn printLineFromFileAnyOs(terminal: std.Io.Terminal, source_location: SourceLocation) !void {
+    const out_stream = terminal.writer;
     // Need this to always block even in async I/O mode, because this could potentially
     // be called from e.g. the event loop code crashing.
-    var f = try std.fs.cwd().openFile(source_location.file_name, .{});
-    defer f.close();
+    const io = bun.blockingIo();
+    var f = try std.Io.Dir.cwd().openFile(io, source_location.file_name, .{});
+    defer f.close(io);
 
     var line_buf: [4096]u8 = undefined;
-    var fbs = std.io.fixedBufferStream(&line_buf);
+    var line_writer = std.Io.Writer.fixed(&line_buf);
+    var file_reader_buf: [4096]u8 = undefined;
+    var file_reader = std.Io.File.Reader.init(f, io, &file_reader_buf);
+    const reader = &file_reader.interface;
     read_line: {
         var buf: [4096]u8 = undefined;
-        var amt_read = try f.read(buf[0..]);
+        var amt_read = try reader.readSliceShort(buf[0..]);
+        if (amt_read == 0) return error.EndOfFile;
         const line_start = seek: {
             var current_line_start: usize = 0;
             var next_line: usize = 1;
@@ -2124,13 +2205,15 @@ fn printLineFromFileAnyOs(out_stream: anytype, tty_config: std.io.tty.Config, so
                 if (bun.strings.indexOfChar(slice, '\n')) |pos| {
                     next_line += 1;
                     if (pos == slice.len - 1) {
-                        amt_read = try f.read(buf[0..]);
+                        amt_read = try reader.readSliceShort(buf[0..]);
+                        if (amt_read == 0) return error.EndOfFile;
                         current_line_start = 0;
                     } else current_line_start += pos + 1;
                 } else if (amt_read < buf.len) {
                     return error.EndOfFile;
                 } else {
-                    amt_read = try f.read(buf[0..]);
+                    amt_read = try reader.readSliceShort(buf[0..]);
+                    if (amt_read == 0) return error.EndOfFile;
                     current_line_start = 0;
                 }
             }
@@ -2140,29 +2223,29 @@ fn printLineFromFileAnyOs(out_stream: anytype, tty_config: std.io.tty.Config, so
         if (bun.strings.indexOfChar(slice, '\n')) |pos| {
             const line = slice[0..pos];
             std.mem.replaceScalar(u8, line, '\t', ' ');
-            fbs.writer().writeAll(line) catch {};
+            line_writer.writeAll(line) catch {};
             break :read_line;
         } else { // Line is the last inside the buffer, and requires another read to find delimiter. Alternatively the file ends.
             std.mem.replaceScalar(u8, slice, '\t', ' ');
-            fbs.writer().writeAll(slice) catch break :read_line;
+            line_writer.writeAll(slice) catch break :read_line;
             while (amt_read == buf.len) {
-                amt_read = try f.read(buf[0..]);
+                amt_read = try reader.readSliceShort(buf[0..]);
                 if (bun.strings.indexOfChar(buf[0..amt_read], '\n')) |pos| {
                     const line = buf[0..pos];
                     std.mem.replaceScalar(u8, line, '\t', ' ');
-                    fbs.writer().writeAll(line) catch break :read_line;
+                    line_writer.writeAll(line) catch break :read_line;
                     break :read_line;
                 } else {
                     const line = buf[0..amt_read];
                     std.mem.replaceScalar(u8, line, '\t', ' ');
-                    fbs.writer().writeAll(line) catch break :read_line;
+                    line_writer.writeAll(line) catch break :read_line;
                 }
             }
             break :read_line;
         }
         return;
     }
-    const line_without_newline = std.mem.trimRight(u8, fbs.getWritten(), "\n");
+    const line_without_newline = std.mem.trimEnd(u8, line_writer.buffered(), "\n");
     if (source_location.column > line_without_newline.len) {
         try out_stream.writeAll(line_without_newline);
         try out_stream.writeByte('\n');
@@ -2191,20 +2274,20 @@ fn printLineFromFileAnyOs(out_stream: anytype, tty_config: std.io.tty.Config, so
         comment = after_before_comment[pos..];
         after_before_comment = after_before_comment[0..pos];
     }
-    try tty_config.setColor(out_stream, .red);
-    try tty_config.setColor(out_stream, .dim);
+    try terminal.setColor(.red);
+    try terminal.setColor(.dim);
     try out_stream.writeAll(before);
-    try tty_config.setColor(out_stream, .reset);
-    try tty_config.setColor(out_stream, .red);
+    try terminal.setColor(.reset);
+    try terminal.setColor(.red);
     try out_stream.writeAll(highlight);
-    try tty_config.setColor(out_stream, .dim);
+    try terminal.setColor(.dim);
     try out_stream.writeAll(after_before_comment);
     if (comment.len > 0) {
-        try tty_config.setColor(out_stream, .reset);
-        try tty_config.setColor(out_stream, .bright_cyan);
+        try terminal.setColor(.reset);
+        try terminal.setColor(.bright_cyan);
         try out_stream.writeAll(comment);
     }
-    try tty_config.setColor(out_stream, .reset);
+    try terminal.setColor(.reset);
     try out_stream.writeByte('\n');
 }
 

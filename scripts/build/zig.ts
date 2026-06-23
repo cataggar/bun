@@ -1,10 +1,11 @@
 /**
  * Zig toolchain download + zig build step.
  *
- * Bun uses a FORK of zig at a pinned commit (oven-sh/zig). The compiler
- * is downloaded as a prebuilt binary from releases (same pattern as WebKit).
- * The downloaded zig includes its own stdlib (vendor/zig/lib/) — we don't
- * rely on any system zig.
+ * Bun is built with a pinned Zig from cataggar/zig — a mirror of the official
+ * ziglang.org dev builds (the Zig project moved from GitHub to Codeberg). The
+ * compiler is downloaded as a prebuilt binary from that mirror's releases (same
+ * pattern as WebKit). The downloaded zig includes its own stdlib (vendor/zig/
+ * lib/) — we don't rely on any system zig.
  *
  * The zig BUILD is one big `zig build obj` invocation with ~18 -D flags.
  * Zig's own build system (build.zig) handles the per-file compilation; our
@@ -17,11 +18,11 @@
 
 import { existsSync, readFileSync, symlinkSync } from "node:fs";
 import { mkdir, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { availableParallelism, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Config } from "./config.ts";
-import { downloadWithRetry, extractZip, tryPrefetchExtracted } from "./download.ts";
-import { BuildError, assert } from "./error.ts";
+import { downloadWithRetry, extractTarXz, extractZip, tryPrefetchExtracted } from "./download.ts";
+import { assert } from "./error.ts";
 import { fetchCliPath } from "./fetch-cli.ts";
 import { writeIfChanged } from "./fs.ts";
 import type { Ninja } from "./ninja.ts";
@@ -29,40 +30,31 @@ import { quote, quoteArgs } from "./shell.ts";
 import { streamPath } from "./stream.ts";
 
 /**
- * Zig compiler commit — determines compiler download + bundled stdlib.
- * Override via `--zig-commit=<hash>` to test a new compiler.
- * From https://github.com/oven-sh/zig releases.
+ * Zig compiler version — determines compiler download + bundled stdlib.
+ * Override via `--zig-commit=<version>` to test a new compiler.
+ *
+ * This is cataggar/zig's full version string (it embeds the upstream Zig
+ * commit, here `54537285c`). It is used verbatim as the release tag (`v<ver>`),
+ * the asset name (`zig-<arch>-<os>-<ver>.<ext>`), the on-disk identity stamp,
+ * and the value reported in `process.versions.zig`.
+ *
+ * From https://github.com/cataggar/zig releases (a mirror of ziglang.org).
  */
-export const ZIG_COMMIT = "04e7f6ac1e009525bc00934f20199c68f04e0a24";
+export const ZIG_COMMIT = "0.17.0-dev.902+7255f3e72";
 
 /**
  * Number of LLVM codegen units. >1 splits the build into N independent
  * LLVM modules — parallelises emit, but cross-unit calls become
  * `linkonce_odr` externs so LLVM can't inline or IPO across them.
  *
- * Sharding is gated off for:
- *   - Non-ASAN CI: shipped releases want full IPO; cg=1 keeps that and
- *     keeps the upload/download contract a single file.
- *   - Windows targets: COFF shard emission is unimplemented in oven-sh/zig.
- *   - LTO: zig_llvm.cpp gates SplitModule on !lto, so cg>1 would emit one
- *     .o instead of N and the no_merge_shards path would expect missing files.
- *
- * ASAN CI uses a FIXED count (CI_ASAN_CODEGEN_THREADS) so zig-only and
- * link-only — which run on different machines — agree on the artifact
- * names. Local builds shard at availableParallelism(); benchmark against
- * a non-ASAN CI artifact if cross-unit inlining matters.
+ * DISABLED (returns 1 = single `bun-zig.o`): codegen sharding is an
+ * oven-sh/zig-only patch (`--llvm-codegen-threads`) that is NOT in the clean
+ * upstream cataggar/zig 0.17 compiler this build now targets. Re-enable once a
+ * patched compiler ships the feature (migration Phase B2). Until then sharding
+ * would pass `-Dllvm_codegen_threads=N` to a compiler that doesn't implement it.
  */
-function codegenThreads(cfg: Config): number {
-  if (cfg.windows) return 1;
-  if (cfg.lto) return 1;
-  if (cfg.ci) {
-    // ASAN is a test-only build (not shipped), so cross-shard IPO loss is
-    // fine and the speedup is worth it. The count is FIXED so zig-only and
-    // link-only — which run on different machines — agree on the artifact
-    // names. Non-asan CI stays at 1: shipped releases want full IPO.
-    return cfg.asan ? CI_ASAN_CODEGEN_THREADS : 1;
-  }
-  return availableParallelism();
+function codegenThreads(_cfg: Config): number {
+  return 1;
 }
 
 /** Fixed shard count for CI ASAN builds. Matches getZigAgent's instance size. */
@@ -201,20 +193,6 @@ export function zigCpu(cfg: Config): string {
 }
 
 /**
- * Whether to download the ReleaseSafe build of the zig COMPILER itself
- * (not bun's zig code — this is about the compiler binary).
- *
- * CI defaults to yes (better error messages on compiler crashes). EXCEPT
- * windows-arm64 HOST, where the ReleaseSafe compiler has an LLVM SEH
- * epilogue bug that produces broken compiler_rt. Host, not target — the
- * compiler runs on the host; zig-only cross-compile runs on linux.
- */
-export function zigCompilerSafe(cfg: Config): boolean {
-  if (cfg.ci && cfg.host.os === "windows" && cfg.host.arch === "aarch64") return false;
-  return cfg.ci;
-}
-
-/**
  * Whether codegen outputs should be @embedFile'd into the binary (release)
  * or loaded at runtime (debug — faster iteration, no relink on codegen change).
  */
@@ -261,36 +239,32 @@ function zigCacheDirs(cfg: Config): { local: string; global: string } {
 }
 
 /**
- * Download URL for the zig compiler binary.
+ * Download URL for the zig compiler binary, from the cataggar/zig release
+ * mirror (asset layout matches ziglang.org: `zig-<arch>-<os>-<version>`).
  *
  * HOST os/arch, not TARGET — the compiler runs on the build machine and
  * cross-compiles via -Dtarget.
  *
- * os-abi: zig binaries are always statically linked (musl on linux, gnu
- * on windows), so the abi is fixed per-os.
+ * Archives are `.tar.xz` everywhere except Windows (`.zip`). The linux build
+ * is statically linked against musl, so no separate abi suffix is needed.
  */
-export function zigDownloadUrl(cfg: Config, safe: boolean): string {
+export function zigDownloadUrl(cfg: Config): string {
   const arch = cfg.host.arch === "aarch64" ? "aarch64" : "x86_64";
-  let osAbi: string;
+  let os: string;
   if (cfg.host.os === "darwin") {
-    osAbi = "macos-none";
+    os = "macos";
   } else if (cfg.host.os === "windows") {
-    osAbi = "windows-gnu";
+    os = "windows";
   } else if (cfg.host.os === "freebsd") {
-    // oven-sh/zig has no FreeBSD-hosted prebuilt; native builds must use a
-    // system zig via $BUN_ZIG_PATH. Cross-compile from Linux is the
-    // expected path (host.os === "linux" → linux-musl below).
-    throw new BuildError(
-      "No prebuilt zig compiler for FreeBSD hosts — set $BUN_ZIG_PATH to a system zig, or cross-compile from Linux",
-    );
+    os = "freebsd";
   } else {
-    // linux: always musl for the compiler binary (static).
-    osAbi = "linux-musl";
+    os = "linux";
   }
 
-  const safeSuffix = safe ? "-ReleaseSafe" : "";
-  const zipName = `bootstrap-${arch}-${osAbi}${safeSuffix}.zip`;
-  return `https://github.com/oven-sh/zig/releases/download/autobuild-${cfg.zigCommit}/${zipName}`;
+  const ext = cfg.host.os === "windows" ? "zip" : "tar.xz";
+  const version = cfg.zigCommit;
+  const assetName = `zig-${arch}-${os}-${version}.${ext}`;
+  return `https://github.com/cataggar/zig/releases/download/v${version}/${assetName}`;
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -322,14 +296,16 @@ export function registerZigRules(n: Ninja, cfg: Config): void {
   //
   // --zig-progress instead of --console (posix only, set interleave=true):
   // decodes ZIG_PROGRESS IPC into `[zig] Stage [N/M]` lines that interleave
-  // with ninja's [N/M] for cxx — both visible at once. Requires
-  // oven-sh/zig's fix for ziglang/zig#24722. Windows zig has no IPC in
-  // our fork (upstream added Feb 2026, not backported).
+  // with ninja's [N/M] for cxx. Requires the oven-sh/zig-only `--zig-progress`
+  // / ZIG_PROGRESS IPC patch (ziglang/zig#24722), which the clean upstream
+  // cataggar/zig 0.17 compiler does NOT have — keep interleave=false until a
+  // patched compiler ships it (migration Phase B2).
   const interleave = false;
   const consoleMode = !interleave || hostWin;
-  const parallelSema = " --env=ZIG_PARALLEL_SEMA=1";
+  // ZIG_PARALLEL_SEMA is another oven-sh/zig-only patch (parallel semantic
+  // analysis); the clean upstream compiler ignores it, so don't set it.
   n.rule("zig_build", {
-    command: `${stream} ${consoleMode ? "--console" : "--zig-progress"} --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache${parallelSema} $zig build $step $args`,
+    command: `${stream} ${consoleMode ? "--console" : "--zig-progress"} --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache $zig build $step $args`,
     // $out can be 16 shard paths; the build edge sets a compact $label.
     description: "zig $step → $label",
     ...(consoleMode && { pool: "console" }),
@@ -341,7 +317,7 @@ export function registerZigRules(n: Ninja, cfg: Config): void {
   // ninja can track completion. Same cache dirs as the main zig build —
   // zig keys by hash, the two coexist cleanly.
   n.rule("zig_check", {
-    command: `${stream} --console --stamp=$out --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache${parallelSema} $zig build $step $args`,
+    command: `${stream} --console --stamp=$out --env=ZIG_LOCAL_CACHE_DIR=$zig_local_cache --env=ZIG_GLOBAL_CACHE_DIR=$zig_global_cache $zig build $step $args`,
     description: "zig $step",
     pool: "console",
     restat: true,
@@ -410,9 +386,8 @@ export function emitZig(n: Ninja, cfg: Config, inputs: ZigBuildInputs): string[]
       hint: "zig needs its bundled stdlib at <path>/lib/ — make sure the extract wasn't partial",
     });
   } else {
-    const safe = zigCompilerSafe(cfg);
-    const url = zigDownloadUrl(cfg, safe);
-    // Commit + safe go into the stamp content, so switching either retriggers.
+    const url = zigDownloadUrl(cfg);
+    // The version goes into the stamp content, so switching it retriggers.
     const stamp = resolve(zigDest, ".zig-commit");
 
     n.build({
@@ -428,9 +403,7 @@ export function emitZig(n: Ninja, cfg: Config, inputs: ZigBuildInputs): string[]
       vars: {
         url,
         dest: zigDest,
-        // Safe is encoded in the commit stamp (not just URL) so the CLI
-        // can short-circuit correctly when safe doesn't change.
-        commit: `${cfg.zigCommit}${safe ? "-safe" : ""}`,
+        commit: cfg.zigCommit,
       },
     });
   }
@@ -525,8 +498,8 @@ function zigBuildArgs(cfg: Config): string[] {
     // Git sha (optional — empty on dirty builds).
     ...(cfg.revision !== "unknown" && cfg.revision !== "" ? [`-Dsha=${cfg.revision}`] : []),
 
-    // Output formatting
-    "--prominent-compile-errors",
+    // Output formatting. (`--prominent-compile-errors` was removed from
+    // `zig build` in 0.17 — compile errors are always shown prominently now.)
     "--summary",
     "all",
   ];
@@ -675,10 +648,13 @@ export async function fetchZig(url: string, dest: string, commit: string): Promi
   console.log(`fetching ${url}`);
 
   // ─── Download ───
+  // Windows ships the compiler as a .zip; every other host as .tar.xz
+  // (cataggar/zig mirrors the ziglang.org asset layout).
+  const isZip = url.endsWith(".zip");
   const destParent = resolve(dest, "..");
   await mkdir(destParent, { recursive: true });
-  const zipPath = `${dest}.download.zip`;
-  await downloadWithRetry(url, zipPath, "zig");
+  const archivePath = `${dest}.download.${isZip ? "zip" : "tar.xz"}`;
+  await downloadWithRetry(url, archivePath, "zig");
 
   // ─── Extract ───
   // Wipe dest first — don't want stale files from a previous version.
@@ -689,19 +665,18 @@ export async function fetchZig(url: string, dest: string, commit: string): Promi
   await rm(extractDir, { recursive: true, force: true });
   await mkdir(extractDir, { recursive: true });
 
-  // Use system unzip. Present on all platforms we support (Windows 10+
-  // has it via PowerShell Expand-Archive, but `tar` also handles .zip
-  // on bsdtar/Windows tar.exe — use that for consistency).
-  //
-  // -m: same mtime fix as tar (zip stores creation timestamps).
-  // But wait — tar doesn't handle .zip on all platforms reliably.
-  // `unzip` is more portable for .zip specifically. Check and fall back.
-  await extractZip(zipPath, extractDir);
-  await rm(zipPath, { force: true });
+  // Don't strip the top-level dir here — the hoist step below handles it,
+  // matching the .zip path's behavior.
+  if (isZip) {
+    await extractZip(archivePath, extractDir);
+  } else {
+    await extractTarXz(archivePath, extractDir, 0);
+  }
+  await rm(archivePath, { force: true });
 
-  // Hoist: zip has one top-level dir (e.g. `zig-linux-x86_64-0.14.0-...`).
+  // Hoist: the archive has one top-level dir (e.g. `zig-x86_64-linux-0.17.0-dev.892+...`).
   const entries = await readdir(extractDir);
-  assert(entries.length > 0, `zip extracted nothing: ${zipPath}`);
+  assert(entries.length > 0, `archive extracted nothing: ${archivePath}`);
   let hoistFrom: string;
   if (entries.length === 1) {
     hoistFrom = resolve(extractDir, entries[0]!);

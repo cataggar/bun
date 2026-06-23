@@ -11,7 +11,7 @@ const SslContextCacheEntry = struct {
 };
 const ssl_context_cache_max_size = 60;
 const ssl_context_cache_ttl_ns = 30 * std.time.ns_per_min;
-var custom_ssl_context_map = std.AutoArrayHashMap(*SSLConfig, SslContextCacheEntry).init(bun.default_allocator);
+var custom_ssl_context_map: std.AutoArrayHashMapUnmanaged(*SSLConfig, SslContextCacheEntry) = .empty;
 
 loop: *jsc.MiniEventLoop,
 http_context: NewHTTPContext(false),
@@ -22,7 +22,7 @@ queued_tasks: Queue = Queue{},
 /// `active_requests_count >= max_simultaneous_requests`. Kept in FIFO order
 /// and processed before `queued_tasks` on the next `drainEvents`. Owned by
 /// the HTTP thread; never accessed concurrently.
-deferred_tasks: std.ArrayListUnmanaged(*AsyncHTTP) = .{},
+deferred_tasks: std.ArrayListUnmanaged(*AsyncHTTP) = .empty,
 /// Set by `drainQueuedShutdowns` when a shutdown's `async_http_id` wasn't in
 /// `socket_async_http_abort_tracker` — the request is either not yet started
 /// (still in `queued_tasks`/`deferred_tasks`) or already done. `drainEvents`
@@ -31,18 +31,18 @@ deferred_tasks: std.ArrayListUnmanaged(*AsyncHTTP) = .{},
 /// path stays O(1). Owned by the HTTP thread.
 has_pending_queued_abort: bool = false,
 
-queued_shutdowns: std.ArrayListUnmanaged(ShutdownMessage) = std.ArrayListUnmanaged(ShutdownMessage){},
-queued_writes: std.ArrayListUnmanaged(WriteMessage) = std.ArrayListUnmanaged(WriteMessage){},
-queued_response_body_drains: std.ArrayListUnmanaged(DrainMessage) = std.ArrayListUnmanaged(DrainMessage){},
+queued_shutdowns: std.ArrayListUnmanaged(ShutdownMessage) = .empty,
+queued_writes: std.ArrayListUnmanaged(WriteMessage) = .empty,
+queued_response_body_drains: std.ArrayListUnmanaged(DrainMessage) = .empty,
 
 queued_shutdowns_lock: bun.Mutex = .{},
 queued_writes_lock: bun.Mutex = .{},
 queued_response_body_drains_lock: bun.Mutex = .{},
 
-queued_threadlocal_proxy_derefs: std.ArrayListUnmanaged(*ProxyTunnel) = std.ArrayListUnmanaged(*ProxyTunnel){},
+queued_threadlocal_proxy_derefs: std.ArrayListUnmanaged(*ProxyTunnel) = .empty,
 
 has_awoken: std.atomic.Value(bool) = std.atomic.Value(bool).init(false),
-timer: std.time.Timer,
+timer: SystemTimer,
 lazy_libdeflater: ?*LibdeflateState = null,
 lazy_request_body_buffer: ?*HeapRequestBodyBuffer = null,
 
@@ -74,7 +74,7 @@ pub const HeapRequestBodyBuffer = struct {
 
 pub const RequestBodyBuffer = union(enum) {
     heap: *HeapRequestBodyBuffer,
-    stack: std.heap.StackFallbackAllocator(request_body_send_stack_buffer_size),
+    stack: bun.StackFallbackComptime(request_body_send_stack_buffer_size),
 
     pub fn deinit(this: *@This()) void {
         switch (this.*) {
@@ -147,7 +147,7 @@ pub inline fn getRequestBodySendBuffer(this: *@This(), estimated_size: usize) Re
         return .{ .heap = bun.take(&this.lazy_request_body_buffer).? };
     }
     return .{
-        .stack = std.heap.stackFallback(request_body_send_stack_buffer_size, bun.default_allocator),
+        .stack = bun.stackFallback(request_body_send_stack_buffer_size, bun.default_allocator),
     };
 }
 
@@ -202,7 +202,7 @@ fn initOnce(opts: *const InitOpts) void {
             .ref_count = .init(),
             .pending_sockets = NewHTTPContext(true).PooledSocketHiveAllocator.empty,
         },
-        .timer = std.time.Timer.start() catch unreachable,
+        .timer = SystemTimer.start() catch unreachable,
     };
     bun.libdeflate.load();
     const thread = std.Thread.spawn(
@@ -297,7 +297,7 @@ pub fn connect(this: *@This(), client: *HTTPClient, comptime is_ssl: bool) !?New
             };
 
             const now = this.timer.read();
-            bun.handleOom(custom_ssl_context_map.put(requested_config, .{
+            bun.handleOom(custom_ssl_context_map.put(bun.default_allocator, requested_config, .{
                 .ctx = custom_context,
                 .last_used_ns = now,
                 // Clone a strong ref for the cache entry; client.tls_props keeps its own.
@@ -385,7 +385,7 @@ fn drainQueuedShutdowns(this: *@This()) void {
             this.queued_shutdowns_lock.lock();
             defer this.queued_shutdowns_lock.unlock();
             const shutdowns = this.queued_shutdowns;
-            this.queued_shutdowns = .{};
+            this.queued_shutdowns = .empty;
             break :brk shutdowns;
         };
         defer queued_shutdowns.deinit(bun.default_allocator);
@@ -442,7 +442,7 @@ fn drainQueuedWrites(this: *@This()) void {
             this.queued_writes_lock.lock();
             defer this.queued_writes_lock.unlock();
             const writes = this.queued_writes;
-            this.queued_writes = .{};
+            this.queued_writes = .empty;
             break :brk writes;
         };
         defer queued_writes.deinit(bun.default_allocator);
@@ -490,7 +490,7 @@ fn drainQueuedHTTPResponseBodyDrains(this: *@This()) void {
             this.queued_response_body_drains_lock.lock();
             defer this.queued_response_body_drains_lock.unlock();
             const drains = this.queued_response_body_drains;
-            this.queued_response_body_drains = .{};
+            this.queued_response_body_drains = .empty;
             break :brk drains;
         };
         defer queued_response_body_drains.deinit(bun.default_allocator);
@@ -572,7 +572,7 @@ fn drainEvents(this: *@This()) void {
     this.has_pending_queued_abort = false;
     {
         var pending = this.deferred_tasks;
-        this.deferred_tasks = .{};
+        this.deferred_tasks = .empty;
         defer pending.deinit(bun.default_allocator);
         for (pending.items) |http| {
             if (http.client.signals.get(.aborted) or active < max) {
@@ -635,7 +635,7 @@ fn processEvents(this: *@This()) noreturn {
 
         var start_time: i128 = 0;
         if (comptime Environment.isDebug) {
-            start_time = std.time.nanoTimestamp();
+            start_time = SystemTimerUtil.nanoTimestamp();
         }
         Output.flush();
 
@@ -654,8 +654,8 @@ fn processEvents(this: *@This()) noreturn {
 
         // this.loop.run();
         if (comptime Environment.isDebug) {
-            const end = std.time.nanoTimestamp();
-            threadlog("Waited {D}\n", .{@as(i64, @truncate(end - start_time))});
+            const end = SystemTimerUtil.nanoTimestamp();
+            threadlog("Waited {f}\n", .{bun.fmt.fmtDurationOneDecimal(@intCast(@as(i64, @truncate(end - start_time))))});
             Output.flush();
         }
     }
@@ -735,6 +735,8 @@ const stringZ = [:0]const u8;
 
 const ProxyTunnel = @import("./ProxyTunnel.zig");
 const std = @import("std");
+const SystemTimerUtil = @import("../perf/system_timer.zig");
+const SystemTimer = SystemTimerUtil.Timer;
 
 const bun = @import("bun");
 const Environment = bun.Environment;

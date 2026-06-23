@@ -639,10 +639,11 @@ pub const QueryStringMap = struct {
         // this over-allocates
         // TODO: refactor this to support multiple slices instead of copying the whole thing
         var buf = try std.array_list.Managed(u8).initCapacity(allocator, estimated_str_len);
-        var writer = buf.writer();
+        buf.expandToCapacity();
+        var writer = std.Io.Writer.fixed(buf.items);
         var buf_writer_pos: u32 = 0;
 
-        const Writer = @TypeOf(writer);
+        const Writer = @TypeOf(&writer);
         while (scanner.pathname.next()) |result| {
             var name = result.name;
             var value = result.value;
@@ -650,12 +651,15 @@ pub const QueryStringMap = struct {
 
             name.length = @as(u32, @truncate(name_slice.len));
             name.offset = buf_writer_pos;
-            try writer.writeAll(name_slice);
+            writer.writeAll(name_slice) catch return error.OutOfMemory;
             buf_writer_pos += @as(u32, @truncate(name_slice.len));
 
             const name_hash: u64 = bun.hash(name_slice);
 
-            value.length = PercentEncoding.decode(Writer, writer, result.rawValue(scanner.pathname.pathname)) catch continue;
+            value.length = PercentEncoding.decode(Writer, &writer, result.rawValue(scanner.pathname.pathname)) catch |err| switch (err) {
+                error.WriteFailed => return error.OutOfMemory,
+                else => continue,
+            };
             value.offset = buf_writer_pos;
             buf_writer_pos += value.length;
 
@@ -671,7 +675,7 @@ pub const QueryStringMap = struct {
             var value = result.value;
             var name_hash: u64 = undefined;
             if (result.name_needs_decoding) {
-                name.length = PercentEncoding.decode(Writer, writer, scanner.query.query_string[name.offset..][0..name.length]) catch continue;
+                name.length = PercentEncoding.decode(Writer, &writer, scanner.query.query_string[name.offset..][0..name.length]) catch continue;
                 name.offset = buf_writer_pos;
                 buf_writer_pos += name.length;
                 name_hash = bun.hash(buf.items[name.offset..][0..name.length]);
@@ -687,13 +691,13 @@ pub const QueryStringMap = struct {
 
                     name = list_slice.items(.name)[index];
                 } else {
-                    name.length = PercentEncoding.decode(Writer, writer, scanner.query.query_string[name.offset..][0..name.length]) catch continue;
+                    name.length = PercentEncoding.decode(Writer, &writer, scanner.query.query_string[name.offset..][0..name.length]) catch continue;
                     name.offset = buf_writer_pos;
                     buf_writer_pos += name.length;
                 }
             }
 
-            value.length = PercentEncoding.decode(Writer, writer, scanner.query.query_string[value.offset..][0..value.length]) catch continue;
+            value.length = PercentEncoding.decode(Writer, &writer, scanner.query.query_string[value.offset..][0..value.length]) catch continue;
             value.offset = buf_writer_pos;
             buf_writer_pos += value.length;
 
@@ -754,17 +758,18 @@ pub const QueryStringMap = struct {
         }
 
         var buf = try std.array_list.Managed(u8).initCapacity(allocator, estimated_str_len);
-        const writer = buf.writer();
+        buf.expandToCapacity();
+        var writer = std.Io.Writer.fixed(buf.items);
         var buf_writer_pos: u32 = 0;
 
         var list_slice = list.slice();
-        const Writer = @TypeOf(writer);
+        const Writer = @TypeOf(&writer);
         while (scanner.next()) |result| {
             var name = result.name;
             var value = result.value;
             var name_hash: u64 = undefined;
             if (result.name_needs_decoding) {
-                name.length = PercentEncoding.decode(Writer, writer, query_string[name.offset..][0..name.length]) catch continue;
+                name.length = PercentEncoding.decode(Writer, &writer, query_string[name.offset..][0..name.length]) catch continue;
                 name.offset = buf_writer_pos;
                 buf_writer_pos += name.length;
                 name_hash = bun.hash(buf.items[name.offset..][0..name.length]);
@@ -773,13 +778,13 @@ pub const QueryStringMap = struct {
                 if (std.mem.indexOfScalar(u64, list_slice.items(.name_hash), name_hash)) |index| {
                     name = list_slice.items(.name)[index];
                 } else {
-                    name.length = PercentEncoding.decode(Writer, writer, query_string[name.offset..][0..name.length]) catch continue;
+                    name.length = PercentEncoding.decode(Writer, &writer, query_string[name.offset..][0..name.length]) catch continue;
                     name.offset = buf_writer_pos;
                     buf_writer_pos += name.length;
                 }
             }
 
-            value.length = PercentEncoding.decode(Writer, writer, query_string[value.offset..][0..value.length]) catch continue;
+            value.length = PercentEncoding.decode(Writer, &writer, query_string[value.offset..][0..value.length]) catch continue;
             value.offset = buf_writer_pos;
             buf_writer_pos += value.length;
 
@@ -818,9 +823,8 @@ pub const PercentEncoding = struct {
         const buf = try allocator.alloc(u8, input.len);
         errdefer allocator.free(buf);
 
-        var stream = std.io.fixedBufferStream(buf);
-        const writer = stream.writer();
-        const len = try decode(@TypeOf(writer), writer, input);
+        var writer = std.Io.Writer.fixed(buf);
+        const len = try decode(@TypeOf(&writer), &writer, input);
 
         return buf[0..len];
     }

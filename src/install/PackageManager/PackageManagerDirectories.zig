@@ -1,4 +1,4 @@
-pub inline fn getCacheDirectory(this: *PackageManager) std.fs.Dir {
+pub inline fn getCacheDirectory(this: *PackageManager) std.Io.Dir {
     return this.cache_directory_ orelse brk: {
         this.cache_directory_ = ensureCacheDirectory(this);
         break :brk this.cache_directory_.?;
@@ -15,7 +15,7 @@ pub inline fn getTemporaryDirectory(this: *PackageManager) TemporaryDirectory {
 }
 
 const TemporaryDirectory = struct {
-    handle: std.fs.Dir,
+    handle: std.Io.Dir,
     path: [:0]const u8,
     name: []const u8,
 };
@@ -33,22 +33,22 @@ var getTemporaryDirectoryOnce = bun.once(struct {
         const temp_dir_name = Fs.FileSystem.RealFS.getDefaultTempDir();
 
         var tried_dot_tmp = false;
-        var tempdir: std.fs.Dir = bun.MakePath.makeOpenPath(std.fs.cwd(), temp_dir_name, .{}) catch brk: {
+        var tempdir: std.Io.Dir = bun.FD.cwd().stdDir().createDirPathOpen(bun.blockingIo(), temp_dir_name, .{}) catch brk: {
             tried_dot_tmp = true;
-            break :brk bun.MakePath.makeOpenPath(cache_directory, bun.pathLiteral(".tmp"), .{}) catch |err| {
+            break :brk cache_directory.createDirPathOpen(bun.blockingIo(), bun.pathLiteral(".tmp"), .{}) catch |err| {
                 Output.prettyErrorln("<r><red>error<r>: bun is unable to access tempdir: {s}", .{@errorName(err)});
                 Global.crash();
             };
         };
         var tmpbuf: bun.PathBuffer = undefined;
         const tmpname = Fs.FileSystem.tmpname("hm", &tmpbuf, bun.fastRandom()) catch unreachable;
-        var timer: std.time.Timer = if (manager.options.log_level != .silent) std.time.Timer.start() catch unreachable else undefined;
+        var timer: bun.SystemTimer.Timer = if (manager.options.log_level != .silent) bun.SystemTimer.Timer.start() catch unreachable else undefined;
         brk: while (true) {
-            var file = tempdir.createFileZ(tmpname, .{ .truncate = true }) catch |err2| {
+            var file = tempdir.createFile(bun.blockingIo(), tmpname, .{ .truncate = true }) catch |err2| {
                 if (!tried_dot_tmp) {
                     tried_dot_tmp = true;
 
-                    tempdir = bun.MakePath.makeOpenPath(cache_directory, bun.pathLiteral(".tmp"), .{}) catch |err| {
+                    tempdir = cache_directory.createDirPathOpen(bun.blockingIo(), bun.pathLiteral(".tmp"), .{}) catch |err| {
                         Output.prettyErrorln("<r><red>error<r>: bun is unable to access tempdir: {s}", .{@errorName(err)});
                         Global.crash();
                     };
@@ -64,12 +64,12 @@ var getTemporaryDirectoryOnce = bun.once(struct {
                 });
                 Global.crash();
             };
-            file.close();
+            file.close(bun.blockingIo());
 
-            std.posix.renameatZ(tempdir.fd, tmpname, cache_directory.fd, tmpname) catch |err| {
+            bun.sys.renameat(.fromStdDir(tempdir), tmpname, .fromStdDir(cache_directory), tmpname).unwrap() catch |err| {
                 if (!tried_dot_tmp) {
                     tried_dot_tmp = true;
-                    tempdir = cache_directory.makeOpenPath(".tmp", .{}) catch |err2| {
+                    tempdir = cache_directory.createDirPathOpen(bun.blockingIo(), ".tmp", .{}) catch |err2| {
                         Output.prettyErrorln("<r><red>error<r>: bun is unable to write files to tempdir: {s}", .{@errorName(err2)});
                         Global.crash();
                     };
@@ -86,7 +86,7 @@ var getTemporaryDirectoryOnce = bun.once(struct {
                 });
                 Global.crash();
             };
-            cache_directory.deleteFileZ(tmpname) catch {};
+            cache_directory.deleteFile(bun.blockingIo(), tmpname) catch {};
             break;
         }
         if (tried_dot_tmp) {
@@ -113,25 +113,25 @@ var getTemporaryDirectoryOnce = bun.once(struct {
         return .{
             .handle = tempdir,
             .name = temp_dir_name,
-            .path = bun.handleOom(bun.default_allocator.dupeZ(u8, temp_dir_path)),
+            .path = bun.handleOom(bun.dupeZ(bun.default_allocator, u8, temp_dir_path)),
         };
     }
 }.run);
 
-noinline fn ensureCacheDirectory(this: *PackageManager) std.fs.Dir {
+noinline fn ensureCacheDirectory(this: *PackageManager) std.Io.Dir {
     loop: while (true) {
         if (this.options.enable.cache) {
             const cache_dir = fetchCacheDirectoryPath(this.env, &this.options);
-            this.cache_directory_path = bun.handleOom(this.allocator.dupeZ(u8, cache_dir.path));
+            this.cache_directory_path = bun.handleOom(bun.dupeZ(this.allocator, u8, cache_dir.path));
 
-            return std.fs.cwd().makeOpenPath(cache_dir.path, .{}) catch {
+            return bun.FD.cwd().stdDir().createDirPathOpen(bun.blockingIo(), cache_dir.path, .{}) catch {
                 this.options.enable.cache = false;
                 this.allocator.free(this.cache_directory_path);
                 continue :loop;
             };
         }
 
-        this.cache_directory_path = this.allocator.dupeZ(u8, Path.joinAbsString(
+        this.cache_directory_path = bun.dupeZ(this.allocator, u8, Path.joinAbsString(
             Fs.FileSystem.instance.top_level_dir,
             &.{
                 "node_modules",
@@ -140,7 +140,7 @@ noinline fn ensureCacheDirectory(this: *PackageManager) std.fs.Dir {
             .auto,
         )) catch |err| bun.handleOom(err);
 
-        return std.fs.cwd().makeOpenPath("node_modules/.cache", .{}) catch |err| {
+        return bun.FD.cwd().stdDir().createDirPathOpen(bun.blockingIo(), "node_modules/.cache", .{}) catch |err| {
             Output.prettyErrorln("<r><red>error<r>: bun is unable to write files: {s}", .{@errorName(err)});
             Global.crash();
         };
@@ -180,7 +180,7 @@ pub fn fetchCacheDirectoryPath(env: *DotEnv.Loader, options: ?*const Options) Ca
 }
 
 pub fn cachedGitFolderNamePrint(buf: []u8, resolved: string, patch_hash: ?u64) stringZ {
-    return std.fmt.bufPrintZ(buf, "@G@{s}{f}", .{ resolved, PatchHashFmt{ .hash = patch_hash } }) catch unreachable;
+    return bun.fmt.bufPrintZ(buf, "@G@{s}{f}", .{ resolved, PatchHashFmt{ .hash = patch_hash } }) catch unreachable;
 }
 
 pub fn cachedGitFolderName(this: *const PackageManager, repository: *const Repository, patch_hash: ?u64) stringZ {
@@ -194,7 +194,7 @@ pub fn cachedGitFolderNamePrintAuto(this: *const PackageManager, repository: *co
 
     if (!repository.repo.isEmpty() and !repository.committish.isEmpty()) {
         const string_buf = this.lockfile.buffers.string_bytes.items;
-        return std.fmt.bufPrintZ(
+        return bun.fmt.bufPrintZ(
             PackageManager.cached_package_folder_name_buf(),
             "@G@{f}{f}{f}",
             .{
@@ -209,7 +209,7 @@ pub fn cachedGitFolderNamePrintAuto(this: *const PackageManager, repository: *co
 }
 
 pub fn cachedGitHubFolderNamePrint(buf: []u8, resolved: string, patch_hash: ?u64) stringZ {
-    return std.fmt.bufPrintZ(buf, "@GH@{s}{f}{f}", .{
+    return bun.fmt.bufPrintZ(buf, "@GH@{s}{f}{f}", .{
         resolved,
         CacheVersion.Formatter{ .version_number = CacheVersion.current },
         PatchHashFmt{ .hash = patch_hash },
@@ -269,7 +269,7 @@ pub fn cachedNPMPackageFolderNamePrint(this: *const PackageManager, buf: []u8, n
 }
 
 fn cachedGitHubFolderNamePrintGuess(buf: []u8, string_buf: []const u8, repository: *const Repository, patch_hash: ?u64) stringZ {
-    return std.fmt.bufPrintZ(
+    return bun.fmt.bufPrintZ(
         buf,
         "@GH@{f}-{f}-{f}{f}{f}",
         .{
@@ -295,7 +295,7 @@ pub fn cachedNPMPackageFolderPrintBasename(
 ) stringZ {
     if (version.tag.hasPre()) {
         if (version.tag.hasBuild()) {
-            return std.fmt.bufPrintZ(
+            return bun.fmt.bufPrintZ(
                 buf,
                 "{s}@{d}.{d}.{d}-{f}+{f}{f}{f}",
                 .{
@@ -310,7 +310,7 @@ pub fn cachedNPMPackageFolderPrintBasename(
                 },
             ) catch unreachable;
         }
-        return std.fmt.bufPrintZ(
+        return bun.fmt.bufPrintZ(
             buf,
             "{s}@{d}.{d}.{d}-{f}{f}{f}",
             .{
@@ -325,7 +325,7 @@ pub fn cachedNPMPackageFolderPrintBasename(
         ) catch unreachable;
     }
     if (version.tag.hasBuild()) {
-        return std.fmt.bufPrintZ(
+        return bun.fmt.bufPrintZ(
             buf,
             "{s}@{d}.{d}.{d}+{f}{f}{f}",
             .{
@@ -339,7 +339,7 @@ pub fn cachedNPMPackageFolderPrintBasename(
             },
         ) catch unreachable;
     }
-    return std.fmt.bufPrintZ(buf, "{s}@{d}.{d}.{d}{f}{f}", .{
+    return bun.fmt.bufPrintZ(buf, "{s}@{d}.{d}.{d}{f}{f}", .{
         name,
         version.major,
         version.minor,
@@ -350,7 +350,7 @@ pub fn cachedNPMPackageFolderPrintBasename(
 }
 
 pub fn cachedTarballFolderNamePrint(buf: []u8, url: string, patch_hash: ?u64) stringZ {
-    return std.fmt.bufPrintZ(buf, "@T@{f}{f}{f}", .{
+    return bun.fmt.bufPrintZ(buf, "@T@{f}{f}{f}", .{
         bun.fmt.hexIntLower(String.Builder.stringHash(url)),
         CacheVersion.Formatter{ .version_number = CacheVersion.current },
         PatchHashFmt{ .hash = patch_hash },
@@ -373,7 +373,7 @@ pub fn setupGlobalDir(manager: *PackageManager, ctx: Command.Context) !void {
     manager.options.bin_path = path.ptr[0..path.len :0];
 }
 
-pub fn globalLinkDir(this: *PackageManager) std.fs.Dir {
+pub fn globalLinkDir(this: *PackageManager) std.Io.Dir {
     return this.global_link_dir orelse brk: {
         var global_dir = Options.openGlobalDir(this.options.explicit_global_directory) catch |err| switch (err) {
             error.@"No global directory found" => {
@@ -386,7 +386,7 @@ pub fn globalLinkDir(this: *PackageManager) std.fs.Dir {
             },
         };
         this.global_dir = global_dir;
-        this.global_link_dir = global_dir.makeOpenPath("node_modules", .{}) catch |err| {
+        this.global_link_dir = global_dir.createDirPathOpen(bun.blockingIo(), "node_modules", .{}) catch |err| {
             Output.err(err, "failed to open global link dir node_modules at '{f}'", .{FD.fromStdDir(global_dir)});
             Global.exit(1);
         };
@@ -405,7 +405,7 @@ pub fn globalLinkDirPath(this: *PackageManager) []const u8 {
     return this.global_link_dir_path;
 }
 
-pub fn globalLinkDirAndPath(this: *PackageManager) struct { std.fs.Dir, []const u8 } {
+pub fn globalLinkDirAndPath(this: *PackageManager) struct { std.Io.Dir, []const u8 } {
     const dir = this.globalLinkDir();
     return .{ dir, this.global_link_dir_path };
 }
@@ -472,10 +472,10 @@ pub fn computeCacheDirAndSubpath(
     resolution: *const Resolution,
     folder_path_buf: *bun.PathBuffer,
     patch_hash: ?u64,
-) struct { cache_dir: std.fs.Dir, cache_dir_subpath: stringZ } {
+) struct { cache_dir: std.Io.Dir, cache_dir_subpath: stringZ } {
     const name = pkg_name;
     const buf = manager.lockfile.buffers.string_bytes.items;
-    var cache_dir = std.fs.cwd();
+    var cache_dir = bun.FD.cwd().stdDir();
     var cache_dir_subpath: stringZ = "";
 
     switch (resolution.tag) {
@@ -506,7 +506,7 @@ pub fn computeCacheDirAndSubpath(
                 folder_path_buf[folder.len] = 0;
                 cache_dir_subpath = folder_path_buf[0..folder.len :0];
             }
-            cache_dir = std.fs.cwd();
+            cache_dir = bun.FD.cwd().stdDir();
         },
         .local_tarball => {
             cache_dir_subpath = manager.cachedTarballFolderName(resolution.value.local_tarball, patch_hash);
@@ -526,7 +526,7 @@ pub fn computeCacheDirAndSubpath(
                 folder_path_buf[folder.len] = 0;
                 cache_dir_subpath = folder_path_buf[0..folder.len :0];
             }
-            cache_dir = std.fs.cwd();
+            cache_dir = bun.FD.cwd().stdDir();
         },
         .symlink => {
             const directory = manager.globalLinkDir();
@@ -535,7 +535,7 @@ pub fn computeCacheDirAndSubpath(
 
             if (folder.len == 0 or (folder.len == 1 and folder[0] == '.')) {
                 cache_dir_subpath = ".";
-                cache_dir = std.fs.cwd();
+                cache_dir = bun.FD.cwd().stdDir();
             } else {
                 const global_link_dir = manager.globalLinkDirPath();
                 var ptr = folder_path_buf;
@@ -563,20 +563,20 @@ pub fn computeCacheDirAndSubpath(
     };
 }
 
-pub fn attemptToCreatePackageJSONAndOpen() !std.fs.File {
-    const package_json_file = std.fs.cwd().createFileZ("package.json", .{ .read = true }) catch |err| {
+pub fn attemptToCreatePackageJSONAndOpen() !std.Io.File {
+    const package_json_file = bun.FD.cwd().stdDir().createFile(bun.blockingIo(), "package.json", .{ .read = true }) catch |err| {
         Output.prettyErrorln("<r><red>error:<r> {s} create package.json", .{@errorName(err)});
         Global.crash();
     };
 
-    try package_json_file.pwriteAll("{\"dependencies\": {}}", 0);
+    try package_json_file.writePositionalAll(bun.blockingIo(), "{\"dependencies\": {}}", 0);
 
     return package_json_file;
 }
 
 pub fn attemptToCreatePackageJSON() !void {
     var file = try attemptToCreatePackageJSONAndOpen();
-    file.close();
+    file.close(bun.blockingIo());
 }
 
 pub fn saveLockfile(
@@ -693,9 +693,9 @@ pub fn writeYarnLock(this: *PackageManager) !void {
     tmpname_buf[0..8].* = "tmplock-".*;
     var tmpfile = FileSystem.RealFS.Tmpfile{};
     var secret: [32]u8 = undefined;
-    std.mem.writeInt(u64, secret[0..8], @as(u64, @intCast(std.time.milliTimestamp())), .little);
+    std.mem.writeInt(u64, secret[0..8], @as(u64, @intCast(bun.SystemTimer.milliTimestamp())), .little);
     var base64_bytes: [64]u8 = undefined;
-    std.crypto.random.bytes(&base64_bytes);
+    bun.csprng(&base64_bytes);
 
     const tmpname__ = std.fmt.bufPrint(tmpname_buf[8..], "{x}", .{&base64_bytes}) catch unreachable;
     tmpname_buf[tmpname__.len + 8] = 0;
@@ -708,7 +708,7 @@ pub fn writeYarnLock(this: *PackageManager) !void {
 
     var file = tmpfile.file();
     var file_buffer: [4096]u8 = undefined;
-    var file_writer = file.writerStreaming(&file_buffer);
+    var file_writer = file.writerStreaming(bun.blockingIo(), &file_buffer);
     const writer = &file_writer.interface;
     try Lockfile.Printer.Yarn.print(&printer, @TypeOf(writer), writer);
     try writer.flush();

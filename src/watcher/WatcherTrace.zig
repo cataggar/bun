@@ -36,7 +36,7 @@ pub fn writeEvents(watcher: *Watcher, events: []Watcher.WatchEvent, changed_file
     const writer = &buffered.new_interface;
 
     // Get current timestamp
-    const timestamp = std.time.milliTimestamp();
+    const timestamp = bun.SystemTimer.milliTimestamp();
 
     // Write: { "timestamp": number, "files": { ... } }
     writer.writeAll("{\"timestamp\":") catch return;
@@ -59,7 +59,7 @@ pub fn writeEvents(watcher: *Watcher, events: []Watcher.WatchEvent, changed_file
         writer.writeAll(":{\"events\":[") catch return;
 
         // Write array of event types using comptime reflection
-        const fields = std.meta.fields(@TypeOf(event.op));
+        const fields = comptime bun.meta.fields(@TypeOf(event.op));
         var first = true;
         inline for (fields) |field| {
             // Only process bool fields (skip _padding and other non-bool fields)

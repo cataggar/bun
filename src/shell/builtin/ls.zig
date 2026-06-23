@@ -61,7 +61,7 @@ fn next(this: *Ls) Yield {
                 if (paths) |p| {
                     const print_directory = p.len > 1;
                     for (p) |path_raw| {
-                        const path = bun.handleOom(this.alloc_scope.allocator().dupeZ(u8, path_raw[0..std.mem.len(path_raw) :0]));
+                        const path = bun.handleOom(bun.dupeZ(this.alloc_scope.allocator(), u8, path_raw[0..std.mem.len(path_raw) :0]));
                         var task = ShellLsTask.create(
                             this,
                             this.opts,
@@ -290,7 +290,7 @@ pub const ShellLsTask = struct {
             return bun.handleOom(std.fs.path.joinZ(alloc, subdir_parts));
         }
 
-        const out = bun.handleOom(alloc.dupeZ(u8, bun.path.join(subdir_parts, .auto)));
+        const out = bun.handleOom(bun.dupeZ(alloc, u8, bun.path.join(subdir_parts, .auto)));
 
         return out;
     }
@@ -298,7 +298,7 @@ pub const ShellLsTask = struct {
     pub fn run(this: *@This()) void {
         // Cache current time once per task for timestamp formatting
         if (this.opts.long_listing) {
-            this.#now_secs = @intCast(std.time.timestamp());
+            this.#now_secs = @intCast(std.Io.Timestamp.now(bun.blockingIo(), .real).toSeconds());
         }
 
         const fd = switch (ShellSyscall.openat(this.cwd, this.path, bun.O.RDONLY | bun.O.DIRECTORY, 0)) {
@@ -327,8 +327,7 @@ pub const ShellLsTask = struct {
 
         if (!this.opts.list_directories) {
             if (this.print_directory) {
-                const writer = this.output.writer();
-                bun.handleOom(writer.print("{s}:\n", .{this.path}));
+                this.printOutput("{s}:\n", .{this.path});
             }
 
             var iterator = DirIterator.iterate(fd, .u8);
@@ -355,8 +354,7 @@ pub const ShellLsTask = struct {
             return;
         }
 
-        const writer = this.output.writer();
-        bun.handleOom(writer.print("{s}\n", .{this.path}));
+        this.printOutput("{s}\n", .{this.path});
         return;
     }
 
@@ -395,14 +393,11 @@ pub const ShellLsTask = struct {
         const stat = switch (stat_result) {
             .err => {
                 // If stat fails, just output the name with placeholders
-                const writer = this.output.writer();
-                bun.handleOom(writer.print("?????????? ? ? ? ?            ? {s}\n", .{name}));
+                this.printOutput("?????????? ? ? ? ?            ? {s}\n", .{name});
                 return;
             },
             .result => |s| s,
         };
-
-        const writer = this.output.writer();
 
         // File type and permissions
         const mode: u32 = @intCast(stat.mode);
@@ -423,7 +418,7 @@ pub const ShellLsTask = struct {
         const mtime = stat.mtime();
         const time_str = formatTime(@intCast(mtime.sec), this.#now_secs);
 
-        bun.handleOom(writer.print("{c}{s} {d: >3} {d: >5} {d: >5} {d: >8} {s} {s}\n", .{
+        this.printOutput("{c}{s} {d: >3} {d: >5} {d: >5} {d: >8} {s} {s}\n", .{
             file_type,
             &perms,
             nlink,
@@ -432,7 +427,20 @@ pub const ShellLsTask = struct {
             size,
             &time_str,
             name,
-        }));
+        });
+    }
+
+    fn printOutput(this: *@This(), comptime fmt: []const u8, args: anytype) void {
+        const allocator = this.output.allocator;
+        var list = this.output.moveToUnmanaged();
+        var writer = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
+        writer.writer.print(fmt, args) catch bun.outOfMemory();
+        list = writer.toArrayList();
+        this.output = .{
+            .items = list.items,
+            .capacity = list.capacity,
+            .allocator = allocator,
+        };
     }
 
     fn getFileTypeChar(mode: u32) u8 {
@@ -540,7 +548,7 @@ pub const ShellLsTask = struct {
 
     fn errorWithPath(this: *@This(), err: Syscall.Error, path: [:0]const u8) Syscall.Error {
         debug("Ls(0x{x}).errorWithPath({s})", .{ @intFromPtr(this), path });
-        return err.withPath(bun.handleOom(this.ls.alloc_scope.allocator().dupeZ(u8, path[0..path.len])));
+        return err.withPath(bun.handleOom(bun.dupeZ(this.ls.alloc_scope.allocator(), u8, path[0..path.len])));
     }
 
     pub fn workPoolCallback(task: *jsc.WorkPoolTask) void {

@@ -1,4 +1,4 @@
-cache_directory_: ?std.fs.Dir = null,
+cache_directory_: ?std.Io.Dir = null,
 cache_directory_path: stringZ = "",
 root_dir: *Fs.FileSystem.DirEntry,
 allocator: std.mem.Allocator,
@@ -31,7 +31,7 @@ update_requests: []UpdateRequest = &[_]UpdateRequest{},
 /// Only set in `bun pm`
 root_package_json_name_at_time_of_init: []const u8 = "",
 
-root_package_json_file: std.fs.File,
+root_package_json_file: std.Io.File,
 
 /// The package id corresponding to the workspace the install is happening in. Could be root, or
 /// could be any of the workspaces.
@@ -88,11 +88,11 @@ env_configure: ?ScriptRunEnvironment = null,
 lockfile: *Lockfile = undefined,
 
 options: Options,
-preinstall_state: std.ArrayListUnmanaged(PreinstallState) = .{},
+preinstall_state: std.ArrayListUnmanaged(PreinstallState) = .empty,
 postinstall_optimizer: PostinstallOptimizer.List = .{},
 
-global_link_dir: ?std.fs.Dir = null,
-global_dir: ?std.fs.Dir = null,
+global_link_dir: ?std.Io.Dir = null,
+global_dir: ?std.Io.Dir = null,
 global_link_dir_path: string = "",
 
 onWake: WakeHandler = .{},
@@ -107,7 +107,7 @@ event_loop: jsc.AnyEventLoop,
 
 // During `installPackages` we learn exactly what dependencies from --trust
 // actually have scripts to run, and we add them to this list
-trusted_deps_to_add_to_package_json: std.ArrayListUnmanaged(string) = .{},
+trusted_deps_to_add_to_package_json: std.ArrayListUnmanaged(string) = .empty,
 
 any_failed_to_install: bool = false,
 
@@ -463,7 +463,7 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
         // used later for adding to path for scripts
         manager.node_gyp_tempdir_name = try manager.allocator.dupe(u8, node_gyp_tempdir_name);
 
-        var node_gyp_tempdir = tempdir.handle.makeOpenPath(manager.node_gyp_tempdir_name, .{}) catch |err| {
+        var node_gyp_tempdir = tempdir.handle.createDirPathOpen(bun.blockingIo(), manager.node_gyp_tempdir_name, .{}) catch |err| {
             if (err == error.EEXIST) {
                 // it should not exist
                 Output.prettyErrorln("<r><red>error<r>: node-gyp tempdir already exists", .{});
@@ -472,7 +472,7 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> creating node-gyp tempdir", .{@errorName(err)});
             Global.crash();
         };
-        defer node_gyp_tempdir.close();
+        defer node_gyp_tempdir.close(bun.blockingIo());
 
         const file_name = switch (Environment.os) {
             else => "node-gyp",
@@ -483,11 +483,11 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             .windows => 0, // windows does not have an executable bit
         };
 
-        var node_gyp_file = node_gyp_tempdir.createFile(file_name, .{ .mode = mode }) catch |err| {
+        var node_gyp_file = node_gyp_tempdir.createFile(bun.blockingIo(), file_name, .{ .permissions = .fromMode(@intCast(mode)) }) catch |err| {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> creating node-gyp tempdir", .{@errorName(err)});
             Global.crash();
         };
-        defer node_gyp_file.close();
+        defer node_gyp_file.close(bun.blockingIo());
 
         const content = switch (Environment.os) {
             .windows =>
@@ -508,7 +508,7 @@ var ensureTempNodeGypScriptOnce = bun.once(struct {
             ,
         };
 
-        node_gyp_file.writeAll(content) catch |err| {
+        node_gyp_file.writeStreamingAll(bun.blockingIo(), content) catch |err| {
             Output.prettyErrorln("<r><red>error<r>: <b><red>{s}<r> writing to " ++ file_name ++ " file", .{@errorName(err)});
             Global.crash();
         };
@@ -571,8 +571,15 @@ pub fn init(
         if (ctx.install) |opts| {
             explicit_global_dir = opts.global_dir orelse explicit_global_dir;
         }
-        var global_dir = try Options.openGlobalDir(explicit_global_dir);
-        try global_dir.setAsCwd();
+        const global_dir = try Options.openGlobalDir(explicit_global_dir);
+        // Zig 0.17 removed `std.Io.Dir.setAsCwd`; chdir to the directory instead.
+        if (comptime Environment.isWindows) {
+            var dir_path_buf: bun.PathBuffer = undefined;
+            const dir_path = try bun.getFdPath(.fromStdDir(global_dir), &dir_path_buf);
+            try bun.sys.chdir(dir_path, dir_path).unwrap();
+        } else {
+            if (std.c.fchdir(global_dir.handle) != 0) return error.SetGlobalDirFailed;
+        }
     }
 
     var fs = try Fs.FileSystem.init(null);
@@ -626,7 +633,7 @@ pub fn init(
                 package_json_path_buf[this_cwd.len + "/package.json".len] = 0;
                 const package_json_path = package_json_path_buf[0 .. this_cwd.len + "/package.json".len :0];
 
-                break :child std.fs.cwd().openFileZ(
+                break :child bun.openFileZ(
                     package_json_path,
                     .{ .mode = if (need_write) .read_write else .read_only },
                 ) catch |err| switch (err) {
@@ -693,17 +700,17 @@ pub fn init(
                     parent_path_buf[parent_without_trailing_slash.len..parent_path_buf.len][0.."/package.json".len].* = "/package.json".*;
                     parent_path_buf[parent_without_trailing_slash.len + "/package.json".len] = 0;
 
-                    const json_file = std.fs.cwd().openFileZ(
-                        parent_path_buf[0 .. parent_without_trailing_slash.len + "/package.json".len :0].ptr,
+                    const json_file = bun.openFileZ(
+                        parent_path_buf[0 .. parent_without_trailing_slash.len + "/package.json".len :0],
                         .{ .mode = .read_write },
                     ) catch {
                         continue;
                     };
-                    defer if (!found) json_file.close();
-                    const json_stat_size = try json_file.getEndPos();
+                    defer if (!found) json_file.close(bun.blockingIo());
+                    const json_stat_size = (try json_file.stat(bun.blockingIo())).size;
                     const json_buf = try ctx.allocator.alloc(u8, json_stat_size + 64);
                     defer ctx.allocator.free(json_buf);
-                    const json_len = try json_file.preadAll(json_buf, 0);
+                    const json_len = try (bun.sys.File{ .handle = bun.FD.fromStdFile(json_file) }).readAll(json_buf).unwrap();
                     const json_path = try bun.getFdPath(.fromStdFile(json_file), &root_package_json_path_buf);
                     const json_source = logger.Source.initPathString(json_path, json_buf[0..json_len]);
                     initializeStore();
@@ -748,9 +755,9 @@ pub fn init(
                             } else child_path;
 
                             if (strings.eqlLong(maybe_workspace_path, path, true)) {
-                                fs.top_level_dir = try bun.default_allocator.dupeZ(u8, parent);
+                                fs.top_level_dir = try bun.dupeZ(bun.default_allocator, u8, parent);
                                 found = true;
-                                child_json.close();
+                                child_json.close(bun.blockingIo());
                                 if (comptime Environment.isWindows) {
                                     try json_file.seekTo(0);
                                 }
@@ -765,7 +772,7 @@ pub fn init(
             }
         }
 
-        fs.top_level_dir = try bun.default_allocator.dupeZ(u8, child_cwd);
+        fs.top_level_dir = try bun.dupeZ(bun.default_allocator, u8, child_cwd);
         break :root_package_json_file child_json;
     };
 
@@ -922,7 +929,7 @@ pub fn init(
     if (manager.options.ca.len > 0) {
         ca = try manager.allocator.alloc(stringZ, manager.options.ca.len);
         for (ca, manager.options.ca) |*z, s| {
-            z.* = try manager.allocator.dupeZ(u8, s);
+            z.* = try bun.dupeZ(manager.allocator, u8, s);
         }
     }
 
@@ -930,10 +937,10 @@ pub fn init(
     if (manager.options.ca_file_name.len > 0) {
         // resolve with original cwd
         if (std.fs.path.isAbsolute(manager.options.ca_file_name)) {
-            abs_ca_file_name = try manager.allocator.dupeZ(u8, manager.options.ca_file_name);
+            abs_ca_file_name = try bun.dupeZ(manager.allocator, u8, manager.options.ca_file_name);
         } else {
             var path_buf: bun.PathBuffer = undefined;
-            abs_ca_file_name = try manager.allocator.dupeZ(u8, bun.path.joinAbsStringBuf(
+            abs_ca_file_name = try bun.dupeZ(manager.allocator, u8, bun.path.joinAbsStringBuf(
                 original_cwd_clone,
                 &path_buf,
                 &.{manager.options.ca_file_name},
@@ -970,7 +977,7 @@ pub fn init(
             }
         }
 
-        break :brk @truncate(@as(u64, @intCast(@max(std.time.timestamp(), 0))));
+        break :brk @truncate(@as(u64, @intCast(@max(bun.SystemTimer.timestamp(), 0))));
     };
     return .{
         manager,
@@ -1100,7 +1107,7 @@ pub fn initWithRuntimeOnce(
         @truncate(@as(
             u64,
             @intCast(@max(
-                std.time.timestamp(),
+                bun.SystemTimer.timestamp(),
                 0,
             )),
         )),
