@@ -43,7 +43,9 @@ pub fn mergeJUnitFragments(coord: *Coordinator, outfile: []const u8, summary: *c
 
     for (coord.crashed_files.items) |idx| {
         const rel = coord.relPath(idx);
-        const w = body.writer(bun.default_allocator);
+        var body_aw = std.Io.Writer.Allocating.fromArrayList(bun.default_allocator, &body);
+        defer body = body_aw.toArrayList();
+        const w = &body_aw.writer;
         bun.handleOom(w.writeAll("  <testsuite name=\""));
         bun.handleOom(test_command.escapeXml(rel, w));
         bun.handleOom(w.writeAll("\" tests=\"1\" assertions=\"0\" failures=\"1\" skipped=\"0\" time=\"0\">\n    <testcase name=\"(worker crashed)\" classname=\""));

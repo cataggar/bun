@@ -1301,7 +1301,7 @@ pub const Command = struct {
         // Create command wraps bunx
         const ctx = try Command.init(allocator, log, .CreateCommand);
 
-        var args = try std.process.argsAlloc(allocator);
+        const args = bun.argv;
 
         if (args.len <= 2) {
             Command.Tag.printHelp(.CreateCommand, false);

@@ -53,13 +53,13 @@ const Stats = struct {
 
     fn init() Stats {
         var stats = std.mem.zeroes(Stats);
-        stats.start = std.time.milliTimestamp();
+        stats.start = bun.SystemTimer.milliTimestamp();
         return stats;
     }
 
     /// Time elapsed since start in milliseconds
     fn elapsed(this: *const Stats) i64 {
-        return std.time.milliTimestamp() - this.start;
+        return bun.SystemTimer.milliTimestamp() - this.start;
     }
 
     /// Total number of tests run
@@ -95,9 +95,9 @@ fn runTests() u8 {
         };
         defer if (did_lock) stderr.unlock();
 
-        const start = std.time.milliTimestamp();
+        const start = bun.SystemTimer.milliTimestamp();
         const result = recover.callForTest(t.func);
-        const elapsed = std.time.milliTimestamp() - start;
+        const elapsed = bun.SystemTimer.milliTimestamp() - start;
 
         const name = extractName(t);
         const memory_check = std.testing.allocator_instance.deinit();
