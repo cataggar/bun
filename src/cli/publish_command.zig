@@ -509,7 +509,7 @@ pub const PublishCommand = struct {
 
         if (registry.token.len > 0) {
             auth_buf.clearRetainingCapacity();
-            auth_buf.writer().print("Bearer {s}", .{registry.token}) catch return false;
+            auth_buf.print("Bearer {s}", .{registry.token}) catch return false;
             headers.append("authorization", auth_buf.items);
         } else if (registry.auth.len > 0) {
             auth_buf.clearRetainingCapacity();

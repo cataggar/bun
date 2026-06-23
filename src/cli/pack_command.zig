@@ -420,7 +420,8 @@ pub const PackCommand = struct {
             var dir, const dir_subpath, const dir_depth = dir_info;
             defer dir.close(bun.blockingIo());
 
-            while (ignores.getLastOrNull()) |last| {
+            while (ignores.items.len > 0) {
+                const last = ignores.items[ignores.items.len - 1];
                 if (last.depth < dir_depth) break;
 
                 last.deinit(allocator);
@@ -826,7 +827,8 @@ pub const PackCommand = struct {
                 }
             }
 
-            while (ignores.getLastOrNull()) |last| {
+            while (ignores.items.len > 0) {
+                const last = ignores.items[ignores.items.len - 1];
                 if (last.depth < dir_depth) break;
 
                 // pop patterns from files greater than or equal to the current depth.
@@ -1608,7 +1610,6 @@ pub const PackCommand = struct {
 
         var print_buf = std.array_list.Managed(u8).init(ctx.allocator);
         defer print_buf.deinit();
-        const print_buf_writer = print_buf.writer();
 
         var archive = Archive.writeNew();
 
@@ -1630,7 +1631,7 @@ pub const PackCommand = struct {
         // default is 9
         // https://github.com/npm/cli/blob/ec105f400281a5bfd17885de1ea3d54d0c231b27/node_modules/pacote/lib/util/tar-create-options.js#L12
         const compression_level = manager.options.pack_gzip_level orelse "9";
-        try print_buf_writer.print("{s}\x00", .{compression_level});
+        try print_buf.print("{s}\x00", .{compression_level});
         switch (archive.writeSetFilterOption(null, "compression-level", print_buf.items[0..compression_level.len :0])) {
             .failed, .fatal, .warn => {
                 Output.errGeneric("compression level must be between 0 and 9, received {s}", .{compression_level});
@@ -2086,15 +2087,14 @@ pub const PackCommand = struct {
         print_buf: *std.array_list.Managed(u8),
         bins: []const BinInfo,
     ) OOM!*Archive.Entry {
-        const print_buf_writer = print_buf.writer();
 
-        try print_buf_writer.print("{s}{s}\x00", .{ package_prefix, filename });
+        try print_buf.print("{s}{s}\x00", .{ package_prefix, filename });
         const pathname = print_buf.items[0 .. package_prefix.len + filename.len :0];
         if (comptime Environment.isWindows)
             entry.setPathnameUtf8(pathname)
         else
             entry.setPathname(pathname);
-        print_buf_writer.context.clearRetainingCapacity();
+        print_buf.clearRetainingCapacity();
 
         entry.setSize(@intCast(stat.size));
 
@@ -2551,7 +2551,7 @@ pub const PackCommand = struct {
                 "package.json",
             });
 
-            while (pack_list.removeOrNull()) |item| {
+            while (pack_list.pop()) |item| {
                 const stat = root_dir.statat(item.path).unwrap() catch |err| {
                     if (item.optional) {
                         ctx.stats.total_files -= 1;

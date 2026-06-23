@@ -633,11 +633,7 @@ pub const BunxCommand = struct {
                                 else => break :is_stale true,
                             }
                         } else {
-                            var stat: std.posix.Stat = undefined;
-                            const rc = std.c.stat(destination, &stat);
-                            if (rc != 0) {
-                                break :is_stale true;
-                            }
+                            const stat = bun.sys.stat(destination).unwrap() catch break :is_stale true;
                             break :is_stale @divTrunc(bun.SystemTimer.milliTimestamp(), 1000) - stat.mtime().sec > seconds_cache_valid;
                         }
                     };
