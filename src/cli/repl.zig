@@ -799,7 +799,7 @@ fn enableSignalsDuringWait(self: *Repl) void {
             .mask = bun.sys.sigemptyset(),
             .flags = 0,
         };
-        bun.sys.sigaction(std.posix.SIG.INT, &act, null);
+        bun.sys.sigaction(@intFromEnum(std.posix.SIG.INT), &act, null);
     }
     // On Windows, ENABLE_PROCESSED_INPUT is already set so Ctrl+C works
 }

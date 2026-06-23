@@ -76,7 +76,7 @@ fn link(ctx: Command.Context) !void {
         // Step 3a. symlink to the node_modules folder
         {
             // delete it if it exists
-            node_modules.deleteTree(name) catch {};
+            node_modules.deleteTree(bun.blockingIo(), name) catch {};
 
             // create scope if specified
             if (name[0] == '@') {
