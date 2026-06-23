@@ -26,7 +26,7 @@ pub const UntrustedCommand = struct {
         const resolutions: []Install.Resolution = packages.items(.resolution);
         const buf = pm.lockfile.buffers.string_bytes.items;
 
-        var untrusted_dep_ids: std.AutoArrayHashMapUnmanaged(DependencyID, void) = .{};
+        var untrusted_dep_ids: std.AutoArrayHashMapUnmanaged(DependencyID, void) = .empty;
         defer untrusted_dep_ids.deinit(ctx.allocator);
 
         // loop through dependencies and get trusted and untrusted deps with lifecycle scripts
@@ -48,7 +48,7 @@ pub const UntrustedCommand = struct {
             return;
         }
 
-        var untrusted_deps: std.AutoArrayHashMapUnmanaged(DependencyID, Lockfile.Package.Scripts.List) = .{};
+        var untrusted_deps: std.AutoArrayHashMapUnmanaged(DependencyID, Lockfile.Package.Scripts.List) = .empty;
         defer untrusted_deps.deinit(ctx.allocator);
 
         var tree_iterator = Lockfile.Tree.Iterator(.node_modules).init(pm.lockfile);
@@ -210,12 +210,12 @@ pub const TrustCommand = struct {
         var node_modules_path: bun.AbsPath(.{ .sep = .auto }) = .initTopLevelDir();
         defer node_modules_path.deinit();
 
-        var package_names_to_add: bun.StringArrayHashMapUnmanaged(void) = .{};
+        var package_names_to_add: bun.StringArrayHashMapUnmanaged(void) = .empty;
         var scripts_at_depth: std.AutoArrayHashMapUnmanaged(usize, std.ArrayListUnmanaged(struct {
             package_id: PackageID,
             scripts_list: Lockfile.Package.Scripts.List,
             skip: bool,
-        })) = .{};
+        })) = .empty;
 
         var scripts_count: usize = 0;
 
@@ -273,7 +273,7 @@ pub const TrustCommand = struct {
 
                         // even if it is skipped we still add to scripts_at_depth for logging later
                         const entry = try scripts_at_depth.getOrPut(ctx.allocator, node_modules.depth);
-                        if (!entry.found_existing) entry.value_ptr.* = .{};
+                        if (!entry.found_existing) entry.value_ptr.* = .empty;
                         try entry.value_ptr.append(ctx.allocator, .{
                             .package_id = package_id,
                             .scripts_list = scripts_list,
