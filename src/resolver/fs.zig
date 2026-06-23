@@ -570,7 +570,7 @@ pub const FileSystem = struct {
                     }
 
                     var tmp_buf: bun.PathBuffer = undefined;
-                    const cwd = std.posix.getcwd(&tmp_buf) catch @panic("Failed to get cwd for platformTempDir");
+                    const cwd = bun.getcwd(&tmp_buf) catch @panic("Failed to get cwd for platformTempDir");
                     const root = bun.path.windowsFilesystemRoot(cwd);
                     return std.fmt.allocPrint(
                         bun.default_allocator,
