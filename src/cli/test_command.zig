@@ -147,7 +147,7 @@ pub const JunitReporter = struct {
 
     pub fn init() *JunitReporter {
         return JunitReporter.new(
-            .{ .contents = .{}, .total_metrics = .{}, .suite_stack = .{} },
+            .{ .contents = .empty, .total_metrics = .{}, .suite_stack = .empty },
         );
     }
 

@@ -102,7 +102,7 @@ pub fn scan(this: *Scanner, path_literal: []const u8) Error!void {
             const pathZ = this.open_dir_buf[path2.len - entry.name.slice().len .. path2.len :0];
             const child_dir = bun.openDir(dir, pathZ) catch continue;
             path2 = try this.fs.dirname_store.append([]const u8, path2);
-            FileSystem.setMaxFd(child_dir.fd);
+            FileSystem.setMaxFd(child_dir.handle);
             _ = this.readDirWithName(path2, child_dir) catch return error.OutOfMemory;
         } else {
             const parts2 = &[_][]const u8{ entry.dir_path, entry.name.slice() };

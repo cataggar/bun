@@ -460,9 +460,11 @@ pub const Snapshots = struct {
                 } else ils.value;
 
                 if (needs_pre_comma) try result_text.appendSlice(", ");
-                const result_text_writer = result_text.writer();
                 try result_text.appendSlice("`");
-                try bun.js_printer.writePreQuotedString(re_indented, @TypeOf(result_text_writer), result_text_writer, '`', false, false, .utf8);
+                var pre_aw = std.Io.Writer.Allocating.init(arena);
+                defer pre_aw.deinit();
+                try bun.js_printer.writePreQuotedString(re_indented, *std.Io.Writer, &pre_aw.writer, '`', false, false, .utf8);
+                try result_text.appendSlice(pre_aw.written());
                 try result_text.appendSlice("`");
 
                 if (ils.is_added) Jest.runner.?.snapshots.added += 1;
