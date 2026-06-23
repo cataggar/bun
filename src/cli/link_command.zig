@@ -66,7 +66,7 @@ fn link(ctx: Command.Context) !void {
 
             try manager.setupGlobalDir(ctx);
 
-            break :brk manager.global_dir.?.makeOpenPath("node_modules", .{}) catch |err| {
+            break :brk manager.global_dir.?.createDirPathOpen(bun.blockingIo(), "node_modules", .{}) catch |err| {
                 if (manager.options.log_level != .silent)
                     Output.prettyErrorln("<r><red>error:<r> failed to create node_modules in global dir due to error {s}", .{@errorName(err)});
                 Global.crash();
