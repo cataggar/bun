@@ -81,7 +81,7 @@ fn link(ctx: Command.Context) !void {
             // create scope if specified
             if (name[0] == '@') {
                 if (strings.indexOfChar(name, '/')) |i| {
-                    node_modules.makeDir(name[0..i]) catch |err| brk: {
+                    node_modules.createDir(bun.blockingIo(), name[0..i], .default_dir) catch |err| brk: {
                         if (err == error.PathAlreadyExists) break :brk;
                         if (manager.options.log_level != .silent)
                             Output.prettyErrorln("<r><red>error:<r> failed to create scope in global dir due to error {s}", .{@errorName(err)});
