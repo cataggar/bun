@@ -635,11 +635,7 @@ pub const CreateCommand = struct {
             }
 
             bun.sys.unlinkat(.fromStdDir(parent_dir), "gitignore").unwrap() catch {};
-            std.posix.unlinkat(
-                parent_dir.handle,
-                ".npmignore",
-                0,
-            ) catch {};
+            bun.sys.unlinkat(.fromStdDir(parent_dir), ".npmignore").unwrap() catch {};
         }
 
         var start_command: string = "bun dev";
