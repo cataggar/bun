@@ -1304,7 +1304,7 @@ pub const RunCommand = struct {
         // HTTP worker or allocate any Download structs.
         var seen = bun.StringHashMapUnmanaged(void){};
         defer seen.deinit(allocator);
-        var remote_urls = std.ArrayListUnmanaged([]const u8){};
+        var remote_urls: std.ArrayListUnmanaged([]const u8) = .empty;
         defer remote_urls.deinit(allocator);
         for (collector.urls.items) |u| {
             if (!bun.strings.hasPrefixComptime(u, "http://") and
@@ -1731,7 +1731,10 @@ pub const RunCommand = struct {
 
             const trigger = bun.pathLiteral("/[stdin]");
             var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-            const cwd = try std.posix.getcwd(&entry_point_buf);
+            var cwd_buf: bun.PathBuffer = undefined;
+            const cwd_slice = try bun.getcwd(&cwd_buf);
+            @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+            const cwd = entry_point_buf[0..cwd_slice.len];
             @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
             const entry_path = entry_point_buf[0 .. cwd.len + trigger.len];
 
