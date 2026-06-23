@@ -283,7 +283,7 @@ pub const BunxCommand = struct {
                     }
                 } else {
                     const stat = target_package_json.stat().unwrap() catch break :is_stale true;
-                    break :is_stale std.time.timestamp() - stat.mtime().sec > seconds_cache_valid;
+                    break :is_stale @divTrunc(bun.SystemTimer.milliTimestamp(), 1000) - stat.mtime().sec > seconds_cache_valid;
                 }
             };
 

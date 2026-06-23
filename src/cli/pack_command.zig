@@ -1686,7 +1686,7 @@ pub const PackCommand = struct {
         }
 
         // append removed items from `pack_queue` with their file size
-        var pack_list: PackList = .{};
+        var pack_list: PackList = .empty;
         defer pack_list.deinit(ctx.allocator);
 
         var read_buf: [8192]u8 = undefined;

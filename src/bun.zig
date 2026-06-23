@@ -2207,7 +2207,7 @@ const WindowsStat = extern struct {
     }
 };
 
-pub const Stat = if (Environment.isWindows) windows.libuv.uv_stat_t else std.posix.Stat;
+pub const Stat = if (Environment.isWindows) windows.libuv.uv_stat_t else sys.PosixStat;
 pub const StatFS = switch (Environment.os) {
     .mac, .linux, .freebsd => bun.c.struct_statfs,
     .windows => windows.libuv.uv_statfs_t,

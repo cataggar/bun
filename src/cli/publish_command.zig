@@ -513,7 +513,7 @@ pub const PublishCommand = struct {
             headers.append("authorization", auth_buf.items);
         } else if (registry.auth.len > 0) {
             auth_buf.clearRetainingCapacity();
-            auth_buf.writer().print("Basic {s}", .{registry.auth}) catch return false;
+            auth_buf.print("Basic {s}", .{registry.auth}) catch return false;
             headers.append("authorization", auth_buf.items);
         }
 

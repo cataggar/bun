@@ -479,7 +479,7 @@ pub const RunCommand = struct {
                     if (comptime Environment.isPosix) {
                         switch (bun.sys.stat(executable[0.. :0])) {
                             .result => |stat| {
-                                if (bun.S.ISDIR(stat.mode)) {
+                                if (bun.S.ISDIR(@intCast(stat.mode))) {
                                     Output.prettyErrorln("<r><red>error<r>: Failed to run directory \"<b>{s}<r>\"\n", .{basenameOrBun(executable)});
                                     break :print_error;
                                 }
