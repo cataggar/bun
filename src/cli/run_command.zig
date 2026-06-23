@@ -1320,7 +1320,7 @@ pub const RunCommand = struct {
 
         // Heap-allocate each Download so AsyncHTTP.task has a stable
         // address (see RemoteImageDownload doc comment).
-        var downloads = std.ArrayListUnmanaged(*RemoteImageDownload){};
+        var downloads: std.ArrayListUnmanaged(*RemoteImageDownload) = .empty;
         defer {
             for (downloads.items) |d| {
                 d.response_buffer.deinit();
@@ -1958,7 +1958,10 @@ pub const RunCommand = struct {
         if (ctx.runtime_options.eval.script.len > 0) {
             const trigger = bun.pathLiteral("/[eval]");
             var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-            const cwd = try std.posix.getcwd(&entry_point_buf);
+            var cwd_buf: bun.PathBuffer = undefined;
+            const cwd_slice = try bun.getcwd(&cwd_buf);
+            @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+            const cwd = entry_point_buf[0..cwd_slice.len];
             @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
             try Run.boot(ctx, entry_point_buf[0 .. cwd.len + trigger.len], null);
             return;
@@ -2001,7 +2004,10 @@ pub const RunCommand = struct {
     fn @"bun feedback"(ctx: Command.Context) !noreturn {
         const trigger = bun.pathLiteral("/[eval]");
         var entry_point_buf: [bun.MAX_PATH_BYTES + trigger.len]u8 = undefined;
-        const cwd = try std.posix.getcwd(&entry_point_buf);
+        var cwd_buf: bun.PathBuffer = undefined;
+            const cwd_slice = try bun.getcwd(&cwd_buf);
+            @memcpy(entry_point_buf[0..cwd_slice.len], cwd_slice);
+            const cwd = entry_point_buf[0..cwd_slice.len];
         @memcpy(entry_point_buf[cwd.len..][0..trigger.len], trigger);
         ctx.runtime_options.eval.script = if (bun.Environment.codegen_embed)
             @embedFile("eval/feedback.ts")

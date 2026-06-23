@@ -348,7 +348,7 @@ const State = struct {
         for (this.handles) |*handle| {
             if (handle.process) |*proc| {
                 // if we get an error here we simply ignore it
-                _ = proc.ptr.kill(std.posix.SIG.INT);
+                _ = proc.ptr.kill(@intFromEnum(std.posix.SIG.INT));
             }
         }
     }
