@@ -136,8 +136,7 @@ pub const PackageManagerCommand = struct {
     }
 
     pub fn exec(ctx: Command.Context) !void {
-        var args = try std.process.argsAlloc(ctx.allocator);
-        args = args[1..];
+        const args = bun.argv[1..];
 
         // Check if we're being invoked directly as "bun whoami" instead of "bun pm whoami"
         const is_direct_whoami = if (bun.argv.len > 1) strings.eqlComptime(bun.argv[1], "whoami") else false;
