@@ -256,7 +256,7 @@ pub const PackageManagerCommand = struct {
             };
 
             if (pm.options.positionals.len > 1 and strings.eqlComptime(pm.options.positionals[1], "rm")) {
-                fd.close();
+                fd.close(bun.blockingIo());
 
                 var had_err = false;
 
